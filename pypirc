@@ -2,4 +2,4 @@
   jfrog
 
 [jfrog]
-repository: https://netfoundry.jfrog.io/netfoundry/api/pypi/python
+repository = https://netfoundry.jfrog.io/netfoundry/api/pypi/python
