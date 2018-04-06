@@ -6,7 +6,7 @@ pipelines:
       - step:
           script:
             - echo "username = $ARTIFACTORY_USER" >> ./pypirc
-            - echo "password=$ARTIFACTORY_PASSWORD" >> ./pypirc
+            - echo "password = $ARTIFACTORY_PASSWORD" >> ./pypirc
             - cp ./pypirc ~/.pypirc
             - cat ~/.pypirc
             # requires a new version in setup.py

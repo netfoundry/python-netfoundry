@@ -1,4 +1,6 @@
-[distutils]                                                                               index-servers = jfrog
+[distutils]
+index-servers =
+  jfrog
 
 [jfrog]
 repository = https://netfoundry.jfrog.io/netfoundry/api/pypi/python
