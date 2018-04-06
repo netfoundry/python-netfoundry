@@ -6,7 +6,7 @@ pipelines:
       - step:
           script:
             - mv ./pypirc ~/.pypirc
-            - echo "username: $ARTIFACTORY_USER" >> ~/.pypirc
-            - echo "password: $ARTIFACTORY_PASSWORD" >> ~/.pypirc
+            - echo 'username=$ARTIFACTORY_USER' >> ~/.pypirc
+            - echo "password=$ARTIFACTORY_PASSWORD" >> ~/.pypirc
             # requires a new version in setup.py
             - python setup.py sdist upload -r jfrog
