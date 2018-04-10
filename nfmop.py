@@ -297,7 +297,7 @@ class nfapi(object):
 
     def getEndpoints(self, netId):
         """
-        return the endpoints.content object
+        return the endpoints as an object
         """
         try:
             # returns a list of dicts (network objects)
@@ -329,7 +329,7 @@ class nfapi(object):
         return(endpoints)
 
     def getEndpointGroups(self, netId):
-        """return the endpointGroups.content object
+        """return the endpointGroups as an object
         """
         try:
             # returns a list of dicts (network objects)
@@ -518,7 +518,7 @@ class nfapi(object):
 
         return(netId)
 
-    def createGatewayService(self,
+    def createIpNetworkService(self,
                              netId,
                              name,
                              gatewayIp,
@@ -586,16 +586,15 @@ class nfapi(object):
 
         return(svcId)
 
-    def createGateway(self, name, netId, dataCenterId, wait=0):
+    def createAwsGateway(self, name, netId, dataCenterId, wait=0):
         """
-        create a hosted gateway endpoint with
+        create a managed AWS gateway endpoint with
         :param name: gateway name
         :param netId: network UUID
         :param dataCenterId: datacenter UUID
         :param wait: optional wait seconds for endpoint to become REGISTERED (400)
         """
         request = {
-            "networkID": netId,
             "name": name,
             "endpointType": "GW",
             "dataCenterId": dataCenterId
@@ -642,7 +641,62 @@ class nfapi(object):
 
         return(endId)
 
-    def createClientService(self,
+    def createVcpeGateway(self, name, netId, geoRegionId, wait=0):
+        """
+        create a self-hosted gateway endpoint with
+        :param name: gateway name
+        :param netId: network UUID
+        :param dataCenterId: datacenter UUID
+        :param wait: optional wait seconds for endpoint to become REGISTERED (400)
+        """
+        request = {
+            "name": name,
+            "endpointType": "VCPEGW",
+            "geoRegionId": geoRegionId
+        }
+
+        headers = {
+            'Content-Type': 'application/json',
+            "authorization": "Bearer " + self.auth
+        }
+
+        try:
+            response = requests.post(self.aud+"rest/v1/networks/"+netId+"/endpoints",
+                                     json=request,
+                                     headers=headers,
+                                     proxies=self.proxies,
+                                     verify=self.verify
+                                    )
+            http_code = response.status_code
+        except:
+            raise
+
+        if not http_code == requests.status_codes.codes.ACCEPTED:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        endId = json.loads(response.text)['_links']['self']['href'].split('/')[-1]
+
+        # expected value is UUID of new endpoint
+        UUID(endId, version=4) # validate the returned value is a UUID
+
+        if not wait == 0:
+            try:
+                self.waitForEntityStatus(status='REGISTERED',
+                                         entType='endpoint',
+                                         netId=netId,
+                                         entId=endId,
+                                         wait=wait)
+            except:
+                raise
+
+        return(endId)
+
+    def createIpHostService(self,
                             netId,
                             name,
                             networkIp,
