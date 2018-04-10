@@ -153,6 +153,12 @@ class nfapi(object):
             self.datacentersByRegion[dc['locationCode']] = dc['_links']['self']['href'].split('/')[-1]
             # e.g. { us-east-1: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
 
+        self.georegions = self.getGeoRegions()
+        self.geoRegionsByName = dict()
+        for gr in self.georegions:
+            self.geoRegionsByName[gr['name']] = gr['_links']['self']['href'].split('/')[-1]
+            # e.g. { us-east-1: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
+
         # an attribute that is a dict for resolving network UUIDs by name
         self.networksByName = dict()
         for net in self.getNetworks():
@@ -198,7 +204,7 @@ class nfapi(object):
         return(network)
 
     def getDataCenters(self):
-        """return the dataCenters.content object
+        """return the dataCenters object
         """
         try:
             # dataCenters returns a list of dicts (datacenter objects)
@@ -228,6 +234,38 @@ class nfapi(object):
             )
 
         return(datacenters)
+
+    def getGeoRegions(self):
+        """return the geoRegions object
+        """
+        try:
+            # dataCenters returns a list of dicts (datacenter objects)
+            headers = { "authorization": "Bearer " + self.auth }
+            response = requests.get(self.aud+'rest/v1/geoRegions',
+                                    proxies=self.proxies,
+                                    verify=self.verify,
+                                    headers=headers
+                                   )
+
+            http_code = response.status_code
+        except:
+            raise
+
+        if http_code == requests.status_codes.codes.OK: # HTTP 200
+            try:
+                geoRegions = json.loads(response.text)['_embedded']['geoRegions']
+            except ValueError as e:
+                eprint('ERROR getting geo regions')
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        return(geoRegions)
 
     def organizationShortName(self):
         """resolve an org ID to a short name
@@ -646,7 +684,7 @@ class nfapi(object):
         create a self-hosted gateway endpoint with
         :param name: gateway name
         :param netId: network UUID
-        :param dataCenterId: datacenter UUID
+        :param geoRegionId: geo region UUID
         :param wait: optional wait seconds for endpoint to become REGISTERED (400)
         """
         request = {
