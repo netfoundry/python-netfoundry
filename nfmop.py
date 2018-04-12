@@ -679,6 +679,61 @@ class nfapi(object):
 
         return(endId)
 
+    def createAwsCpeGateway(self, name, netId, dataCenterId, wait=0):
+        """
+        create a self-hosted AWS gateway endpoint with
+        :param name: gateway name
+        :param netId: network UUID
+        :param dataCenterId: datacenter UUID
+        :param wait: optional wait seconds for endpoint to become REGISTERED (400)
+        """
+        request = {
+            "name": name,
+            "endpointType": "AWSCPEGW",
+            "dataCenterId": dataCenterId
+        }
+
+        headers = {
+            'Content-Type': 'application/json',
+            "authorization": "Bearer " + self.auth
+        }
+
+        try:
+            response = requests.post(self.aud+"rest/v1/networks/"+netId+"/endpoints",
+                                     json=request,
+                                     headers=headers,
+                                     proxies=self.proxies,
+                                     verify=self.verify
+                                    )
+            http_code = response.status_code
+        except:
+            raise
+
+        if not http_code == requests.status_codes.codes.ACCEPTED:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        endId = json.loads(response.text)['_links']['self']['href'].split('/')[-1]
+
+        # expected value is UUID of new endpoint
+        UUID(endId, version=4) # validate the returned value is a UUID
+
+        if not wait == 0:
+            try:
+                self.waitForEntityStatus(status='REGISTERED',
+                                         entType='endpoint',
+                                         netId=netId,
+                                         entId=endId,
+                                         wait=wait)
+            except:
+                raise
+
+        return(endId)
+
     def createVcpeGateway(self, name, netId, geoRegionId, wait=0):
         """
         create a self-hosted gateway endpoint with
@@ -1240,8 +1295,41 @@ class nfapi(object):
         return(True)
 
     def getEntity(self, entType, netId, entId=0):
-        """return the object describing an entity or the symbolic name of the
-        HTTP code
+        """return the full object describing an entity
+        :param entType: the type of entity e.g. network, endpoint, service
+        :param netId: the UUID of the network housing the entity
+        :param entId: the UUID of the entity having a status if not a network
+        """
+
+        try:
+            headers = { "authorization": "Bearer " + self.auth }
+            entUrl = self.aud+'rest/v1/networks/'+netId
+            if not entType == 'network':
+                if entId == 0:
+                    raise Exception("ERROR: entity UUID must be specified if not a network")
+                entUrl += '/'+entType+'s/'+entId
+
+            response = requests.get(entUrl,
+                                    proxies=self.proxies,
+                                    verify=self.verify,
+                                    headers=headers)
+            http_code = response.status_code
+        except:
+            raise
+
+        if http_code == requests.status_codes.codes.OK:
+            try:
+                entity = json.loads(response.text)
+            except:
+                eprint('ERROR parsing entity object in response')
+                raise
+        else:
+            status = None
+
+        return(entity)
+
+    def getEntityStatus(self, entType, netId, entId=0):
+        """return an object describing an entity's API status or the symbolic HTTP code
         :param entType: the type of entity e.g. network, endpoint, service
         :param netId: the UUID of the network housing the entity
         :param entId: the UUID of the entity having a status if not a network
@@ -1311,7 +1399,7 @@ class nfapi(object):
             sys.stdout.flush()
 
             try:
-                entity = self.getEntity(entType=entType,
+                entity = self.getEntityStatus(entType=entType,
                                         netId=netId,
                                         entId=entId)
             except:
@@ -1391,7 +1479,7 @@ class nfapi(object):
             sys.stdout.write('.')
             sys.stdout.flush()
             try:
-                entity = self.getEntity(entType=entType,
+                entity = self.getEntityStatus(entType=entType,
                                         netId=netId,
                                         entId=entId)
                 if not http_code or (
