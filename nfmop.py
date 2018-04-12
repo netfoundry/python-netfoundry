@@ -679,6 +679,61 @@ class nfapi(object):
 
         return(endId)
 
+    def createAwsCpeGateway(self, name, netId, dataCenterId, wait=0):
+        """
+        create a self-hosted AWS gateway endpoint with
+        :param name: gateway name
+        :param netId: network UUID
+        :param dataCenterId: datacenter UUID
+        :param wait: optional wait seconds for endpoint to become REGISTERED (400)
+        """
+        request = {
+            "name": name,
+            "endpointType": "AWSCPEGW",
+            "dataCenterId": dataCenterId
+        }
+
+        headers = {
+            'Content-Type': 'application/json',
+            "authorization": "Bearer " + self.auth
+        }
+
+        try:
+            response = requests.put(self.aud+"rest/v1/networks/"+netId+"/endpoints",
+                                     json=request,
+                                     headers=headers,
+                                     proxies=self.proxies,
+                                     verify=self.verify
+                                    )
+            http_code = response.status_code
+        except:
+            raise
+
+        if not http_code == requests.status_codes.codes.ACCEPTED:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        endId = json.loads(response.text)['_links']['self']['href'].split('/')[-1]
+
+        # expected value is UUID of new endpoint
+        UUID(endId, version=4) # validate the returned value is a UUID
+
+        if not wait == 0:
+            try:
+                self.waitForEntityStatus(status='REGISTERED',
+                                         entType='endpoint',
+                                         netId=netId,
+                                         entId=endId,
+                                         wait=wait)
+            except:
+                raise
+
+        return(endId)
+
     def createVcpeGateway(self, name, netId, geoRegionId, wait=0):
         """
         create a self-hosted gateway endpoint with
@@ -699,7 +754,7 @@ class nfapi(object):
         }
 
         try:
-            response = requests.post(self.aud+"rest/v1/networks/"+netId+"/endpoints",
+            response = requests.put(self.aud+"rest/v1/networks/"+netId+"/endpoints",
                                      json=request,
                                      headers=headers,
                                      proxies=self.proxies,
