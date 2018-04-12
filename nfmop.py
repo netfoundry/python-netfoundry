@@ -1230,12 +1230,10 @@ class nfapi(object):
 
         if not wait == 0:
             try:
-                self.waitForEntityHttpStatus(
-                    'INTERNAL_SERVER_ERROR',
-                    'network',
-                    netId,
-                    wait
-                )
+                self.waitForEntityStatus(status='DELETED',
+                                         entType='network',
+                                         netId=netId,
+                                         wait=wait)
             except:
                 raise
 
