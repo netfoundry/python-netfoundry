@@ -94,6 +94,7 @@ class nfapi(object):
             'integration': 'https://netfoundry-integration.auth0.com/oauth/token',
             'staging': 'https://netfoundry-staging.auth0.com/oauth/token',
             'trial': 'https://netfoundry-trial.auth0.com/oauth/token',
+            'private': 'https://netfoundry-private.auth0.com/oauth/token',
             'production': 'https://netfoundry-production.auth0.com/oauth/token'
         }
 
