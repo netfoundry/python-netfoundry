@@ -1,6 +1,6 @@
 """classes for interacting with the NetFoundry Management Operations Platform (MOP)
 
-import nfmop
+import netfoundry
 import requests
 import json
 
@@ -8,7 +8,7 @@ CLIENT_ID = "9jJ38zA6OZfN4A0nJPLfQnAeBvm2jqnM"
 CLIENT_SECRET = "9uIjiifcyr8nZMq_63jaNlHqZp1N7kfpg_z3IZ61bIYyzBwtucrFOHDpK43F_j3d"
 REGION = "us-east-1"
 
-api = nfmop.nfapi()
+api = netfoundry.nfapi()
 
 AUTH_ENDPOINT = api.authEndpoints["production"]
 HEADERS = { 'content-type': "application/json" }

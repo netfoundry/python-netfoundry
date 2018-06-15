@@ -3,12 +3,11 @@
 from setuptools import setup
 
 setup(
-    name='nfmop',
-    py_modules=['nfmop'],
+    name='netfoundry',
+    py_modules=['netfoundry'],
     author='NetFoundry',
     author_email='ops-mgmt@netfoundry.io',
     url='https://netfoundry.atlassian.net/wiki/spaces/PUB/blog/2017/10/15/11829509/MOP+for+Python',
-    download_url='https://netfoundry.jfrog.io/netfoundry/list/python/nfmop/1.0.10/nfmop-1.0.10.tar.gz',
     description='API wrappers and configuration for NetFoundry\'s Management Orchestration Platform',
     license='MIT',
 
