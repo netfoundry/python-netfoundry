@@ -10,4 +10,4 @@ pipelines:
             - cp ./pypirc ~/.pypirc
 #            - cat ~/.pypirc
             # requires a new version in setup.py
-            - python setup.py sdist upload -r jfrog
+            - python setup.py sdist upload -r pypi
