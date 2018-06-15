@@ -15,7 +15,7 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     license='MIT',
-    version='1.0.10',
+    version='1.0.11',
     install_requires=[
         'requests >= 2.18.4',
         'pysocks >= 1.6.7',
