@@ -1,4 +1,3 @@
-```python
 import netfoundry
 import requests
 import json
@@ -66,4 +65,3 @@ except:
 
 # store existing network resources as a lookup object that resolves names to identifying UUIDs
 helloNetworkNVirginia = api.walkNetwork(NETID)
-```

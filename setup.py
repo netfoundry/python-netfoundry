@@ -2,7 +2,7 @@
 
 from setuptools import setup
 
-with open("README.md", "r") as fh:
+with open("README.txt", "r") as fh:
     long_description = fh.read()
 
 setup(
@@ -13,9 +13,8 @@ setup(
     url='https://netfoundry.atlassian.net/wiki/spaces/PUB/blog/2017/10/15/11829509/MOP+for+Python',
     description='API wrappers and configuration for NetFoundry\'s Management Orchestration Platform',
     long_description=long_description,
-    long_description_content_type="text/markdown",
     license='MIT',
-    version='1.0.11',
+    version='1.0.12',
     install_requires=[
         'requests >= 2.18.4',
         'pysocks >= 1.6.7',
