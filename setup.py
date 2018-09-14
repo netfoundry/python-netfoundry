@@ -14,7 +14,7 @@ setup(
     description='API wrappers and configuration for NetFoundry\'s Management Orchestration Platform',
     long_description=long_description,
     license='MIT',
-    version='1.0.12',
+    version='1.1.0',
     install_requires=[
         'requests >= 2.18.4',
         'pysocks >= 1.6.7',
