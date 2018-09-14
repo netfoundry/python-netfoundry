@@ -1362,7 +1362,7 @@ class nfapi(object):
             status_code == self.codes[status]
         ) or (
             status == 'DELETED' and
-            http_code == requests.status_codes.codes.NOT_FOUND
+            http_code == requests.status_codes.codes.FORBIDDEN
         ):
             return(True)
         elif not status_code:
