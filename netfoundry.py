@@ -432,19 +432,20 @@ class nfapi(object):
 
         return(text)
 
-    def createNetwork(self, name, region, version=None, wait=0):
+    def createNetwork(self, name, region, version=None, wait=0, family="dvn"):
         """
         create an NFN with
         :param name: network name
         :param region: required datacenter region name in which to create
         :param version: optional product version string like 3.6.6.11043_2018-03-21_1434
         :param wait: optional wait seconds for network to build before returning
+        :param family: optional product family if not "dvn"
         """
         request = {
             "organizationId" : self.orgId,
             "name": name,
             "locationCode": region,
-            "productFamily": "dvn"
+            "productFamily": family
         }
         if version:
             request['productVersion'] = version
