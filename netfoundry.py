@@ -557,17 +557,24 @@ class nfapi(object):
 
         return(svcId)
 
-    def createAwsGateway(self, name, netId, dataCenterId, wait=0):
+    def createAwsGateway(self, name, netId, dataCenterId, wait=0, family="dvn"):
         """
         create a managed AWS gateway endpoint with
         :param name: gateway name
         :param netId: network UUID
         :param dataCenterId: datacenter UUID
         :param wait: optional wait seconds for endpoint to become REGISTERED (400)
+        :param family: optional family indicating endpoint type if not "dvn"
         """
+
+        if family == "ziti":
+            endpointType = 'ZITIGW'
+        else:
+            endpointType = 'GW'
+             
         request = {
             "name": name,
-            "endpointType": "GW",
+            "endpointType": endpointType,
             "dataCenterId": dataCenterId
         }
 
