@@ -568,7 +568,7 @@ class nfapi(object):
         """
 
         if family == "ziti":
-            endpointType = 'ZITIGW'
+            endpointType = 'ZTGW'
         else:
             endpointType = 'GW'
              
