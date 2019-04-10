@@ -194,6 +194,37 @@ class nfapi(object):
 
         return(geoRegions)
 
+    def organizationShortName(self):
+        """resolve an org ID to a short name
+        """
+        try:
+            headers = { "authorization": "Bearer " + self.auth }
+            response = requests.get(self.aud+'rest/v1/organizations/'+self.orgId,
+                                    proxies=self.proxies,
+                                    verify=self.verify,
+                                    headers=headers
+                                   )
+
+            http_code = response.status_code
+        except:
+            raise
+
+        if http_code == requests.status_codes.codes.OK: # HTTP 200
+            try:
+                shortName = json.loads(response.text)['organizationShortName']
+            except ValueError as e:
+                eprint('ERROR resolving organization UUID to short name')
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        return(shortName)
+
     def getNetworks(self):
         """
         return the networks for a particular organization
