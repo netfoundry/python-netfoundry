@@ -55,11 +55,6 @@ class nfapi(object):
         stores them for reuse in the instance namespace
         """
 
-        self.orgId = jwt.decode(auth,
-                                verify=False)['https://netfoundry.io/organization_id']
-        # expected value is UUID
-        UUID(self.orgId, version=4)
-
         self.aud = jwt.decode(auth,
                               verify=False)['aud']
         self.auth = auth
@@ -239,7 +234,7 @@ class nfapi(object):
             # returns a list of dicts (network objects)
             headers = { "authorization": "Bearer " + self.auth }
             response = requests.get(
-                self.aud+'rest/v1/organizations/'+self.orgId+'/networks',
+                self.aud+'rest/v1/networks',
                                     proxies=self.proxies,
                                     verify=self.verify,
                                     headers=headers
@@ -297,6 +292,39 @@ class nfapi(object):
             )
 
         return(endpoints)
+
+    def getEndpoint(self, netId, endpointId):
+        """
+        return the endpoint as an object
+        """
+        try:
+            # returns a list of dicts (network objects)
+            headers = { "authorization": "Bearer " + self.auth }
+            response = requests.get(self.aud+'rest/v1/networks/'+netId+'/endpoints/'+endpointId,
+                                    proxies=self.proxies,
+                                    verify=self.verify,
+                                    headers=headers
+                                   )
+
+            http_code = response.status_code
+        except:
+            raise
+
+        if http_code == requests.status_codes.codes.OK: # HTTP 200
+            try:
+                endpoint = json.loads(response.text)
+            except KeyError:
+                endpoint = []
+                pass
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        return(endpoint)
 
     def getEndpointGroups(self, netId):
         """return the endpointGroups as an object
@@ -557,79 +585,36 @@ class nfapi(object):
 
         return(svcId)
 
-    def createAwsGateway(self, name, netId, dataCenterId, wait=0, family="dvn"):
+    def createAwsGateway(self, name, netId, dataCenterId, wait=0, family="dvn", managed=False):
         """
-        create a managed AWS gateway endpoint with
+        create an AWS gateway endpoint with
         :param name: gateway name
         :param netId: network UUID
         :param dataCenterId: datacenter UUID
         :param wait: optional wait seconds for endpoint to become REGISTERED (400)
         :param family: optional family indicating endpoint type if not "dvn"
+        :param managed: optional boolean indicating instance is launched and managed by MOP
         """
 
-        if family == "ziti":
-            endpointType = 'ZTGW'
+        if not managed and family == "ziti":
+            endpointType = "ZTNHGW"
+        elif not managed and family == "dvn":
+            endpointType = "AWSCPEGW"
+        elif managed and family == "ziti":
+            endpointType = "ZTGW"
+        elif managed and family == "dvn":
+            endpointType = "GW"
         else:
-            endpointType = 'GW'
-             
-        request = {
-            "name": name,
-            "endpointType": endpointType,
-            "dataCenterId": dataCenterId
-        }
-
-        headers = {
-            'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
-        }
-
-        try:
-            response = requests.post(self.aud+"rest/v1/networks/"+netId+"/endpoints",
-                                     json=request,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
-            http_code = response.status_code
-        except:
-            raise
-
-        if not http_code == requests.status_codes.codes.ACCEPTED:
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                'unexpected family "{}" or endpoint type "{}"'.format(
+                    family,
+                    endpointType
                 )
             )
 
-        endId = json.loads(response.text)['_links']['self']['href'].split('/')[-1]
-
-        # expected value is UUID of new endpoint
-        UUID(endId, version=4) # validate the returned value is a UUID
-
-        if not wait == 0:
-            try:
-                self.waitForEntityStatus(status='REGISTERED',
-                                         entType='endpoint',
-                                         netId=netId,
-                                         entId=endId,
-                                         wait=wait)
-            except:
-                raise
-
-        return(endId)
-
-    def createAwsCpeGateway(self, name, netId, dataCenterId, wait=0):
-        """
-        create a self-hosted AWS gateway endpoint with
-        :param name: gateway name
-        :param netId: network UUID
-        :param dataCenterId: datacenter UUID
-        :param wait: optional wait seconds for endpoint to become REGISTERED (400)
-        """
         request = {
             "name": name,
-            "endpointType": "AWSCPEGW",
+            "endpointType": endpointType,
             "dataCenterId": dataCenterId
         }
 
