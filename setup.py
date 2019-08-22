@@ -11,10 +11,10 @@ setup(
     author='NetFoundry',
     author_email='ops-mgmt@netfoundry.io',
     url='https://netfoundry.atlassian.net/wiki/spaces/PUB/blog/2017/10/15/11829509/MOP+for+Python',
-    description='API wrappers and configuration for NetFoundry\'s Management Orchestration Platform',
+    description='API wrapper for the NetFoundry Platform',
     long_description=long_description,
     license='MIT',
-    version='1.1.0',
+    version='3.0.0',
     install_requires=[
         'requests >= 2.18.4',
         'pysocks >= 1.6.7',
