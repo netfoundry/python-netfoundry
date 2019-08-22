@@ -55,8 +55,9 @@ class nfapi(object):
         stores them for reuse in the instance namespace
         """
 
-        self.aud = jwt.decode(auth,
-                              verify=False)['aud']
+        self.jwtClaim = jwt.decode(auth,verify=False)
+        self.aud = self.jwtClaim['aud']
+        self.tenant = self.jwtClaim['https://netfoundry.io/tenant/label']
         self.auth = auth
 
         # forward request to proxy if defined
@@ -193,37 +194,6 @@ class nfapi(object):
             )
 
         return(geoRegions)
-
-    def organizationShortName(self):
-        """resolve an org ID to a short name
-        """
-        try:
-            headers = { "authorization": "Bearer " + self.auth }
-            response = requests.get(self.aud+'rest/v1/organizations/'+self.orgId,
-                                    proxies=self.proxies,
-                                    verify=self.verify,
-                                    headers=headers
-                                   )
-
-            http_code = response.status_code
-        except:
-            raise
-
-        if http_code == requests.status_codes.codes.OK: # HTTP 200
-            try:
-                shortName = json.loads(response.text)['organizationShortName']
-            except ValueError as e:
-                eprint('ERROR resolving organization UUID to short name')
-                raise(e)
-        else:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        return(shortName)
 
     def getNetworks(self):
         """
@@ -460,17 +430,16 @@ class nfapi(object):
 
         return(text)
 
-    def createNetwork(self, name, region, version=None, wait=0, family="dvn"):
+    def createNetwork(self, name, region, version=None, wait=0, family="DVN"):
         """
         create an NFN with
         :param name: network name
         :param region: required datacenter region name in which to create
         :param version: optional product version string like 3.6.6.11043_2018-03-21_1434
         :param wait: optional wait seconds for network to build before returning
-        :param family: optional product family if not "dvn"
+        :param family: optional product family "DVN" or "ZITI"
         """
         request = {
-            "organizationId" : self.orgId,
             "name": name,
             "locationCode": region,
             "productFamily": family
