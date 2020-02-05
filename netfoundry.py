@@ -75,6 +75,12 @@ class nfapi(object):
             else:
                 self.verify = False
 
+        self.networkGroups = self.getNetworkGroups()
+        self.networkGroupsByLabel = dict()
+        for ng in self.networkGroups:
+            self.networkGroupsByLabel[ng['organizationShortName']] = ng['_links']['self']['href'].split('/')[-1]
+            # e.g. { NFADMIN: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
+
         self.datacenters = self.getDataCenters()
         self.datacentersByRegion = dict()
         for dc in self.datacenters:
@@ -130,6 +136,38 @@ class nfapi(object):
             network['appWansByName'][appWan['name']] = appWan['_links']['self']['href'].split('/')[-1]
 
         return(network)
+
+    def getNetworkGroups(self):
+        """return the network groups object (formerly "organizations")
+        """
+        try:
+            # /organizations returns a list of dicts (network group objects)
+            headers = { "authorization": "Bearer " + self.auth }
+            response = requests.get(self.aud+'rest/v1/organizations',
+                                    proxies=self.proxies,
+                                    verify=self.verify,
+                                    headers=headers
+                                   )
+
+            http_code = response.status_code
+        except:
+            raise
+
+        if http_code == requests.status_codes.codes.OK: # HTTP 200
+            try:
+                networkGroups = json.loads(response.text)['_embedded']['organizations']
+            except ValueError as e:
+                eprint('ERROR getting network groups')
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        return(networkGroups)
 
     def getDataCenters(self):
         """return the dataCenters object
@@ -430,10 +468,11 @@ class nfapi(object):
 
         return(text)
 
-    def createNetwork(self, name, region, version=None, wait=0, family="DVN"):
+    def createNetwork(self, netGroup, name, region, version=None, wait=0, family="DVN"):
         """
         create an NFN with
-        :param name: network name
+        :param name: required network group short name
+        :param name: required network name
         :param region: required datacenter region name in which to create
         :param version: optional product version string like 3.6.6.11043_2018-03-21_1434
         :param wait: optional wait seconds for network to build before returning
@@ -442,7 +481,8 @@ class nfapi(object):
         request = {
             "name": name,
             "locationCode": region,
-            "productFamily": family
+            "productFamily": family,
+            "networkGroupId": self.networkGroupsByLabel[netGroup]
         }
         if version:
             request['productVersion'] = version
