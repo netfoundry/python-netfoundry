@@ -4,6 +4,7 @@ from __future__ import print_function # use print from python3 for stdout, stder
 import sys # open stderr
 import json # operate on structured data
 import requests # HTTP user agent
+import re # regex
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 import time # enforce a timeout; sleep
@@ -19,11 +20,10 @@ class client(object):
     """interact with the NetFoundry API
     """
 
-    def __init__(self, credentials=str(Path.home())+"/.netfoundry/credentials.json", proxy=None, environment="production"):
+    def __init__(self, credentials=str(Path.home())+"/.netfoundry/credentials.json", proxy=None):
         """initialize with a reusable API client
         :param credentials: optional alternative path to API account credentials file
         :param proxy: optional HTTP proxy, e.g., http://localhost:8080
-        :param environment optional override of "production"
         The init function also gathers a few essential objects from the API and
         stores them for reuse in the instance namespace
         """
@@ -73,10 +73,10 @@ class client(object):
                 setattr(self.codes, title.upper(), code)
 
         with open(credentials) as f:
-            self.account = json.load(f)
-        self.tokenEndpoint = self.account['authenticationUrl']
-        self.clientId = self.account['clientId']
-        self.password = self.account['password']
+            account = json.load(f)
+        tokenEndpoint = account['authenticationUrl']
+        clientId = account['clientId']
+        password = account['password']
         # verify auth endpoint's server certificate if proxy is type SOCKS or None
         if proxy == None:
             self.proxies = dict()
@@ -90,51 +90,50 @@ class client(object):
                 self.verify = True
             else:
                 self.verify = False
+        # extract the environment name from the authorization URL aka token API endpoint
+        self.environment = re.sub(r'https://netfoundry-([^-]+)-.*', r'\1', tokenEndpoint, re.IGNORECASE)
         # re: scope: we're not using scopes with Cognito, but a non-empty value is required;
         #  hence "/ignore-scope"
-        if environment == 'localhost':
-            self.scope = "http://localhost:8080//ignore-scope"
-        else:
-            self.scope = "https://gateway."+environment+".netfoundry.io//ignore-scope"
-        self.assertion = {
-            "scope": self.scope,
+        scope = "https://gateway."+self.environment+".netfoundry.io//ignore-scope"
+        assertion = {
+            "scope": scope,
             "grant_type": "client_credentials"
         }
         try:
-            self.response = requests.post(
-                self.tokenEndpoint,
-                auth=(self.clientId, self.password),
-                data=self.assertion,
+            response = requests.post(
+                tokenEndpoint,
+                auth=(clientId, password),
+                data=assertion,
                 verify=self.verify,
                 proxies=self.proxies)
-            self.responseCode = self.response.status_code
+            responseCode = response.status_code
         except:
             eprint(
                 'ERROR: failed to contact the authentication endpoint: {}'.format(self.tokenEndpoint)
             )
             raise
 
-        if self.responseCode == requests.status_codes.codes.OK:
+        if responseCode == requests.status_codes.codes.OK:
             try:
-                self.tokenText = json.loads(self.response.text)
-                self.token = self.tokenText['access_token']
+                tokenText = json.loads(response.text)
+                self.token = tokenText['access_token']
             except:
                 raise Exception(
                     'ERROR: failed to find an access_token in the response and instead got: {}'.format(
-                        self.response.text
+                        response.text
                     )
                 )
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP response {} ({:d})'.format(
-                    requests.status_codes._codes[self.responseCode][0].upper(),
-                    self.responseCode
+                    requests.status_codes._codes[responseCode][0].upper(),
+                    responseCode
                 )
             )
 
         # we can gather the URL of the API from the first part of the scope string by
         #  dropping the scope suffix
-        self.audience = self.scope.replace('/ignore-scope','')
+        self.audience = scope.replace('/ignore-scope','')
         self.claim = jwt.decode(self.token,verify=False)
 
         # TODO: [MOP-13438] auto-renew token when near expiry (now+1hour in epoch seconds)
