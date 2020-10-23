@@ -19,9 +19,9 @@ class client(object):
     """interact with the NetFoundry API
     """
 
-    def __init__(self, apiAccountFile=str(Path.home())+"/.netfoundry/credentials", proxy=None, environment="production"):
+    def __init__(self, credentials=str(Path.home())+"/.netfoundry/credentials.json", proxy=None, environment="production"):
         """initialize with a reusable API client
-        :param apiAccountFile: optional alternative path to API account credentials file
+        :param credentials: optional alternative path to API account credentials file
         :param proxy: optional HTTP proxy, e.g., http://localhost:8080
         :param environment optional override of "production"
         The init function also gathers a few essential objects from the API and
@@ -39,13 +39,32 @@ class client(object):
             900: ('defunct', 'deleted')
         }
 
+        self.resources = {
+            'networks': {
+                'embedded': "networkList",
+                'expect': "ACCEPTED"
+            },
+            'endpoints': {
+                'embedded': "endpointList",
+                'expect': "OK"
+            },
+            'edge-routers': {
+                'embedded': "edgeRouterList",
+                'expect': "ACCEPTED"
+            },
+            'services': {
+                'embedded': "serviceList",
+                'expect': "ACCEPTED"
+            }
+        }
+
         self.codes = LookupDict(name='statuses')
 
         for code, titles in self.statusesByCode.items():
             for title in titles:
                 setattr(self.codes, title.upper(), code)
 
-        with open(apiAccountFile) as f:
+        with open(credentials) as f:
             self.account = json.load(f)
 
         self.tokenEndpoint = self.account['authenticationUrl']
@@ -105,8 +124,9 @@ class client(object):
                 )
             )
 
-
         self.claim = jwt.decode(self.token,verify=False)
+
+        # TODO: [MOP-13438] auto-renew token when near expiry
         self.expiry = self.claim['exp']
 
         self.networkGroups = self.getNetworkGroups()
@@ -115,22 +135,22 @@ class client(object):
             self.networkGroupsByLabel[ng['organizationShortName']] = ng['_links']['self']['href'].split('/')[-1]
             # e.g. { NFADMIN: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
 
+        self.networkConfigMetadatas = self.getNetworkConfigMetadatas()
+        self.networkConfigMetadatasByName = dict()
+        for config in self.networkConfigMetadatas:
+            self.networkConfigMetadatasByName[config['name']] = config['id']
+            # e.g. { small: 2616da5c-4441-4c3d-a9a2-ed37262f2ef4 }
+
         self.datacenters = self.getDataCenters()
         self.datacentersByRegion = dict()
         for dc in self.datacenters:
             self.datacentersByRegion[dc['locationCode']] = dc['_links']['self']['href'].split('/')[-1]
             # e.g. { us-east-1: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
 
-        self.georegions = self.getGeoRegions()
-        self.geoRegionsByName = dict()
-        for gr in self.georegions:
-            self.geoRegionsByName[gr['name']] = gr['_links']['self']['href'].split('/')[-1]
-            # e.g. { us-east-1: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
-
         # an attribute that is a dict for resolving network UUIDs by name
         self.networksByName = dict()
         for net in self.getNetworks():
-            self.networksByName[net['name']] = net['_links']['self']['href'].split('/')[-1]
+            self.networksByName[net['name']] = net['id']
             # e.g. { testNetwork: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
 
     def walkNetwork(self, netId):
@@ -171,6 +191,38 @@ class client(object):
 
         return(network)
 
+    def getNetworkConfigMetadatas(self):
+        """return the list of network config metadata which are required to create a network
+        """
+        try:
+            headers = { "authorization": "Bearer " + self.token }
+            response = requests.get(
+                self.audience+'rest/v1/networkConfigMetadata',
+                proxies=self.proxies,
+                verify=self.verify,
+                headers=headers
+            )
+
+            http_code = response.status_code
+        except:
+            raise
+
+        if http_code == requests.status_codes.codes.OK: # HTTP 200
+            try:
+                networkConfigMetadatas = json.loads(response.text)['_embedded']['networkConfigMetadatas']
+            except ValueError as e:
+                eprint('ERROR getting network config metadatas')
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        return(networkConfigMetadatas)
+
     def getNetworkGroups(self):
         """return the network groups object (formerly "organizations")
         """
@@ -210,12 +262,12 @@ class client(object):
         try:
             # dataCenters returns a list of dicts (datacenter objects)
             headers = { "authorization": "Bearer " + self.token }
-            response = requests.get(self.audience+'rest/v1/dataCenters',
-                                    proxies=self.proxies,
-                                    verify=self.verify,
-                                    headers=headers
-                                   )
-
+            response = requests.get(
+                self.audience+'rest/v1/dataCenters',
+                proxies=self.proxies,
+                verify=self.verify,
+                headers=headers
+            )
             http_code = response.status_code
         except:
             raise
@@ -236,41 +288,9 @@ class client(object):
 
         return(datacenters)
 
-    def getGeoRegions(self):
-        """return the geoRegions object
-        """
-        try:
-            # dataCenters returns a list of dicts (datacenter objects)
-            headers = { "authorization": "Bearer " + self.token }
-            response = requests.get(self.audience+'rest/v1/geoRegions',
-                                    proxies=self.proxies,
-                                    verify=self.verify,
-                                    headers=headers
-                                   )
-
-            http_code = response.status_code
-        except:
-            raise
-
-        if http_code == requests.status_codes.codes.OK: # HTTP 200
-            try:
-                geoRegions = json.loads(response.text)['_embedded']['geoRegions']
-            except ValueError as e:
-                eprint('ERROR getting geo regions')
-                raise(e)
-        else:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        return(geoRegions)
-
     def getNetworks(self):
         """
-        return the networks for a particular organization
+        return all networks in this network group
         """
 
         try:
@@ -278,18 +298,17 @@ class client(object):
             headers = { "authorization": "Bearer " + self.token }
             response = requests.get(
                 self.audience+'core/v2/networks',
-                                    proxies=self.proxies,
-                                    verify=self.verify,
-                                    headers=headers
-                                   )
-
+                proxies=self.proxies,
+                verify=self.verify,
+                headers=headers
+            )
             http_code = response.status_code
         except:
             raise
 
         if http_code == requests.status_codes.codes.OK: # HTTP 200
             try:
-                networks = json.loads(response.text)['_embedded']['networks']
+                networks = json.loads(response.text)['_embedded'][self.resources['embedded']]
             except KeyError:
                 networks = []
                 pass
@@ -303,18 +322,61 @@ class client(object):
 
         return(networks)
 
-    def getEndpoints(self, netId):
+    def getNetworkByName(self,name):
+        """return the network object
+            :token required API access token
+            :networkId required name of the NF network may contain quoted whitespace
         """
-        return the endpoints as an object
+    #    name_encoding = urllib.parse.quote(name)
+        try:
+            headers = { 
+                "authorization": "Bearer " + self.token 
+            }
+            params = {
+                "findByName": name
+            }
+            response = requests.get(
+                self.audience+'/core/v2/networks',
+                headers=headers,
+                params=params
+            )
+            http_code = response.status_code
+        except:
+            raise
+
+        if http_code == requests.status_codes.codes.OK: # HTTP 200
+            try:
+                networks = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load endpoints object from GET response')
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+        hits = networks['page']['totalElements']
+        if hits == 1:
+            network = networks['_embedded']['networkList'][0]
+            return(network)
+        else:
+            raise Exception("ERROR: failed to find exactly one match for {}".format(name))
+
+    def getNetwork(token,networkId):
+        """return the network object
+            :token [required] the API access token
+            :networkId [required] the UUID of the NF network
         """
         try:
-            # returns a list of dicts (network objects)
-            headers = { "authorization": "Bearer " + self.token }
-            response = requests.get(self.audience+'core/v2/networks/'+netId+'/endpoints',
-                                    proxies=self.proxies,
-                                    verify=self.verify,
-                                    headers=headers
-                                   )
+            headers = { 
+                "authorization": "Bearer " + token 
+            }
+            response = requests.get(
+                'https://gateway.'+MOPENV+'.netfoundry.io/core/v2/networks/'+networkId,
+                headers=headers
+            )
 
             http_code = response.status_code
         except:
@@ -322,10 +384,10 @@ class client(object):
 
         if http_code == requests.status_codes.codes.OK: # HTTP 200
             try:
-                endpoints = json.loads(response.text)['_embedded']['endpoints']
-            except KeyError:
-                endpoints = []
-                pass
+                network = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load {r} object from GET response'.format(r = "network"))
+                raise(e)
         else:
             raise Exception(
                 'unexpected response: {} (HTTP {:d})'.format(
@@ -334,20 +396,29 @@ class client(object):
                 )
             )
 
-        return(endpoints)
+        return(network)
 
-    def getEndpoint(self, netId, endpointId):
-        """
-        return the endpoint as an object
+    def getResources(token,type,networkId):
+        """return the resources object
+            :token [required] the API access token
+            :type [required] one of endpoints, edge-routers, services
+            :networkId [required] the UUID of the NF network
         """
         try:
-            # returns a list of dicts (network objects)
-            headers = { "authorization": "Bearer " + self.token }
-            response = requests.get(self.audience+'core/v2/networks/'+netId+'/endpoints/'+endpointId,
-                                    proxies=self.proxies,
-                                    verify=self.verify,
-                                    headers=headers
-                                   )
+            headers = { 
+                "authorization": "Bearer " + token 
+            }
+            params = {
+                "networkId": networkId,
+                "page": 0,
+                "size": 10,
+                "sort": "name,asc"
+            }
+            response = requests.get(
+                'https://gateway.'+MOPENV+'.netfoundry.io/core/v2/'+type,
+                headers=headers,
+                params=params
+            )
 
             http_code = response.status_code
         except:
@@ -355,10 +426,10 @@ class client(object):
 
         if http_code == requests.status_codes.codes.OK: # HTTP 200
             try:
-                endpoint = json.loads(response.text)
-            except KeyError:
-                endpoint = []
-                pass
+                resources = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load {r} object from GET response'.format(r = type))
+                raise(e)
         else:
             raise Exception(
                 'unexpected response: {} (HTTP {:d})'.format(
@@ -367,77 +438,93 @@ class client(object):
                 )
             )
 
-        return(endpoint)
+        total_pages = resources['page']['totalPages']
+        total_elements = resources['page']['totalElements']
+        # if there are no resources
+        if total_elements == 0:
+            return([])
+        # if there is one page of resources
+        elif total_pages == 1:
+            return(resources['_embedded'][RESOURCETYPES[type]['embedded']])
+        # if there are multiple pages of resources
+        else:
+            # initialize the list with the first page of resources
+            all_pages = resources['_embedded'][RESOURCETYPES[type]['embedded']]
+            # append the remaining pages of resources
+            for page in range(1,total_pages):
+                try:
+                    params["page"] = page
+                    response = requests.get(
+                        'https://gateway.'+MOPENV+'.netfoundry.io/core/v2/'+type,
+                        headers=headers,
+                        params=params
+                    )
+                    http_code = response.status_code
+                except:
+                    raise
 
-    def getServices(self, netId):
-        """return the services object
+                if http_code == requests.status_codes.codes.OK: # HTTP 200
+                    try:
+                        resources = json.loads(response.text)
+                        all_pages += resources['_embedded'][RESOURCETYPES[type]['embedded']]
+                    except ValueError as e:
+                        eprint('ERROR: failed to load resources object from GET response')
+                        raise(e)
+                else:
+                    raise Exception(
+                        'unexpected response: {} (HTTP {:d})'.format(
+                            requests.status_codes._codes[http_code][0].upper(),
+                            http_code
+                        )
+                    )
+            return(all_pages)
+
+    def patchAttributes(token,type,resource):
+        """return the new resource object
+            :token [required] the API access token
+            :type [required] one of endpoints, edge-routers, services
+            :resource [required] the resource object to PUT 
         """
         try:
-            # returns a list of dicts (network objects)
-            headers = { "authorization": "Bearer " + self.token }
-            response = requests.get(self.audience+'core/v2/networks/'+netId+'/services',
-                                    proxies=self.proxies,
-                                    verify=self.verify,
-                                    headers=headers
-                                   )
-
+            headers = { 
+                'Content-Type': 'application/json',
+                "authorization": "Bearer " + token 
+            }
+            response = requests.patch(
+                'https://gateway.'+MOPENV+'.netfoundry.io/core/v2/'+type+'/'+resource['id'],
+                json={
+                    'name': resource['name'],
+                    'attributes': resource['attributes']
+                },
+                headers=headers
+            )
             http_code = response.status_code
         except:
             raise
 
-        if http_code == requests.status_codes.codes.OK: # HTTP 200
+        if http_code == requests.status_codes.codes[self.resources[type]['expect']]: # HTTP 200
             try:
-                services = json.loads(response.text)['_embedded']['services']
-            except KeyError:
-                services = []
-                pass
+                updated = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load updated resource object from PUT response body')
+                raise(e)
         else:
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
+                'unexpected response: {} (HTTP {:d}\n{})'.format(
                     requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                    http_code,
+                    response.text
                 )
             )
 
-        return(services)
+        return(updated)
 
-    def getAppWans(self, netId):
-        """return the appWans object
-        """
-        try:
-            # returns a list of dicts (network objects)
-            headers = { "authorization": "Bearer " + self.token }
-            response = requests.get(self.audience+'core/v2/networks/'+netId+'/appWans',
-                                    proxies=self.proxies,
-                                    verify=self.verify,
-                                    headers=headers
-                                   )
 
-            http_code = response.status_code
-        except:
-            raise
-
-        if http_code == requests.status_codes.codes.OK: # HTTP 200
-            try:
-                appWans = json.loads(response.text)['_embedded']['appWans']
-            except KeyError:
-                appWans = []
-                pass
-        else:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        return(appWans)
 
     def post(self,
-             method,
-             json,
-             expected_response="ACCEPTED"
-            ):
+        method,
+        json,
+        expected_response="ACCEPTED"):
         """
         post arbitrary data as JSON to an API method
         """
@@ -450,12 +537,13 @@ class client(object):
         }
 
         try:
-            response = requests.post(self.audience+"core/v2"+method,
-                                     json=request,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
+            response = requests.post(
+                self.audience+"core/v2"+method,
+                json=request,
+                headers=headers,
+                proxies=self.proxies,
+                verify=self.verify
+            )
             http_code = response.status_code
         except:
             raise
@@ -463,9 +551,8 @@ class client(object):
         if not http_code == requests.status_codes.codes[expected_response]:
             raise Exception('unexpected response: {} (HTTP {:d})'.format(
                 requests.status_codes._codes[http_code][0].upper(),
-                http_code
+                http_code)
             )
-                           )
 
         text = response.text
 
@@ -496,12 +583,13 @@ class client(object):
         }
 
         try:
-            response = requests.post(self.audience+"core/v2/networks",
-                                     json=request,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
+            response = requests.post(
+                self.audience+"core/v2/networks",
+                json=request,
+                headers=headers,
+                proxies=self.proxies,
+                verify=self.verify
+            )
             http_code = response.status_code
         except:
             raise
@@ -520,24 +608,25 @@ class client(object):
 
         if not wait == 0:
             try:
-                self.waitForEntityStatus(status='ACTIVE',
-                                         entType='network',
-                                         netId=netId,
-                                         wait=wait)
+                self.waitForEntityStatus(
+                    status='ACTIVE',
+                    entType='network',
+                    netId=netId,
+                    wait=wait)
             except:
                 raise
 
         return(netId)
 
-    def createIpNetworkService(self,
-                             netId,
-                             name,
-                             gatewayIp,
-                             gatewayNetmask,
-                             interceptIp,
-                             endpointId,
-                             wait=0
-                            ):
+    def createIpNetworkService(
+            self,
+            netId,
+            name,
+            gatewayIp,
+            gatewayNetmask,
+            interceptIp,
+            endpointId,
+            wait=0):
         """publish a subnetwork (IP or range described by network address and netmask)
         :param netId: network UUID
         :param name: descriptive name allowing whitespace
@@ -818,130 +907,7 @@ class client(object):
 
         return(svcId)
 
-    def createEndpointGroup(self, name, netId):
-        """
-        create an endpoint group in a network with
-        :param name: group name
-        :param netId: network UUID
-        """
-        request = {
-            "name": name
-        }
-
-        headers = {
-            'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.token
-        }
-
-        try:
-            response = requests.post(self.audience+"core/v2/networks/"+netId+"/endpointGroups",
-                                     json=request,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
-            http_code = response.status_code
-        except:
-            raise
-
-        if http_code == requests.status_codes.codes.CREATED:
-            groupId = json.loads(response.text)['_links']['self']['href'].split('/')[-1]
-        else:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        return(groupId)
-
-    def updateEndpointGroup(self,
-                            name,
-                            groupId,
-                            netId,
-                           ):
-        """
-        update an endpoint group name
-        :param name: group name
-        :param groupId: endpoint group UUID
-        :param netId: network UUID
-        """
-        request = {
-            "name": name
-        }
-
-        headers = {
-            'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.token
-        }
-
-        try:
-            response = requests.put(
-                self.audience+"core/v2/networks/"+netId+"/endpointGroups/"+groupId,
-                                     json=request,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
-            #print(response)
-            http_code = response.status_code
-        except:
-            raise
-
-        if not http_code == requests.status_codes.codes.OK:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        return(True)
-
-    def addEndpointToGroup(self,
-                           groupId,
-                           netId,
-                           endpointIds):
-        """
-        add an endpoint to a group
-        :param groupId: endpoint group UUID
-        :param netId: network UUID
-        :param endpointIds: list of endpoint UUIDs to add
-        """
-        request = {
-            "ids": endpointIds # is list
-        }
-
-        headers = {
-            'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.token
-        }
-
-        try:
-            response = requests.post(
-                self.audience+"core/v2/networks/"+netId+"/endpointGroups/"+groupId+"/endpoints",
-                                     json=request,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
-            http_code = response.status_code
-        except:
-            raise
-
-        if not http_code == requests.status_codes.codes.ACCEPTED:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        return(True)
-
-
-    def deleteEndpoint(self,
+    def deleteResource(self,
                        netId,
                        endpointId,
                        wait=0
@@ -958,51 +924,6 @@ class client(object):
 
         try:
             response = requests.delete(self.audience+"core/v2/networks/"+netId+"/endpoints/"+endpointId,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
-            http_code = response.status_code
-        except:
-            raise
-
-        if not http_code == requests.status_codes.codes.ACCEPTED:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        if not wait == 0:
-            try:
-                self.waitForEntityStatus(status='DELETED',
-                                         entType='endpoint',
-                                         netId=netId,
-                                         entId=endpointId,
-                                         wait=wait)
-            except:
-                raise
-
-        return(True)
-
-    def deleteService(self,
-                       netId,
-                       svcId,
-                       wait=0
-                      ):
-        """
-        delete a service by UUID
-        :param netId: network UUID
-        :param svcId: service UUID to delete
-        :param wait: optional seconds to wait for service destruction
-        """
-        headers = {
-            "authorization": "Bearer " + self.token
-        }
-
-        try:
-            response = requests.delete(self.audience+"core/v2/networks/"+netId+"/services/"+svcId,
                                      headers=headers,
                                      proxies=self.proxies,
                                      verify=self.verify
@@ -1148,86 +1069,6 @@ class client(object):
                                              wait=wait)
                 except:
                     raise
-
-        return(True)
-
-    def deleteAppWan(self, netId, appWanId, wait=0):
-        """
-        delete a service connection(s) by UUID
-        :param netId: network UUID in which to discover the endpoints
-        :param appWanId: AppWan UUID to delete
-        """
-        headers = {
-            "authorization": "Bearer " + self.token
-        }
-
-        try:
-            response = requests.delete(self.audience+"core/v2/networks/"+netId+"/appWans/"+appWanId,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
-            http_code = response.status_code
-        except:
-            raise
-
-        if not http_code == requests.status_codes.codes.ACCEPTED:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        if not wait == 0:
-            try:
-                self.waitForEntityStatus(status='DELETED',
-                                         entType='appWan',
-                                         netId=netId,
-                                         entId=appWanId,
-                                         wait=wait)
-            except:
-                raise
-
-        return(True)
-
-    def deleteNetwork(self, netId, wait=0):
-        """
-        delete an NFN (aka SDN) by UUID
-        :param netId: network UUID
-        :param wait: optional wait seconds for network destruction before return
-        """
-        headers = {
-            'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.token
-        }
-
-        try:
-            response = requests.delete(self.audience+"core/v2/networks/"+netId,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
-            http_code = response.status_code
-        except:
-            raise
-
-        if not http_code == requests.status_codes.codes.ACCEPTED:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        if not wait == 0:
-            try:
-                self.waitForEntityStatus(status='DELETED',
-                                         entType='network',
-                                         netId=netId,
-                                         wait=wait)
-            except:
-                raise
 
         return(True)
 
