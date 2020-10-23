@@ -10,24 +10,23 @@ import time # enforce a timeout; sleep
 import uuid # generate a UUID as a businessKey if it is not provided
 from uuid import UUID # validate UUIDv4 strings
 import jwt # decode the JWT claimset to extract the organization UUID
+from pathlib import Path
 
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
-class nfapi(object):
-    """interact with API gateways
+class client(object):
+    """interact with the NetFoundry API
     """
 
-    def __init__(self):
-        self.authEndpoints = {
-            'localhost': 'https://netfoundry-sandbox.auth0.com/oauth/token',
-            'sandbox': 'https://netfoundry-sandbox.auth0.com/oauth/token',
-            'integration': 'https://netfoundry-integration.auth0.com/oauth/token',
-            'staging': 'https://netfoundry-staging.auth0.com/oauth/token',
-            'trial': 'https://netfoundry-trial.auth0.com/oauth/token',
-            'private': 'https://netfoundry-private.auth0.com/oauth/token',
-            'production': 'https://netfoundry-production.auth0.com/oauth/token'
-        }
+    def __init__(self, apiAccountFile=str(Path.home())+"/.netfoundry/credentials", proxy=None, environment="production"):
+        """initialize with a reusable API client
+        :param apiAccountFile: optional alternative path to API account credentials file
+        :param proxy: optional HTTP proxy, e.g., http://localhost:8080
+        :param environment optional override of "production"
+        The init function also gathers a few essential objects from the API and
+        stores them for reuse in the instance namespace
+        """
 
         self.statusesByCode = {
             100: ('new', 'created'),
@@ -46,21 +45,13 @@ class nfapi(object):
             for title in titles:
                 setattr(self.codes, title.upper(), code)
 
-    def client(self, auth, proxy=None):
-        """initialize with a reusable MOP API gateway connector object
-        where
-        :param auth: required authorization bearer token
-        :param proxy: optional HTTP proxy, e.g., http://localhost:8080
-        The init function also gathers a few essential objects from the API and
-        stores them for reuse in the instance namespace
-        """
+        with open(apiAccountFile) as f:
+            self.account = json.load(f)
 
-        self.jwtClaim = jwt.decode(auth,verify=False)
-        self.aud = self.jwtClaim['aud']
-        self.tenant = self.jwtClaim['https://netfoundry.io/tenant/label']
-        self.auth = auth
-
-        # forward request to proxy if defined
+        self.tokenEndpoint = self.account['authenticationUrl']
+        self.clientId = self.account['clientId']
+        self.password = self.account['password']
+        # verify auth endpoint's server certificate if proxy is type SOCKS or None
         if proxy == None:
             self.proxies = dict()
             self.verify = True
@@ -69,11 +60,54 @@ class nfapi(object):
                 'http': proxy,
                 'https': proxy
             }
-            # verify server certificate if proxy is type SOCKS
             if proxy[0:5] == 'socks':
                 self.verify = True
             else:
                 self.verify = False
+        if environment == 'localhost':
+            self.scope = "http://localhost:8080//ignore-scope"
+        else:
+            self.scope = "https://gateway."+environment+".netfoundry.io//ignore-scope"
+        self.audience = self.scope.replace('/ignore-scope','')
+        self.assertion = {
+            "scope": self.scope,
+            "grant_type": "client_credentials"
+        }
+        try:
+            self.response = requests.post(
+                self.tokenEndpoint,
+                auth=(self.clientId, self.password),
+                data=self.assertion,
+                verify=self.verify,
+                proxies=self.proxies)
+            self.responseCode = self.response.status_code
+        except:
+            eprint(
+                'ERROR: failed to contact the authentication endpoint: {}'.format(self.tokenEndpoint)
+            )
+            raise
+
+        if self.responseCode == requests.status_codes.codes.OK:
+            try:
+                self.tokenText = json.loads(self.response.text)
+                self.token = self.tokenText['access_token']
+            except:
+                raise Exception(
+                    'ERROR: failed to find an access_token in the response and instead got: {}'.format(
+                        self.response.text
+                    )
+                )
+        else:
+            raise Exception(
+                'ERROR: got unexpected HTTP response {} ({:d})'.format(
+                    requests.status_codes._codes[self.responseCode][0].upper(),
+                    self.responseCode
+                )
+            )
+
+
+        self.claim = jwt.decode(self.token,verify=False)
+        self.expiry = self.claim['exp']
 
         self.networkGroups = self.getNetworkGroups()
         self.networkGroupsByLabel = dict()
@@ -141,13 +175,14 @@ class nfapi(object):
         """return the network groups object (formerly "organizations")
         """
         try:
-            # /organizations returns a list of dicts (network group objects)
-            headers = { "authorization": "Bearer " + self.auth }
-            response = requests.get(self.aud+'rest/v1/organizations',
-                                    proxies=self.proxies,
-                                    verify=self.verify,
-                                    headers=headers
-                                   )
+            # /network-groups returns a list of dicts (network group objects)
+            headers = { "authorization": "Bearer " + self.token }
+            response = requests.get(
+                self.audience+'rest/v1/network-groups',
+                proxies=self.proxies,
+                verify=self.verify,
+                headers=headers
+            )
 
             http_code = response.status_code
         except:
@@ -174,8 +209,8 @@ class nfapi(object):
         """
         try:
             # dataCenters returns a list of dicts (datacenter objects)
-            headers = { "authorization": "Bearer " + self.auth }
-            response = requests.get(self.aud+'rest/v1/dataCenters',
+            headers = { "authorization": "Bearer " + self.token }
+            response = requests.get(self.audience+'rest/v1/dataCenters',
                                     proxies=self.proxies,
                                     verify=self.verify,
                                     headers=headers
@@ -206,8 +241,8 @@ class nfapi(object):
         """
         try:
             # dataCenters returns a list of dicts (datacenter objects)
-            headers = { "authorization": "Bearer " + self.auth }
-            response = requests.get(self.aud+'rest/v1/geoRegions',
+            headers = { "authorization": "Bearer " + self.token }
+            response = requests.get(self.audience+'rest/v1/geoRegions',
                                     proxies=self.proxies,
                                     verify=self.verify,
                                     headers=headers
@@ -240,9 +275,9 @@ class nfapi(object):
 
         try:
             # returns a list of dicts (network objects)
-            headers = { "authorization": "Bearer " + self.auth }
+            headers = { "authorization": "Bearer " + self.token }
             response = requests.get(
-                self.aud+'rest/v1/networks',
+                self.audience+'core/v2/networks',
                                     proxies=self.proxies,
                                     verify=self.verify,
                                     headers=headers
@@ -274,8 +309,8 @@ class nfapi(object):
         """
         try:
             # returns a list of dicts (network objects)
-            headers = { "authorization": "Bearer " + self.auth }
-            response = requests.get(self.aud+'rest/v1/networks/'+netId+'/endpoints',
+            headers = { "authorization": "Bearer " + self.token }
+            response = requests.get(self.audience+'core/v2/networks/'+netId+'/endpoints',
                                     proxies=self.proxies,
                                     verify=self.verify,
                                     headers=headers
@@ -307,8 +342,8 @@ class nfapi(object):
         """
         try:
             # returns a list of dicts (network objects)
-            headers = { "authorization": "Bearer " + self.auth }
-            response = requests.get(self.aud+'rest/v1/networks/'+netId+'/endpoints/'+endpointId,
+            headers = { "authorization": "Bearer " + self.token }
+            response = requests.get(self.audience+'core/v2/networks/'+netId+'/endpoints/'+endpointId,
                                     proxies=self.proxies,
                                     verify=self.verify,
                                     headers=headers
@@ -334,45 +369,13 @@ class nfapi(object):
 
         return(endpoint)
 
-    def getEndpointGroups(self, netId):
-        """return the endpointGroups as an object
-        """
-        try:
-            # returns a list of dicts (network objects)
-            headers = { "authorization": "Bearer " + self.auth }
-            response = requests.get(self.aud+'rest/v1/networks/'+netId+'/endpointGroups',
-                                    proxies=self.proxies,
-                                    verify=self.verify,
-                                    headers=headers
-                                   )
-
-            http_code = response.status_code
-        except:
-            raise
-
-        if http_code == requests.status_codes.codes.OK: # HTTP 200
-            try:
-                endpointGroups = json.loads(response.text)['_embedded']['endpointGroups']
-            except KeyError:
-                endpointGroups = []
-                pass
-        else:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        return(endpointGroups)
-
     def getServices(self, netId):
         """return the services object
         """
         try:
             # returns a list of dicts (network objects)
-            headers = { "authorization": "Bearer " + self.auth }
-            response = requests.get(self.aud+'rest/v1/networks/'+netId+'/services',
+            headers = { "authorization": "Bearer " + self.token }
+            response = requests.get(self.audience+'core/v2/networks/'+netId+'/services',
                                     proxies=self.proxies,
                                     verify=self.verify,
                                     headers=headers
@@ -403,8 +406,8 @@ class nfapi(object):
         """
         try:
             # returns a list of dicts (network objects)
-            headers = { "authorization": "Bearer " + self.auth }
-            response = requests.get(self.aud+'rest/v1/networks/'+netId+'/appWans',
+            headers = { "authorization": "Bearer " + self.token }
+            response = requests.get(self.audience+'core/v2/networks/'+netId+'/appWans',
                                     proxies=self.proxies,
                                     verify=self.verify,
                                     headers=headers
@@ -443,11 +446,11 @@ class nfapi(object):
 
         headers = {
             'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
+            "authorization": "Bearer " + self.token
         }
 
         try:
-            response = requests.post(self.aud+"rest/v1"+method,
+            response = requests.post(self.audience+"core/v2"+method,
                                      json=request,
                                      headers=headers,
                                      proxies=self.proxies,
@@ -489,11 +492,11 @@ class nfapi(object):
 
         headers = {
             'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
+            "authorization": "Bearer " + self.token
         }
 
         try:
-            response = requests.post(self.aud+"rest/v1/networks",
+            response = requests.post(self.audience+"core/v2/networks",
                                      json=request,
                                      headers=headers,
                                      proxies=self.proxies,
@@ -555,11 +558,11 @@ class nfapi(object):
 
         headers = {
             'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
+            "authorization": "Bearer " + self.token
         }
 
         try:
-            response = requests.post(self.aud+"rest/v1/networks/"+netId+"/services",
+            response = requests.post(self.audience+"core/v2/networks/"+netId+"/services",
                                      json=request,
                                      headers=headers,
                                      proxies=self.proxies,
@@ -629,11 +632,11 @@ class nfapi(object):
 
         headers = {
             'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
+            "authorization": "Bearer " + self.token
         }
 
         try:
-            response = requests.post(self.aud+"rest/v1/networks/"+netId+"/endpoints",
+            response = requests.post(self.audience+"core/v2/networks/"+netId+"/endpoints",
                                      json=request,
                                      headers=headers,
                                      proxies=self.proxies,
@@ -684,11 +687,11 @@ class nfapi(object):
 
         headers = {
             'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
+            "authorization": "Bearer " + self.token
         }
 
         try:
-            response = requests.post(self.aud+"rest/v1/networks/"+netId+"/endpoints",
+            response = requests.post(self.audience+"core/v2/networks/"+netId+"/endpoints",
                                      json=request,
                                      headers=headers,
                                      proxies=self.proxies,
@@ -776,11 +779,11 @@ class nfapi(object):
         }
         headers = {
             'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
+            "authorization": "Bearer " + self.token
         }
 
         try:
-            response = requests.post(self.aud+"rest/v1/networks/"+netId+"/services",
+            response = requests.post(self.audience+"core/v2/networks/"+netId+"/services",
                                      json=request,
                                      headers=headers,
                                      proxies=self.proxies,
@@ -827,11 +830,11 @@ class nfapi(object):
 
         headers = {
             'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
+            "authorization": "Bearer " + self.token
         }
 
         try:
-            response = requests.post(self.aud+"rest/v1/networks/"+netId+"/endpointGroups",
+            response = requests.post(self.audience+"core/v2/networks/"+netId+"/endpointGroups",
                                      json=request,
                                      headers=headers,
                                      proxies=self.proxies,
@@ -870,12 +873,12 @@ class nfapi(object):
 
         headers = {
             'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
+            "authorization": "Bearer " + self.token
         }
 
         try:
             response = requests.put(
-                self.aud+"rest/v1/networks/"+netId+"/endpointGroups/"+groupId,
+                self.audience+"core/v2/networks/"+netId+"/endpointGroups/"+groupId,
                                      json=request,
                                      headers=headers,
                                      proxies=self.proxies,
@@ -912,12 +915,12 @@ class nfapi(object):
 
         headers = {
             'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
+            "authorization": "Bearer " + self.token
         }
 
         try:
             response = requests.post(
-                self.aud+"rest/v1/networks/"+netId+"/endpointGroups/"+groupId+"/endpoints",
+                self.audience+"core/v2/networks/"+netId+"/endpointGroups/"+groupId+"/endpoints",
                                      json=request,
                                      headers=headers,
                                      proxies=self.proxies,
@@ -950,11 +953,11 @@ class nfapi(object):
         :param wait: optional seconds to wait for endpoint destruction
         """
         headers = {
-            "authorization": "Bearer " + self.auth
+            "authorization": "Bearer " + self.token
         }
 
         try:
-            response = requests.delete(self.aud+"rest/v1/networks/"+netId+"/endpoints/"+endpointId,
+            response = requests.delete(self.audience+"core/v2/networks/"+netId+"/endpoints/"+endpointId,
                                      headers=headers,
                                      proxies=self.proxies,
                                      verify=self.verify
@@ -995,11 +998,11 @@ class nfapi(object):
         :param wait: optional seconds to wait for service destruction
         """
         headers = {
-            "authorization": "Bearer " + self.auth
+            "authorization": "Bearer " + self.token
         }
 
         try:
-            response = requests.delete(self.aud+"rest/v1/networks/"+netId+"/services/"+svcId,
+            response = requests.delete(self.audience+"core/v2/networks/"+netId+"/services/"+svcId,
                                      headers=headers,
                                      proxies=self.proxies,
                                      verify=self.verify
@@ -1043,11 +1046,11 @@ class nfapi(object):
 
         headers = {
             'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
+            "authorization": "Bearer " + self.token
         }
 
         try:
-            response = requests.post(self.aud+"rest/v1/networks/"+netId+"/appWans",
+            response = requests.post(self.audience+"core/v2/networks/"+netId+"/appWans",
                                      json=request,
                                      headers=headers,
                                      proxies=self.proxies,
@@ -1112,13 +1115,13 @@ class nfapi(object):
 
         headers = {
             'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
+            "authorization": "Bearer " + self.token
         }
 
         for resource in ['services', 'endpoints', 'endpointGroups']:
             try:
                 response = requests.post(
-                    self.aud+"rest/v1/networks/"+netId+"/appWans/"+appWanId+"/"+resource,
+                    self.audience+"core/v2/networks/"+netId+"/appWans/"+appWanId+"/"+resource,
                          json=appWan[resource],
                          headers=headers,
                          proxies=self.proxies,
@@ -1155,11 +1158,11 @@ class nfapi(object):
         :param appWanId: AppWan UUID to delete
         """
         headers = {
-            "authorization": "Bearer " + self.auth
+            "authorization": "Bearer " + self.token
         }
 
         try:
-            response = requests.delete(self.aud+"rest/v1/networks/"+netId+"/appWans/"+appWanId,
+            response = requests.delete(self.audience+"core/v2/networks/"+netId+"/appWans/"+appWanId,
                                      headers=headers,
                                      proxies=self.proxies,
                                      verify=self.verify
@@ -1196,11 +1199,11 @@ class nfapi(object):
         """
         headers = {
             'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
+            "authorization": "Bearer " + self.token
         }
 
         try:
-            response = requests.delete(self.aud+"rest/v1/networks/"+netId,
+            response = requests.delete(self.audience+"core/v2/networks/"+netId,
                                      headers=headers,
                                      proxies=self.proxies,
                                      verify=self.verify
@@ -1236,8 +1239,8 @@ class nfapi(object):
         """
 
         try:
-            headers = { "authorization": "Bearer " + self.auth }
-            entUrl = self.aud+'rest/v1/networks/'+netId
+            headers = { "authorization": "Bearer " + self.token }
+            entUrl = self.audience+'core/v2/networks/'+netId
             if not entType == 'network':
                 if entId == 0:
                     raise Exception("ERROR: entity UUID must be specified if not a network")
@@ -1270,8 +1273,8 @@ class nfapi(object):
         """
 
         try:
-            headers = { "authorization": "Bearer " + self.auth }
-            entUrl = self.aud+'rest/v1/networks/'+netId
+            headers = { "authorization": "Bearer " + self.token }
+            entUrl = self.audience+'core/v2/networks/'+netId
             if not entType == 'network':
                 if entId == 0:
                     raise Exception("ERROR: entity UUID must be specified if not a network")

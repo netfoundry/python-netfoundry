@@ -10,14 +10,14 @@ setup(
     py_modules=['netfoundry'],
     author='NetFoundry',
     author_email='ops-mgmt@netfoundry.io',
-    url='https://netfoundry.atlassian.net/wiki/spaces/PUB/blog/2017/10/15/11829509/MOP+for+Python',
-    description='API wrapper for the NetFoundry Platform',
+    url='https://developer.netfoundry.io/',
+    description='General purpose library for the NetFoundry network-as-code orchestration Platform',
     long_description=long_description,
     license='MIT',
     version='3.0.0',
     install_requires=[
-        'requests >= 2.18.4',
-        'pysocks >= 1.6.7',
-        'pyjwt >= 1.6.0'
+        'requests >= 2.24.0',
+        'pysocks >= 1.7.1',
+        'pyjwt >= 1.7.1'
     ]
 )
