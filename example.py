@@ -1,7 +1,7 @@
 import netfoundry
 import os
 nfapi = netfoundry.client(
-    credentials="/home/kbingham/.netfoundry/credentials.json", 
+    credentials=os.environ['HOME']+"/.netfoundry/credentials.json", 
     environment="staging"#, proxy="http://localhost:4321"
 )
 netGroup = nfapi.networkGroups[0]['organizationShortName']
