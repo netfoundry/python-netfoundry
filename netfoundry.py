@@ -38,6 +38,7 @@ class client(object):
             800: ('deleting', 'released', 'decommissioned'),
             900: ('defunct', 'deleted')
         }
+        self.codes = LookupDict(name='statuses')
 
         self.resources = {
             'networks': {
@@ -58,7 +59,14 @@ class client(object):
             }
         }
 
-        self.codes = LookupDict(name='statuses')
+        # TODO: [MOP-13441] associate locations with a short list of major regions / continents
+        """
+        self.locationsByContinent = {
+            "Americas": ("Canada Central","Oregon","Virginia"),
+            "EuropeMiddleEastAfrica": ("Frankfurt","London"),
+            "AsiaPacific": ("Hong Kong","Jakarta","Mumbai","Seoul","Singapore","Sydney","Tokyo")
+        }
+        """
 
         for code, titles in self.statusesByCode.items():
             for title in titles:
@@ -66,7 +74,6 @@ class client(object):
 
         with open(credentials) as f:
             self.account = json.load(f)
-
         self.tokenEndpoint = self.account['authenticationUrl']
         self.clientId = self.account['clientId']
         self.password = self.account['password']
@@ -83,11 +90,12 @@ class client(object):
                 self.verify = True
             else:
                 self.verify = False
+        # re: scope: we're not using scopes with Cognito, but a non-empty value is required;
+        #  hence "/ignore-scope"
         if environment == 'localhost':
             self.scope = "http://localhost:8080//ignore-scope"
         else:
             self.scope = "https://gateway."+environment+".netfoundry.io//ignore-scope"
-        self.audience = self.scope.replace('/ignore-scope','')
         self.assertion = {
             "scope": self.scope,
             "grant_type": "client_credentials"
@@ -124,15 +132,18 @@ class client(object):
                 )
             )
 
+        # we can gather the URL of the API from the first part of the scope string by
+        #  dropping the scope suffix
+        self.audience = self.scope.replace('/ignore-scope','')
         self.claim = jwt.decode(self.token,verify=False)
 
-        # TODO: [MOP-13438] auto-renew token when near expiry
+        # TODO: [MOP-13438] auto-renew token when near expiry (now+1hour in epoch seconds)
         self.expiry = self.claim['exp']
 
         self.networkGroups = self.getNetworkGroups()
-        self.networkGroupsByLabel = dict()
+        self.networkGroupsByName = dict()
         for ng in self.networkGroups:
-            self.networkGroupsByLabel[ng['organizationShortName']] = ng['_links']['self']['href'].split('/')[-1]
+            self.networkGroupsByName[ng['organizationShortName']] = ng['id']
             # e.g. { NFADMIN: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
 
         self.networkConfigMetadatas = self.getNetworkConfigMetadatas()
@@ -144,7 +155,7 @@ class client(object):
         self.datacenters = self.getDataCenters()
         self.datacentersByRegion = dict()
         for dc in self.datacenters:
-            self.datacentersByRegion[dc['locationCode']] = dc['_links']['self']['href'].split('/')[-1]
+            self.datacentersByRegion[dc['locationCode']] = dc['id']
             # e.g. { us-east-1: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
 
         # an attribute that is a dict for resolving network UUIDs by name
@@ -152,44 +163,6 @@ class client(object):
         for net in self.getNetworks():
             self.networksByName[net['name']] = net['id']
             # e.g. { testNetwork: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
-
-    def walkNetwork(self, netId):
-        """return an object to serve as a lookup dict for the various resources associated with a NF network where
-        :param netId: required UUID of NF network to walk
-        """
-
-        network = dict()
-
-        # a list of all endpoint objects from which to extract the name and UUID
-        endpoints = self.getEndpoints(netId)
-        # a dict for resolving endpoint UUIDs by name
-        network['endpointsByName'] = dict()
-        for end in endpoints:
-            network['endpointsByName'][end['name']] = end['_links']['self']['href'].split('/')[-1]
-            # e.g. { testGateway: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
-
-        # a list of all endpoint groups from which to extract the name and UUID
-        endpointGroups = self.getEndpointGroups(netId)
-        # a dict for resolving endpoint group UUIDs by name
-        network['endpointGroupsByName'] = dict()
-        for group in endpointGroups:
-            network['endpointGroupsByName'][group['name']] = group['_links']['self']['href'].split('/')[-1]
-
-        # a list of all services from which to extract the name and UUID
-        services = self.getServices(netId)
-        # a dict for resolving service UUIDs by name
-        network['servicesByName'] = dict()
-        for svc in services:
-            network['servicesByName'][svc['name']] = svc['_links']['self']['href'].split('/')[-1]
-
-        # a list of all AppWAN objects from which to extract the name and UUID
-        appWans = self.getAppWans(netId)
-        # a dict for resolving AppWAN UUIDs by name
-        network['appWansByName'] = dict()
-        for appWan in appWans:
-            network['appWansByName'][appWan['name']] = appWan['_links']['self']['href'].split('/')[-1]
-
-        return(network)
 
     def getNetworkConfigMetadatas(self):
         """return the list of network config metadata which are required to create a network
@@ -308,7 +281,7 @@ class client(object):
 
         if http_code == requests.status_codes.codes.OK: # HTTP 200
             try:
-                networks = json.loads(response.text)['_embedded'][self.resources['embedded']]
+                networks = json.loads(response.text)['_embedded'][self.resources['networks']['embedded']]
             except KeyError:
                 networks = []
                 pass
@@ -364,20 +337,18 @@ class client(object):
         else:
             raise Exception("ERROR: failed to find exactly one match for {}".format(name))
 
-    def getNetwork(token,networkId):
+    def getNetwork(self,networkId):
         """return the network object
-            :token [required] the API access token
             :networkId [required] the UUID of the NF network
         """
         try:
             headers = { 
-                "authorization": "Bearer " + token 
+                "authorization": "Bearer " + self.token 
             }
             response = requests.get(
-                'https://gateway.'+MOPENV+'.netfoundry.io/core/v2/networks/'+networkId,
+                self.audience+'/core/v2/networks/'+networkId,
                 headers=headers
             )
-
             http_code = response.status_code
         except:
             raise
@@ -415,11 +386,10 @@ class client(object):
                 "sort": "name,asc"
             }
             response = requests.get(
-                'https://gateway.'+MOPENV+'.netfoundry.io/core/v2/'+type,
+                self.audience+'core/v2/'+type,
                 headers=headers,
                 params=params
             )
-
             http_code = response.status_code
         except:
             raise
@@ -445,17 +415,17 @@ class client(object):
             return([])
         # if there is one page of resources
         elif total_pages == 1:
-            return(resources['_embedded'][RESOURCETYPES[type]['embedded']])
+            return(resources['_embedded'][self.resources[type]['embedded']])
         # if there are multiple pages of resources
         else:
             # initialize the list with the first page of resources
-            all_pages = resources['_embedded'][RESOURCETYPES[type]['embedded']]
+            all_pages = resources['_embedded'][self.resources[type]['embedded']]
             # append the remaining pages of resources
             for page in range(1,total_pages):
                 try:
                     params["page"] = page
                     response = requests.get(
-                        'https://gateway.'+MOPENV+'.netfoundry.io/core/v2/'+type,
+                        self.audience+'/core/v2/'+type,
                         headers=headers,
                         params=params
                     )
@@ -466,7 +436,7 @@ class client(object):
                 if http_code == requests.status_codes.codes.OK: # HTTP 200
                     try:
                         resources = json.loads(response.text)
-                        all_pages += resources['_embedded'][RESOURCETYPES[type]['embedded']]
+                        all_pages += resources['_embedded'][self.resources[type]['embedded']]
                     except ValueError as e:
                         eprint('ERROR: failed to load resources object from GET response')
                         raise(e)
@@ -491,7 +461,7 @@ class client(object):
                 "authorization": "Bearer " + token 
             }
             response = requests.patch(
-                'https://gateway.'+MOPENV+'.netfoundry.io/core/v2/'+type+'/'+resource['id'],
+                self.audience+'/core/v2/'+type+'/'+resource['id'],
                 json={
                     'name': resource['name'],
                     'attributes': resource['attributes']
@@ -519,8 +489,6 @@ class client(object):
 
         return(updated)
 
-
-
     def post(self,
         method,
         json,
@@ -528,8 +496,6 @@ class client(object):
         """
         post arbitrary data as JSON to an API method
         """
-
-        request = json
 
         headers = {
             'Content-Type': 'application/json',
@@ -539,7 +505,7 @@ class client(object):
         try:
             response = requests.post(
                 self.audience+"core/v2"+method,
-                json=request,
+                json=json,
                 headers=headers,
                 proxies=self.proxies,
                 verify=self.verify
@@ -553,26 +519,24 @@ class client(object):
                 requests.status_codes._codes[http_code][0].upper(),
                 http_code)
             )
-
         text = response.text
-
         return(text)
 
-    def createNetwork(self, netGroup, name, region, version=None, wait=0, family="DVN"):
+    def createNetwork(self, netGroup, name, location='us-east-1', version=None, wait=0, netConfig="small"):
         """
-        create an NFN with
+        create a network with
         :param name: required network group short name
         :param name: required network name
-        :param region: required datacenter region name in which to create
-        :param version: optional product version string like 3.6.6.11043_2018-03-21_1434
+        :param location: required datacenter region name in which to create
+        :param version: optional product version string like 7.2.0-1234567
         :param wait: optional wait seconds for network to build before returning
-        :param family: optional product family "DVN" or "ZITI"
+        :param netConfig: optional network configuration metadata name e.g. "medium"
         """
         request = {
             "name": name,
-            "locationCode": region,
-            "productFamily": family,
-            "networkGroupId": self.networkGroupsByLabel[netGroup]
+            "locationCode": location,
+            "networkGroupId": self.networkGroupsByName[netGroup],
+            "networkConfigMetadataId": self.networkConfigMetadatasByName[netConfig]
         }
         if version:
             request['productVersion'] = version
@@ -602,7 +566,7 @@ class client(object):
                 )
             )
 
-        netId = json.loads(response.text)['_links']['self']['href'].split('/')[-1]
+        netId = json.loads(response.text)['id']
         # expected value is UUID
         UUID(netId, version=4) # validate the returned value is a UUID
 
