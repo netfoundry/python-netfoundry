@@ -1,12 +1,18 @@
 import netfoundry
 import os
-nfapi = netfoundry.client(
+
+Org = netfoundry.Organization(
     credentials=os.environ['HOME']+"/.netfoundry/credentials.json"#, proxy="http://localhost:4321"
 )
-netGroup = nfapi.networkGroups[0]['organizationShortName']
-netName = "BibbidiBobbidiBoo"
-if netName in nfapi.networksByName.keys():
-    print(nfapi.getNetworkByName(netName)['status'])
+# use the default Network Group (the first Network Group ID known to the Organization)
+NetworkGroup = netfoundry.NetworkGroup(Org.token, Org.networkGroupId)
+
+# create and use a Network
+netName = "BibbidiBobbidiBoo1"
+if netName in NetworkGroup.networksByName.keys():
+    NetworkGroup.waitForStatus("PROVISIONED","network",NetworkGroup.networksByName[netName],wait=999,progress=True)
+    Network = netfoundry.Network(Org.token, NetworkGroup.id, networkName=netName)
 else:
-    netId = nfapi.createNetwork(netGroup, netName)
-    print(nfapi.getNetwork(netId)['status'])
+    netId = NetworkGroup.createNetwork(netName,wait=999,progress=False)
+    Network = netfoundry.Network(Org.token, NetworkGroup.id, netId)
+print('{} is {}\n'.format(Network.name, Network.status))
