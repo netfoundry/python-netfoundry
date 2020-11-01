@@ -19,6 +19,7 @@ if netName in NetworkGroup.networksByName.keys():
     Network.waitForStatus("PROVISIONED",wait=999,progress=False)
     Network.deleteNetwork(wait=120)
     Network = netfoundry.Network(Session, networkName=netName)
+    Network.waitForStatus("DELETED",wait=33,progress=True)
 else:
     netId = NetworkGroup.createNetwork(netName,wait=999,progress=True)
     Network = netfoundry.Network(Session, networkId=netId)
