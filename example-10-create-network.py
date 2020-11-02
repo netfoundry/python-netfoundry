@@ -2,7 +2,7 @@ import netfoundry
 import os
 
 Session = netfoundry.Session(
-    credentials="/home/kbingham/.netfoundry/kentest-nfsales.json"#, proxy="http://localhost:4321"
+    credentials=os.environ['HOME']+"/.netfoundry/credentials.json"#, proxy="http://localhost:4321"
 )
 
 # yields a list of Network Groups in Organization.networkGroups[], but there's typically only one group
@@ -21,6 +21,7 @@ else:
     netId = NetworkGroup.createNetwork(netName)
     Network = netfoundry.Network(Session, networkId=netId)
     Network.waitForStatus("PROVISIONED",wait=999,progress=True)
+    Network = netfoundry.Network(Session, networkId=netId)
     laptop1 = Network.createEndpoint(name="laptop1",attributes=["#topSecret"])
     endpoints = Network.endpoints()
 print('{} is {}\n'.format(Network.name, Network.status))

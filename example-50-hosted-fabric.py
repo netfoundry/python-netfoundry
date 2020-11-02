@@ -13,7 +13,7 @@ Organization = netfoundry.Organization(Session)
 NetworkGroup = netfoundry.NetworkGroup(Organization)
 
 # create a Network
-netName = "BibbidiBobbidiBoo1"
+netName = "BibbidiBobbidiBoo2312"
 if netName in NetworkGroup.networksByName.keys():
     # use the Network
     Network = netfoundry.Network(Session, networkName=netName)
