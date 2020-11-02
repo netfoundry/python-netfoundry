@@ -16,8 +16,8 @@ netName = "BibbidiBobbidiBoo1"
 if netName in NetworkGroup.networksByName.keys():
     # use the Network
     Network = netfoundry.Network(Session, networkName=netName)
-    #Network.waitForStatus("PROVISIONED",wait=999,progress=True)
-    #laptop1 = Network.createEndpoint(name="laptop1",attributes=["#topSecret"])
+    Network.waitForStatus("PROVISIONED",wait=999,progress=True)
+    laptop1 = Network.createEndpoint(name="laptop1",attributes=["#topSecret"])
     endpoints = Network.endpoints()
 else:
     netId = NetworkGroup.createNetwork(netName)
@@ -26,4 +26,4 @@ else:
 print('{} is {}\n'.format(Network.name, Network.status))
 
 # delete the Network and wait for confirmation
-Network.deleteNetwork()
+#Network.deleteNetwork()
