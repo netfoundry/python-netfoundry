@@ -36,7 +36,7 @@ for region in MAJOR_REGIONS:
         FABRIC_PLACEMENTS += [choice]
 
 for location in FABRIC_PLACEMENTS:
-    Network.createEdgeRouter(
+    er = Network.createEdgeRouter(
         name=location['name'],
         attributes=[
             "#defaultRouters",
@@ -45,6 +45,10 @@ for location in FABRIC_PLACEMENTS:
         ],
         dataCenterId=location['id']
     )
+    print("INFO: Placed Edge Router in {major} ({locationName})".format(
+        major=location['majorRegion'],
+        locationName=location['name']
+    ))
 
 ERPs = Network.edgeRouterPolicies()
 DEFAULT_ERP_NAME = "defaultRouters"
