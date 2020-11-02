@@ -281,10 +281,14 @@ class NetworkGroup:
             self.networkConfigMetadatasByName[config['name']] = config['id']
             # e.g. { small: 2616da5c-4441-4c3d-a9a2-ed37262f2ef4 }
         self.dataCenters = self.getDataCenters()
-        self.dataCentersByRegion = dict()
+        self.dataCentersByLocationCode = dict()
         for dc in self.dataCenters:
-            self.dataCentersByRegion[dc['locationCode']] = dc['id']
+            self.dataCentersByLocationCode[dc['locationCode']] = dc['id']
             # e.g. { us-east-1: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
+
+        self.dataCentersByMajorRegion = dict()
+        for major in MAJOR_REGIONS['AWS'].keys():
+            self.dataCentersByMajorRegion[major] = [dc for dc in self.dataCenters if dc['provider'] == "AWS" and dc['locationName'] in MAJOR_REGIONS['AWS'][major]]
 
     def getNetworkConfigMetadatas(self):
         """return the list of network config metadata which are required to create a network
@@ -351,14 +355,48 @@ class NetworkGroup:
 
         return(dataCenters)
 
-    def createNetwork(self, name, netGroup=None, location="us-east-1", version=None, wait=0, netConfig="small", progress=False):
+    def getDataCenterByLocation(self, locationCode):
+        """return one dataCenter object
+        :param locationCode: required single location to fetch
+        """
+        try:
+            # dataCenters returns a list of dicts (datacenter objects)
+            headers = { "authorization": "Bearer " + self.session.token }
+            params = { "locationCode": locationCode }
+            response = requests.get(
+                self.session.audience+'rest/v1/dataCenters',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                params=params
+            )
+            http_code = response.status_code
+        except:
+            raise
+
+        if http_code == requests.status_codes.codes.OK: # HTTP 200
+            try:
+                dataCenter = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR getting dataCenter')
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        return(dataCenter)
+
+    def createNetwork(self, name, netGroup=None, location="us-east-1", version=None, netConfig="small"):
         """
         create a network with
         :param name: required network name
         :param netGroup: optional Network Group short name
         :param location: optional datacenter region name in which to create
         :param version: optional product version string like 7.2.0-1234567
-        :param wait: optional wait seconds for network to build before returning
         :param netConfig: optional network configuration metadata name e.g. "medium"
         """
         request = {
@@ -391,7 +429,7 @@ class NetworkGroup:
         except:
             raise
 
-        if not http_code == requests.status_codes.codes.ACCEPTED:
+        if not http_code == requests.status_codes.codes[RESOURCES['networks']['expect']]:
             raise Exception(
                 'unexpected response: {} (HTTP {:d})'.format(
                     requests.status_codes._codes[http_code][0].upper(),
@@ -403,18 +441,44 @@ class NetworkGroup:
         # expected value is UUID
         UUID(netId, version=4) # validate the returned value is a UUID
 
-        if not wait == 0:
-            try:
-                self.waitForStatus(
-                    expect='PROVISIONED',
-                    type='network',
-                    wait=wait,
-                    progress=progress)
-            except:
-                raise
-
         return(netId)
 
+    def deleteNetwork(self, networkId=None, networkName=None):
+        """
+        delete a Network
+        :param id: optional Network UUID to delete
+        :param name: optional Network name to delete
+        """
+        try:
+            if networkId:
+                networkName = [ net['name'] for net in self.networksByName if net['id'] == networkId ][0]
+            elif networkName and networkName in self.networksByName.keys():
+                networkId = self.networksByName[networkName]
+        except:
+            raise Exception("ERROR: need one of networkId or networkName for a Network in this Network Group: {:s}".format(self.name))
+
+        try:
+            headers = { "authorization": "Bearer " + self.session.token }
+            entityUrl = self.session.audience+'core/v2/networks/'+networkId
+            response = requests.delete(
+                entityUrl,
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers
+            )
+            http_code = response.status_code
+        except:
+            raise
+
+        if not http_code == requests.status_codes.codes.ACCEPTED:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        return(True)
 class Network:
     """describe and use a Network
     """
@@ -457,8 +521,14 @@ class Network:
     def services(self):
         return(self.getResources("services"))
 
-    def deleteNetwork(self,wait=120):
-        self.deleteResource("network",wait)
+    def edgeRouterPolicies(self):
+        return(self.getResources("edge-router-policies"))
+
+    def appWans(self):
+        return(self.getResources("app-wans"))
+
+    def deleteNetwork(self,wait=300,progress=True):
+        self.deleteResource(type="network",wait=wait,progress=progress)
 #        raise Exception("ERROR: failed to delete Network {:s}".format(self.name))
 
     def getResources(self,type):
@@ -542,6 +612,135 @@ class Network:
                         )
                     )
             return(all_pages)
+
+    def createEndpoint(self, name, attributes=[]):
+        """create an Endpoint
+        """
+        try:
+            headers = { 
+                "authorization": "Bearer " + self.session.token 
+            }
+            for role in attributes:
+                if not role[0:1] == '#':
+                    raise Exception("ERROR: hashtag role attributes on an Endpoint must begin with #")
+            body = {
+                "networkId": self.id,
+                "name": name,
+                "attributes": attributes,
+                "enrollmentMethod": { "ott": True }
+            }
+            response = requests.post(
+                self.session.audience+'core/v2/endpoints',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                json=body
+            )
+            http_code = response.status_code
+        except:
+            raise
+        if http_code == requests.status_codes.codes.OK: # HTTP 200 (synchronous fulfillment)
+            try:
+                endpoint = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load {:s} object from POST response'.format("Endpoint"))
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        return(endpoint)
+
+    def createEdgeRouter(self, name, attributes=[], linkListener=False, dataCenterId=None):
+        """create an Edge Router
+        """
+        try:
+            headers = { 
+                "authorization": "Bearer " + self.session.token 
+            }
+            for role in attributes:
+                if not role[0:1] == '#':
+                    raise Exception("ERROR: hashtag role attributes on an Endpoint must begin with #")
+            body = {
+                "networkId": self.id,
+                "name": name,
+                "attributes": attributes,
+                "linkListener": linkListener
+            }
+            if dataCenterId:
+                body['dataCenterId'] = dataCenterId
+                body['linkListener'] = True
+            response = requests.post(
+                self.session.audience+'core/v2/edge-routers',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                json=body
+            )
+            http_code = response.status_code
+        except:
+            raise
+        if http_code == requests.status_codes.codes[RESOURCES['edge-routers']['expect']]:
+            try:
+                router = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load {:s} object from POST response'.format("Edge Router"))
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        return(router)
+
+    def createEdgeRouterPolicy(self, name, endpointAttributes=[], edgeRouterAttributes=[]):
+        """create an Edge Router Policy
+        """
+        try:
+            headers = { 
+                "authorization": "Bearer " + self.session.token 
+            }
+            for role in endpointAttributes+edgeRouterAttributes:
+                if not re.match('^[#@]', role):
+                    raise Exception("ERROR: role attributes on a policy must begin with # or @")
+            body = {
+                "networkId": self.id,
+                "name": name,
+                "endpointAttributes": endpointAttributes,
+                "edgeRouterAttributes": edgeRouterAttributes
+            }
+            response = requests.post(
+                self.session.audience+'core/v2/edge-router-policies',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                json=body
+            )
+            http_code = response.status_code
+        except:
+            raise
+        if http_code == requests.status_codes.codes[RESOURCES['edge-router-policies']['expect']]:
+            try:
+                policy = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load {:s} object from POST response'.format("Edge Router Policy"))
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        return(policy)
 
     def getNetworkByName(self,name):
         """return exactly one network object
@@ -742,7 +941,7 @@ class Network:
             'name': name
         }
 
-    def deleteResource(self, type, id=None, wait=0):
+    def deleteResource(self, type, id=None, wait=int(0), progress=False):
         """
         delete a resource
         :param type: required entity type to delete i.e. network, endpoint, service, edge-router
@@ -778,10 +977,11 @@ class Network:
         if not wait == 0:
             try:
                 self.waitForStatus(
-                    status='DELETED',
-                    type='endpoint',
-                    id=endpointId,
-                    wait=wait
+                    expect='DELETED',
+                    type=type,
+                    id=self.id if type == 'network' else id,
+                    wait=wait,
+                    progress=progress
                 )
             except:
                 raise
@@ -838,6 +1038,10 @@ RESOURCES = {
         'embedded': "edgeRouterList",
         'expect': "ACCEPTED"
     },
+    'edge-router-policies': {
+        'embedded': "edgeRouterPolicyList",
+        'expect': "ACCEPTED"
+    },
     'services': {
         'embedded': "serviceList",
         'expect': "ACCEPTED"
@@ -845,47 +1049,11 @@ RESOURCES = {
 }
 
 # TODO: [MOP-13441] associate locations with a short list of major regions / continents
-"""
-self.locationsByContinent = {
-    "Americas": ("Canada Central","Oregon","Virginia"),
-    "EuropeMiddleEastAfrica": ("Frankfurt","London"),
-    "AsiaPacific": ("Hong Kong","Jakarta","Mumbai","Seoul","Singapore","Sydney","Tokyo")
+MAJOR_REGIONS = {
+    "AWS" : {
+        "Americas": ("Canada Central","N. California","N. Virginia","Ohio","Oregon","Sao Paulo"),
+        "EuropeMiddleEastAfrica": ("Bahrain","Cape Town South Africa","Frankfurt","Ireland","London","Milan","Paris","Stockholm"),
+        "AsiaPacific": ("Hong Kong","Mumbai","Seoul","Singapore","Sydney","Tokyo")
+    }
 }
-"""
 
-
-
-def getDataCenterByLocation(self, locationCode):
-    """return one dataCenter object
-    :param locationCode: required single location to fetch
-    """
-    try:
-        # dataCenters returns a list of dicts (datacenter objects)
-        headers = { "authorization": "Bearer " + self.token }
-        params = { "locationCode": locationCode }
-        response = requests.get(
-            self.audience+'rest/v1/dataCenters',
-            proxies=self.proxies,
-            verify=self.verify,
-            headers=headers,
-            params=params
-        )
-        http_code = response.status_code
-    except:
-        raise
-
-    if http_code == requests.status_codes.codes.OK: # HTTP 200
-        try:
-            dataCenter = json.loads(response.text)
-        except ValueError as e:
-            eprint('ERROR getting dataCenter')
-            raise(e)
-    else:
-        raise Exception(
-            'unexpected response: {} (HTTP {:d})'.format(
-                requests.status_codes._codes[http_code][0].upper(),
-                http_code
-            )
-        )
-
-    return(dataCenter)

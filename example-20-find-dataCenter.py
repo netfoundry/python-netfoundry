@@ -1,5 +1,6 @@
 import netfoundry
 import os
+import random
 
 Session = netfoundry.Session(
     credentials=os.environ['HOME']+"/.netfoundry/credentials.json"#, proxy="http://localhost:4321"
@@ -16,13 +17,15 @@ netName = "BibbidiBobbidiBoo1"
 if netName in NetworkGroup.networksByName.keys():
     # use the Network
     Network = netfoundry.Network(Session, networkName=netName)
-    Network.waitForStatus("PROVISIONED",wait=999,progress=False)
-    Network.deleteNetwork(wait=120)
-    Network = netfoundry.Network(Session, networkName=netName)
-    Network.waitForStatus("DELETED",wait=33,progress=True)
 else:
-    netId = NetworkGroup.createNetwork(netName,wait=999,progress=True)
-    Network = netfoundry.Network(Session, networkId=netId)
-print('{} is {}\n'.format(Network.name, Network.status))
+    raise Exception("ERROR: missing Network: {:s}".format(netName))
+#print('{} is {}\n'.format(Network.name, Network.status))
 
 # a list of places where Endpoints or Services or both are located
+PLACES = ("Americas", "EuropeMiddleEastAfrica")
+DATACENTERS = list()
+print('Datacenters:')
+for place in PLACES:
+    dc = random.choice(NetworkGroup.dataCentersByMajorRegion[place])
+    DATACENTERS += dc
+    print('\t{:s}: {:s}'.format(place, dc['locationCode']))
