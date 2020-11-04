@@ -32,6 +32,8 @@ for region in MAJOR_REGIONS:
     existing_count = len([er for er in EDGE_ROUTERS if er['dataCenterId'] in dataCenterIds])
     if existing_count < DESIRED_COUNT:
         choice = random.choice(NetworkGroup.dataCentersByMajorRegion[region])
+        # append the current major region to the randomly-chosen dataCenter object
+        #   so we can use it as a role attribute when we create the hosted Edge Router
         choice['majorRegion'] = region
         FABRIC_PLACEMENTS += [choice]
 
