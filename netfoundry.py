@@ -536,7 +536,7 @@ class Network:
             :type [required] one of endpoints, edge-routers, services
         """
         try:
-            headers = { 
+            headers = {
                 "authorization": "Bearer " + self.session.token 
             }
             params = {
@@ -741,6 +741,121 @@ class Network:
             )
 
         return(policy)
+
+    def createService(self, name: str, clientHostName: str, clientPortRange: int, serverHostName: str, 
+        serverPortRange: int, serverProtocol: str="TCP", attributes: list=[], edgeRouterAttributes: list=[], 
+        egressRouterId: str=None, endpoints: list=[], encryptionRequired: bool=True):
+        """create a Service
+        """
+        try:
+            headers = { 
+                "authorization": "Bearer " + self.session.token 
+            }
+            for role in attributes:
+                if not role[0:1] == '#':
+                    raise Exception("ERROR: hashtag role attributes on an Endpoint must begin with #")
+            body = {
+                "networkId": self.id,
+                "name": name,
+                "attributes": attributes,
+                "clientHostname": clientHostName,
+                "clientPortRange": clientPortRange,
+                "serverHostName": serverHostName,
+                "serverPortRange": serverPortRange,
+                "serverProtocol": serverProtocol,
+                "encryptionRequired": encryptionRequired
+            }
+            # resolve exit hosting params
+            if egressRouterId and endpoints:
+                raise Exception("ERROR: specify only one of egressRouterId or endpoints to host the exit for this Service")
+            elif endpoints:
+                body['endpoints'] = endpoints
+            elif egressRouterId:
+                body['egressRouterId'] = egressRouterId
+
+            # resolve Edge Router param
+            if edgeRouterAttributes:
+                eprint("WARN: overriding default Service Edge Router Policy #all for new Service {:s}".format(name))
+                body['edgeRouterAttributes'] = edgeRouterAttributes
+
+            response = requests.post(
+                self.session.audience+'core/v2/services',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                json=body
+            )
+            http_code = response.status_code
+        except:
+            raise
+        if http_code == requests.status_codes.codes[RESOURCES['services']['expect']]:
+            try:
+                service = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load {:s} object from POST response'.format("Service"))
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        return(service)
+
+    def createAppWan(self, name: str, endpointAttributes: list=[], serviceAttributes: list=[], postureCheckAttributes: list=[]):
+        """create an AppWAN
+        """
+        try:
+            headers = { 
+                "authorization": "Bearer " + self.session.token 
+            }
+            for role in endpointAttributes+serviceAttributes+postureCheckAttributes:
+                if not re.match('^[#@]', role):
+                    raise Exception("ERROR: role attributes on an AppWAN must begin with # or @")
+            body = {
+                "networkId": self.id,
+                "name": name,
+                "endpointAttributes": endpointAttributes,
+                "serviceAttributes": serviceAttributes,
+                "postureCheckAttributes": postureCheckAttributes
+            }
+
+            response = requests.post(
+                self.session.audience+'core/v2/app-wans',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                json=body
+            )
+            http_code = response.status_code
+        except:
+            raise
+        if http_code == requests.status_codes.codes[RESOURCES['app-wans']['expect']]:
+            try:
+                appwan = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load {:s} object from POST response'.format("AppWAN"))
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        return(appwan)
+
+
+
+
+
+
+
+
+
 
     def getNetworkByName(self,name):
         """return exactly one network object
@@ -1042,9 +1157,13 @@ RESOURCES = {
         'embedded': "edgeRouterPolicyList",
         'expect': "ACCEPTED"
     },
+    'app-wans': {
+        'embedded': "appWanList",
+        'expect': "OK"
+    },
     'services': {
         'embedded': "serviceList",
-        'expect': "ACCEPTED"
+        'expect': "OK"
     }
 }
 

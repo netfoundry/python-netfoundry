@@ -22,8 +22,6 @@ else:
     Network = netfoundry.Network(Session, networkId=netId)
     Network.waitForStatus("PROVISIONED",wait=999,progress=True)
     Network = netfoundry.Network(Session, networkId=netId)
-    laptop1 = Network.createEndpoint(name="laptop1",attributes=["#topSecret"])
-    endpoints = Network.endpoints()
 print('{} is {}\n'.format(Network.name, Network.status))
 
 # delete the Network and wait for confirmation

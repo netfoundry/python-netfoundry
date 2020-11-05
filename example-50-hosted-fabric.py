@@ -52,6 +52,7 @@ for location in FABRIC_PLACEMENTS:
         locationName=location['name']
     ))
 
+# create a simple global Edge Router Policy unless one exists with the same name
 ERPs = Network.edgeRouterPolicies()
 DEFAULT_ERP_NAME = "defaultRouters"
 if not DEFAULT_ERP_NAME in [erp['name'] for erp in ERPs]:
