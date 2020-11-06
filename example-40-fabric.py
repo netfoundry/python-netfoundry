@@ -36,6 +36,8 @@ for region in MAJOR_REGIONS:
         #   so we can use it as a role attribute when we create the hosted Edge Router
         choice['majorRegion'] = region
         FABRIC_PLACEMENTS += [choice]
+    else:
+        print("INFO: found at least {count} Edge Router(s) in {major}".format(count=DESIRED_COUNT, major=region))
 
 for location in FABRIC_PLACEMENTS:
     er = Network.createEdgeRouter(

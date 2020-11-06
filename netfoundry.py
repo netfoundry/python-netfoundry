@@ -758,7 +758,7 @@ class Network:
                 "networkId": self.id,
                 "name": name,
                 "attributes": attributes,
-                "clientHostname": clientHostName,
+                "clientHostName": clientHostName,
                 "clientPortRange": clientPortRange,
                 "serverHostName": serverHostName,
                 "serverPortRange": serverPortRange,

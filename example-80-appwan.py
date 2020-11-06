@@ -1,6 +1,5 @@
 import netfoundry
 import os
-import random
 
 Session = netfoundry.Session(
     credentials=os.environ['HOME']+"/.netfoundry/credentials.json"#, proxy="http://localhost:4321"
@@ -20,27 +19,17 @@ if netName in NetworkGroup.networksByName.keys():
 else:
     raise Exception("ERROR: missing Network: {:s}".format(netName))
 
+# check Endpoint exit1 exists
 ENDPOINTS = Network.endpoints()
-DIALER1_NAME = "dialer1"
-if not DIALER1_NAME in [end['name'] for end in ENDPOINTS]:
-    # create an Endpoint for the dialing device that will access Services
-    DIALER1 = Network.createEndpoint(name=DIALER1_NAME,attributes=["#dialers"])
-    print("INFO: created Endpoint {:s}".format(DIALER1['name']))
-else:
-    DIALER1 = [end for end in ENDPOINTS if end['name'] == DIALER1_NAME][0]
-    print("INFO: found Endpoint {:s}".format(DIALER1['name']))
-
 EXIT1_NAME = "exit1"
 if not EXIT1_NAME in [end['name'] for end in ENDPOINTS]:
-    # create an Endpoint for the hosting device that will provide access to the server
-    EXIT1 = Network.createEndpoint(name=EXIT1_NAME,attributes=["#exits"])
-    print("INFO: created Endpoint {:s}".format(EXIT1['name']))
+    raise Exception("ERROR: missing Endpoint {:s}".format(EXIT1_NAME))
 else:
     EXIT1 = [end for end in ENDPOINTS if end['name'] == EXIT1_NAME][0]
-    print("INFO: found Endpoint {:s}".format(EXIT1['name']))
+#    print("INFO: found Endpoint {:s}".format(EXIT1['name']))
 
-# create Service unless name exists
-HELLO1_NAME = "helloService1"
+# create Services unless name exists
+HELLO1_NAME = "hello Service"
 SERVICES = Network.services()
 if not HELLO1_NAME in [svc['name'] for svc in SERVICES]:
     # traffic sent to hello.netfoundry:80 leaves Endpoint exit1 to server hello:3000
@@ -58,6 +47,43 @@ if not HELLO1_NAME in [svc['name'] for svc in SERVICES]:
 else:
     HELLO1 = [svc for svc in SERVICES if svc['name'] == HELLO1_NAME][0]
     print("INFO: found Service {:s}".format(HELLO1['name']))
+
+SPEED1_NAME = "speedtest Service"
+if not SPEED1_NAME in [svc['name'] for svc in SERVICES]:
+    # traffic sent to speedtest.netfoundry:80 leaves Endpoint exit1 to server speedtest:8080
+    SPEED1 = Network.createService(
+        name=SPEED1_NAME,
+        attributes=["#welcomeWagon"],
+        clientHostName="speedtest.netfoundry",
+        clientPortRange="80",
+        endpoints=[EXIT1['id']],
+        serverHostName="speedtest",
+        serverPortRange="8080",
+        serverProtocol="TCP"
+    )
+    print("INFO: created Service {:s}".format(SPEED1['name']))
+else:
+    SPEED1 = [svc for svc in SERVICES if svc['name'] == SPEED1_NAME][0]
+    print("INFO: found Service {:s}".format(SPEED1['name']))
+
+HTTPBIN1_NAME = "httpbin Service"
+if not HTTPBIN1_NAME in [svc['name'] for svc in SERVICES]:
+    # traffic sent to speedtest.netfoundry:80 leaves Endpoint exit1 to server speedtest:8080
+    HTTPBIN1 = Network.createService(
+        name=HTTPBIN1_NAME,
+        attributes=["#welcomeWagon"],
+        clientHostName="httpbin.netfoundry",
+        clientPortRange="80",
+        endpoints=[EXIT1['id']],
+        serverHostName="httpbin",
+        serverPortRange="80",
+        serverProtocol="TCP"
+    )
+    print("INFO: created Service {:s}".format(HTTPBIN1['name']))
+else:
+    HTTPBIN1 = [svc for svc in SERVICES if svc['name'] == HTTPBIN1_NAME][0]
+    print("INFO: found Service {:s}".format(HTTPBIN1['name']))
+
 
 # create unless exists
 WELCOMEWAN1_NAME = "Welcome"
