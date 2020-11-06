@@ -1,66 +1,43 @@
-"""classes for interacting with the NetFoundry Management Operations Platform (MOP)
+""" Interface to NetFoundry API
 """
-from __future__ import print_function # use print from python3 for stdout, stderr
-import sys # open stderr
-import json # operate on structured data
-import requests # HTTP user agent
+import sys                  # open stderr
+import json                 # 
+import requests             # HTTP user agent will not emit server cert warnings if verify=False
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
-import time # enforce a timeout; sleep
-import uuid # generate a UUID as a businessKey if it is not provided
-from uuid import UUID # validate UUIDv4 strings
-import jwt # decode the JWT claimset to extract the organization UUID
+import re                   # regex
+import time                 # enforce a timeout; sleep
+from uuid import UUID       # validate UUIDv4 strings
+import jwt                  # decode the JWT claimset
+from pathlib import Path    #
 
-def eprint(*args, **kwargs):
-    print(*args, file=sys.stderr, **kwargs)
-
-class nfapi(object):
-    """interact with API gateways
+class Session:
+    """ Use an API account from a credentials file as described in https://developer.netfoundry.io/v2/guides/authentication/
+    Example credentials file:
+    {
+        "cliid": "3tcm6to3qqfu78juj9huppk9g3",
+        "password": "149a7ksfj3t5lstg0pesun69m1l4k91d6h8m779l43q0ekekr782",
+        "authenticationUrl": "https://netfoundry-production-xfjiye.auth.us-east-1.amazoncognito.com/oauth2/token"
+    }
     """
 
-    def __init__(self):
-        self.authEndpoints = {
-            'localhost': 'https://netfoundry-sandbox.auth0.com/oauth/token',
-            'sandbox': 'https://netfoundry-sandbox.auth0.com/oauth/token',
-            'integration': 'https://netfoundry-integration.auth0.com/oauth/token',
-            'staging': 'https://netfoundry-staging.auth0.com/oauth/token',
-            'trial': 'https://netfoundry-trial.auth0.com/oauth/token',
-            'private': 'https://netfoundry-private.auth0.com/oauth/token',
-            'production': 'https://netfoundry-production.auth0.com/oauth/token'
-        }
-
-        self.statusesByCode = {
-            100: ('new', 'created'),
-            200: ('building', 'incomplete', 'allocated'),
-            300: ('active', 'complete', 'provisioned'),
-            400: ('registered', 'enrolled'),
-            500: ('error', 'server_error'),
-            600: ('updating', 'modifying'),
-            800: ('deleting', 'released', 'decommissioned'),
-            900: ('defunct', 'deleted')
-        }
-
-        self.codes = LookupDict(name='statuses')
-
-        for code, titles in self.statusesByCode.items():
-            for title in titles:
-                setattr(self.codes, title.upper(), code)
-
-    def client(self, auth, proxy=None):
-        """initialize with a reusable MOP API gateway connector object
-        where
-        :param auth: required authorization bearer token
+    def __init__(
+        self, 
+        token=None, 
+        credentials=str(Path.home())+"/.netfoundry/credentials.json", 
+        proxy=None):
+        """initialize with a reusable API client
+        :param token: optional temporary API bearer/session token
+        :param credentials: optional alternative path to API account credentials file
         :param proxy: optional HTTP proxy, e.g., http://localhost:8080
         The init function also gathers a few essential objects from the API and
         stores them for reuse in the instance namespace
         """
 
-        self.jwtClaim = jwt.decode(auth,verify=False)
-        self.aud = self.jwtClaim['aud']
-        self.tenant = self.jwtClaim['https://netfoundry.io/tenant/label']
-        self.auth = auth
+        # persist the credentials filename in instances so that it may be used to refresh the token
+        self.credentials = credentials
 
-        # forward request to proxy if defined
+        # verify auth endpoint's server certificate if proxy is type SOCKS or None
         if proxy == None:
             self.proxies = dict()
             self.verify = True
@@ -69,89 +46,109 @@ class nfapi(object):
                 'http': proxy,
                 'https': proxy
             }
-            # verify server certificate if proxy is type SOCKS
             if proxy[0:5] == 'socks':
                 self.verify = True
             else:
                 self.verify = False
+        
+        if token:
+            claim = jwt.decode(token,verify=False)
+            # TODO: [MOP-13438] auto-renew token when near expiry (now+1hour in epoch seconds)
+            expiry = claim['exp']
+            epoch = time.time()
+            # extract the API URL from the claim
+            self.audience = claim['scope'].replace('/ignore-scope','')
+            # e.g. https://gateway.production.netfoundry.io/
 
-        self.datacenters = self.getDataCenters()
-        self.datacentersByRegion = dict()
-        for dc in self.datacenters:
-            self.datacentersByRegion[dc['locationCode']] = dc['_links']['self']['href'].split('/')[-1]
-            # e.g. { us-east-1: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
+        # if no token or near expiry then use credentials to obtain a token
+        if token and epoch < (expiry - 600):
+            self.token = token
+        else:
+            with open(self.credentials) as f:
+                account = json.load(f)
+            tokenEndpoint = account['authenticationUrl']
+            clientId = account['clientId']
+            password = account['password']
+            # extract the environment name from the authorization URL aka token API endpoint
+            self.environment = re.sub(r'https://netfoundry-([^-]+)-.*', r'\1', tokenEndpoint, re.IGNORECASE)
+            # re: scope: we're not using scopes with Cognito, but a non-empty value is required;
+            #  hence "/ignore-scope"
+            scope = "https://gateway."+self.environment+".netfoundry.io//ignore-scope"
+            # we can gather the URL of the API from the first part of the scope string by
+            #  dropping the scope suffix
+            self.audience = scope.replace('/ignore-scope','')
+            # e.g. https://gateway.production.netfoundry.io/
+            assertion = {
+                "scope": scope,
+                "grant_type": "client_credentials"
+            }
+            # request a token
+            try:
+                response = requests.post(
+                    tokenEndpoint,
+                    auth=(clientId, password),
+                    data=assertion,
+                    verify=self.verify,
+                    proxies=self.proxies)
+                responseCode = response.status_code
+            except:
+                eprint(
+                    'ERROR: failed to contact the authentication endpoint: {}'.format(self.tokenEndpoint)
+                )
+                raise
 
-        self.georegions = self.getGeoRegions()
-        self.geoRegionsByName = dict()
-        for gr in self.georegions:
-            self.geoRegionsByName[gr['name']] = gr['_links']['self']['href'].split('/')[-1]
-            # e.g. { us-east-1: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
+            if responseCode == requests.status_codes.codes.OK:
+                try:
+                    tokenText = json.loads(response.text)
+                    self.token = tokenText['access_token']
+                except:
+                    raise Exception(
+                        'ERROR: failed to find an access_token in the response and instead got: {}'.format(
+                            response.text
+                        )
+                    )
+            else:
+                raise Exception(
+                    'ERROR: got unexpected HTTP response {} ({:d})'.format(
+                        requests.status_codes._codes[responseCode][0].upper(),
+                        responseCode
+                    )
+                )
 
-        # an attribute that is a dict for resolving network UUIDs by name
-        self.networksByName = dict()
-        for net in self.getNetworks():
-            self.networksByName[net['name']] = net['_links']['self']['href'].split('/')[-1]
-            # e.g. { testNetwork: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
+class Organization:
+    """ Use an organization
+    """
 
-    def walkNetwork(self, netId):
-        """return an object to serve as a lookup dict for the various resources associated with a NF network where
-        :param netId: required UUID of NF network to walk
-        """
+    def __init__(self, Session):
+        self.session = Session
+        # always resolve Network Groups so we can specify either name or ID when calling super()
+        self.networkGroups = self.getNetworkGroups()
+        self.networkGroupsByName = dict()
+        for ng in self.networkGroups:
+            self.networkGroupsByName[ng['organizationShortName']] = ng['id']
+            # e.g. { NFADMIN: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
 
-        network = dict()
-
-        # a list of all endpoint objects from which to extract the name and UUID
-        endpoints = self.getEndpoints(netId)
-        # a dict for resolving endpoint UUIDs by name
-        network['endpointsByName'] = dict()
-        for end in endpoints:
-            network['endpointsByName'][end['name']] = end['_links']['self']['href'].split('/')[-1]
-            # e.g. { testGateway: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
-
-        # a list of all endpoint groups from which to extract the name and UUID
-        endpointGroups = self.getEndpointGroups(netId)
-        # a dict for resolving endpoint group UUIDs by name
-        network['endpointGroupsByName'] = dict()
-        for group in endpointGroups:
-            network['endpointGroupsByName'][group['name']] = group['_links']['self']['href'].split('/')[-1]
-
-        # a list of all services from which to extract the name and UUID
-        services = self.getServices(netId)
-        # a dict for resolving service UUIDs by name
-        network['servicesByName'] = dict()
-        for svc in services:
-            network['servicesByName'][svc['name']] = svc['_links']['self']['href'].split('/')[-1]
-
-        # a list of all AppWAN objects from which to extract the name and UUID
-        appWans = self.getAppWans(netId)
-        # a dict for resolving AppWAN UUIDs by name
-        network['appWansByName'] = dict()
-        for appWan in appWans:
-            network['appWansByName'][appWan['name']] = appWan['_links']['self']['href'].split('/')[-1]
-
-        return(network)
-
-    def getDataCenters(self):
-        """return the dataCenters object
+    def getNetworkGroups(self):
+        """return the Network Groups object (formerly "organizations")
         """
         try:
-            # dataCenters returns a list of dicts (datacenter objects)
-            headers = { "authorization": "Bearer " + self.auth }
-            response = requests.get(self.aud+'rest/v1/dataCenters',
-                                    proxies=self.proxies,
-                                    verify=self.verify,
-                                    headers=headers
-                                   )
-
+            # /network-groups returns a list of dicts (Network Group objects)
+            headers = { "authorization": "Bearer " + self.session.token }
+            response = requests.get(
+                self.session.audience+'rest/v1/network-groups',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers
+            )
             http_code = response.status_code
         except:
             raise
 
         if http_code == requests.status_codes.codes.OK: # HTTP 200
             try:
-                datacenters = json.loads(response.text)['_embedded']['dataCenters']
+                networkGroups = json.loads(response.text)['_embedded']['organizations']
             except ValueError as e:
-                eprint('ERROR getting datacenters')
+                eprint('ERROR getting Network Groups')
                 raise(e)
         else:
             raise Exception(
@@ -161,62 +158,29 @@ class nfapi(object):
                 )
             )
 
-        return(datacenters)
+        return(networkGroups)
 
-    def getGeoRegions(self):
-        """return the geoRegions object
+    def getNetworksByOrganization(self):
         """
-        try:
-            # dataCenters returns a list of dicts (datacenter objects)
-            headers = { "authorization": "Bearer " + self.auth }
-            response = requests.get(self.aud+'rest/v1/geoRegions',
-                                    proxies=self.proxies,
-                                    verify=self.verify,
-                                    headers=headers
-                                   )
-
-            http_code = response.status_code
-        except:
-            raise
-
-        if http_code == requests.status_codes.codes.OK: # HTTP 200
-            try:
-                geoRegions = json.loads(response.text)['_embedded']['geoRegions']
-            except ValueError as e:
-                eprint('ERROR getting geo regions')
-                raise(e)
-        else:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        return(geoRegions)
-
-    def getNetworks(self):
-        """
-        return the networks for a particular organization
+        return all networks in this Network Group
         """
 
         try:
             # returns a list of dicts (network objects)
-            headers = { "authorization": "Bearer " + self.auth }
+            headers = { "authorization": "Bearer " + self.session.token }
             response = requests.get(
-                self.aud+'rest/v1/networks',
-                                    proxies=self.proxies,
-                                    verify=self.verify,
-                                    headers=headers
-                                   )
-
+                self.session.audience+'core/v2/networks',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers
+            )
             http_code = response.status_code
         except:
             raise
 
         if http_code == requests.status_codes.codes.OK: # HTTP 200
             try:
-                networks = json.loads(response.text)['_embedded']['networks']
+                networks = json.loads(response.text)['_embedded'][RESOURCES['networks']['embedded']]
             except KeyError:
                 networks = []
                 pass
@@ -230,28 +194,34 @@ class nfapi(object):
 
         return(networks)
 
-    def getEndpoints(self, netId):
-        """
-        return the endpoints as an object
+    def getNetworksByGroup(self,networkGroupId):
+        """return list of network objects
+            :param networkGroupId: required network group UUID
         """
         try:
-            # returns a list of dicts (network objects)
-            headers = { "authorization": "Bearer " + self.auth }
-            response = requests.get(self.aud+'rest/v1/networks/'+netId+'/endpoints',
-                                    proxies=self.proxies,
-                                    verify=self.verify,
-                                    headers=headers
-                                   )
-
+            headers = { 
+                "authorization": "Bearer " + self.session.token 
+            }
+            params = {
+                "findByNetworkGroupId": networkGroupId
+            }
+            response = requests.get(
+                self.session.audience+'/core/v2/networks',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                params=params
+            )
             http_code = response.status_code
         except:
             raise
 
         if http_code == requests.status_codes.codes.OK: # HTTP 200
             try:
-                endpoints = json.loads(response.text)['_embedded']['endpoints']
+                embedded = json.loads(response.text)
+                networks = embedded['_embedded'][RESOURCES['networks']['embedded']]
             except KeyError:
-                endpoints = []
+                networks = []
                 pass
         else:
             raise Exception(
@@ -261,20 +231,76 @@ class nfapi(object):
                 )
             )
 
-        return(endpoints)
 
-    def getEndpoint(self, netId, endpointId):
-        """
-        return the endpoint as an object
+        return(networks)
+
+class NetworkGroup:
+    """use a Network Group by name or ID or the first group in the organization
+    """
+    def __init__(self, Organization, networkGroupId=None, networkGroupName=None):
+        if networkGroupId:
+            self.networkGroupId = networkGroupId
+            self.networkGroupName = [ ng['organizationShortName'] for ng in Organization.networkGroups if ng['id'] == networkGroupId ][0]
+        # TODO: review the use of org short name ref https://netfoundry.slack.com/archives/C45UDKR8V/p1603655594135000?thread_ts=1580318187.149400&cid=C45UDKR8V
+        elif networkGroupName:
+            self.networkGroupName = networkGroupName
+            self.networkGroupId = [ ng['id'] for ng in Organization.networkGroups if ng['organizationShortName'] == networkGroupName ][0]
+        elif len(Organization.networkGroups) > 0:
+            # first Network Group is typically the only Network Group
+            self.networkGroupId = Organization.networkGroups[0]['id']
+            self.networkGroupName = Organization.networkGroups[0]['organizationShortName']
+            # warn if there are other groups
+            if len(Organization.networkGroups) > 1:
+                eprint("WARN: Using first Network Group {:s} and ignoring {:d} other(s) e.g. {:s}, etc...".format(
+                    self.networkGroupName,
+                    len(Organization.networkGroups) - 1,
+                    Organization.networkGroups[1]['organizationShortName']
+                ))
+            elif len(Organization.networkGroups) == 1:
+                eprint("WARN: Using the default Network Group: {:s}".format(
+                    self.networkGroupName
+                ))
+        else:
+            raise Exception("ERROR: need at least one Network Group in organization")
+
+        self.session = Organization.session
+        self.id = self.networkGroupId
+        self.name = self.networkGroupName
+
+        # an attribute that is a dict for resolving network UUIDs by name
+        self.networksByName = dict()
+        for net in Organization.getNetworksByGroup(self.networkGroupId):
+            self.networksByName[net['name']] = net['id']
+        self.id = self.networkGroupId
+        self.name = self.networkGroupName
+
+        #inventory of infrequently-changing assets: configs, dataCenters
+        self.networkConfigMetadatas = self.getNetworkConfigMetadatas()
+        self.networkConfigMetadatasByName = dict()
+        for config in self.networkConfigMetadatas:
+            self.networkConfigMetadatasByName[config['name']] = config['id']
+            # e.g. { small: 2616da5c-4441-4c3d-a9a2-ed37262f2ef4 }
+        self.dataCenters = self.getDataCenters()
+        self.dataCentersByLocationCode = dict()
+        for dc in self.dataCenters:
+            self.dataCentersByLocationCode[dc['locationCode']] = dc['id']
+            # e.g. { us-east-1: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
+
+        self.dataCentersByMajorRegion = dict()
+        for major in MAJOR_REGIONS['AWS'].keys():
+            self.dataCentersByMajorRegion[major] = [dc for dc in self.dataCenters if dc['provider'] == "AWS" and dc['locationName'] in MAJOR_REGIONS['AWS'][major]]
+
+    def getNetworkConfigMetadatas(self):
+        """return the list of network config metadata which are required to create a network
         """
         try:
-            # returns a list of dicts (network objects)
-            headers = { "authorization": "Bearer " + self.auth }
-            response = requests.get(self.aud+'rest/v1/networks/'+netId+'/endpoints/'+endpointId,
-                                    proxies=self.proxies,
-                                    verify=self.verify,
-                                    headers=headers
-                                   )
+            headers = { "authorization": "Bearer " + self.session.token }
+            response = requests.get(
+                self.session.audience+'rest/v1/networkConfigMetadata',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers
+            )
 
             http_code = response.status_code
         except:
@@ -282,10 +308,343 @@ class nfapi(object):
 
         if http_code == requests.status_codes.codes.OK: # HTTP 200
             try:
+                networkConfigMetadatas = json.loads(response.text)['_embedded']['networkConfigMetadatas']
+            except ValueError as e:
+                eprint('ERROR getting network config metadatas')
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        return(networkConfigMetadatas)
+
+    def getDataCenters(self):
+        """return the dataCenters object
+        :param kwargs: optional named parameters as field filters
+        """
+        try:
+            # dataCenters returns a list of dicts (datacenter objects)
+            headers = { "authorization": "Bearer " + self.session.token }
+            response = requests.get(
+                self.session.audience+'rest/v1/dataCenters',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers
+            )
+            http_code = response.status_code
+        except:
+            raise
+
+        if http_code == requests.status_codes.codes.OK: # HTTP 200
+            try:
+                dataCenters = json.loads(response.text)['_embedded']['dataCenters']
+            except ValueError as e:
+                eprint('ERROR getting dataCenters')
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        return(dataCenters)
+
+    def getDataCenterByLocation(self, locationCode):
+        """return one dataCenter object
+        :param locationCode: required single location to fetch
+        """
+        try:
+            # dataCenters returns a list of dicts (datacenter objects)
+            headers = { "authorization": "Bearer " + self.session.token }
+            params = { "locationCode": locationCode }
+            response = requests.get(
+                self.session.audience+'rest/v1/dataCenters',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                params=params
+            )
+            http_code = response.status_code
+        except:
+            raise
+
+        if http_code == requests.status_codes.codes.OK: # HTTP 200
+            try:
+                dataCenter = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR getting dataCenter')
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        return(dataCenter)
+
+    def createNetwork(self, name, netGroup=None, location="us-east-1", version=None, netConfig="small"):
+        """
+        create a network with
+        :param name: required network name
+        :param netGroup: optional Network Group short name
+        :param location: optional datacenter region name in which to create
+        :param version: optional product version string like 7.2.0-1234567
+        :param netConfig: optional network configuration metadata name e.g. "medium"
+        """
+        request = {
+            "name": name,
+            "locationCode": location,
+            "networkConfigMetadataId": self.networkConfigMetadatasByName[netConfig]
+        }
+        if netGroup:
+            request["networkGroupId"] = netGroup
+        else:
+            request["networkGroupId"] = self.networkGroupId
+
+        if version:
+            request['productVersion'] = version
+
+        headers = {
+            'Content-Type': 'application/json',
+            "authorization": "Bearer " + self.session.token
+        }
+
+        try:
+            response = requests.post(
+                self.session.audience+"core/v2/networks",
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                json=request,
+                headers=headers
+            )
+            http_code = response.status_code
+        except:
+            raise
+
+        if not http_code == requests.status_codes.codes[RESOURCES['networks']['expect']]:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        netId = json.loads(response.text)['id']
+        # expected value is UUID
+        UUID(netId, version=4) # validate the returned value is a UUID
+
+        return(netId)
+
+    def deleteNetwork(self, networkId=None, networkName=None):
+        """
+        delete a Network
+        :param id: optional Network UUID to delete
+        :param name: optional Network name to delete
+        """
+        try:
+            if networkId:
+                networkName = [ net['name'] for net in self.networksByName if net['id'] == networkId ][0]
+            elif networkName and networkName in self.networksByName.keys():
+                networkId = self.networksByName[networkName]
+        except:
+            raise Exception("ERROR: need one of networkId or networkName for a Network in this Network Group: {:s}".format(self.name))
+
+        try:
+            headers = { "authorization": "Bearer " + self.session.token }
+            entityUrl = self.session.audience+'core/v2/networks/'+networkId
+            response = requests.delete(
+                entityUrl,
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers
+            )
+            http_code = response.status_code
+        except:
+            raise
+
+        if not http_code == requests.status_codes.codes.ACCEPTED:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        return(True)
+class Network:
+    """describe and use a Network
+    """
+    def __init__(self, Session, networkId=None, networkName=None):
+        """
+        :param token: required bearer token for this session
+        :param networkName: optional name of the network to describe and use
+        :param networkId: optional UUID of the network to describe and use
+        """
+        self.session = Session
+
+        if networkId:
+            self.describe = self.getNetworkById(networkId)
+        elif networkName:
+            self.describe = self.getNetworkByName(networkName)
+        else:
+            raise Exception("ERROR: need one of networkId or networkName")
+
+        # populate some attributes
+        self.id = self.describe['id']
+        self.name = self.describe['name']
+        self.networkGroupId = self.describe['networkGroupId']
+        self.status = self.describe['status']
+        self.productVersion = self.describe['productVersion']
+        self.ownerIdentityId = self.describe['ownerIdentityId']
+        self.deletedBy = self.describe['deletedBy']
+        self.networkConfigMetadataId = self.describe['networkConfigMetadataId']
+        self.o365BreakoutCategory = self.describe['o365BreakoutCategory']
+        self.deletedAt = self.describe['deletedAt']
+        self.createdAt = self.describe['createdAt']
+        self.updatedAt = self.describe['updatedAt']
+        self.createdBy = self.describe['createdBy']
+
+    def endpoints(self):
+        return(self.getResources("endpoints"))
+
+    def edgeRouters(self):
+        return(self.getResources("edge-routers"))
+
+    def services(self):
+        return(self.getResources("services"))
+
+    def edgeRouterPolicies(self):
+        return(self.getResources("edge-router-policies"))
+
+    def appWans(self):
+        return(self.getResources("app-wans"))
+
+    def deleteNetwork(self,wait=300,progress=True):
+        self.deleteResource(type="network",wait=wait,progress=progress)
+#        raise Exception("ERROR: failed to delete Network {:s}".format(self.name))
+
+    def getResources(self,type):
+        """return the resources object
+            :type [required] one of endpoints, edge-routers, services
+        """
+        try:
+            headers = {
+                "authorization": "Bearer " + self.session.token 
+            }
+            params = {
+                "networkId": self.id,
+                "page": 0,
+                "size": 10,
+                "sort": "name,asc"
+            }
+            response = requests.get(
+                self.session.audience+'core/v2/'+type,
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                params=params
+            )
+            http_code = response.status_code
+        except:
+            raise
+
+        if http_code == requests.status_codes.codes.OK: # HTTP 200
+            try:
+                resources = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load {r} object from GET response'.format(r = type))
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        total_pages = resources['page']['totalPages']
+        total_elements = resources['page']['totalElements']
+        # if there are no resources
+        if total_elements == 0:
+            return([])
+        # if there is one page of resources
+        elif total_pages == 1:
+            return(resources['_embedded'][RESOURCES[type]['embedded']])
+        # if there are multiple pages of resources
+        else:
+            # initialize the list with the first page of resources
+            all_pages = resources['_embedded'][RESOURCES[type]['embedded']]
+            # append the remaining pages of resources
+            for page in range(1,total_pages):
+                try:
+                    params["page"] = page
+                    response = requests.get(
+                        self.session.audience+'core/v2/'+type,
+                        proxies=self.session.proxies,
+                        verify=self.session.verify,
+                        headers=headers,
+                        params=params
+                    )
+                    http_code = response.status_code
+                except:
+                    raise
+
+                if http_code == requests.status_codes.codes.OK: # HTTP 200
+                    try:
+                        resources = json.loads(response.text)
+                        all_pages += resources['_embedded'][RESOURCES[type]['embedded']]
+                    except ValueError as e:
+                        eprint('ERROR: failed to load resources object from GET response')
+                        raise(e)
+                else:
+                    raise Exception(
+                        'unexpected response: {} (HTTP {:d})'.format(
+                            requests.status_codes._codes[http_code][0].upper(),
+                            http_code
+                        )
+                    )
+            return(all_pages)
+
+    def createEndpoint(self, name, attributes=[]):
+        """create an Endpoint
+        """
+        try:
+            headers = { 
+                "authorization": "Bearer " + self.session.token 
+            }
+            for role in attributes:
+                if not role[0:1] == '#':
+                    raise Exception("ERROR: hashtag role attributes on an Endpoint must begin with #")
+            body = {
+                "networkId": self.id,
+                "name": name,
+                "attributes": attributes,
+                "enrollmentMethod": { "ott": True }
+            }
+            response = requests.post(
+                self.session.audience+'core/v2/endpoints',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                json=body
+            )
+            http_code = response.status_code
+        except:
+            raise
+        if http_code == requests.status_codes.codes.OK: # HTTP 200 (synchronous fulfillment)
+            try:
                 endpoint = json.loads(response.text)
-            except KeyError:
-                endpoint = []
-                pass
+            except ValueError as e:
+                eprint('ERROR: failed to load {:s} object from POST response'.format("Endpoint"))
+                raise(e)
         else:
             raise Exception(
                 'unexpected response: {} (HTTP {:d})'.format(
@@ -296,730 +655,41 @@ class nfapi(object):
 
         return(endpoint)
 
-    def getEndpointGroups(self, netId):
-        """return the endpointGroups as an object
+    def createEdgeRouter(self, name, attributes=[], linkListener=False, dataCenterId=None):
+        """create an Edge Router
         """
         try:
-            # returns a list of dicts (network objects)
-            headers = { "authorization": "Bearer " + self.auth }
-            response = requests.get(self.aud+'rest/v1/networks/'+netId+'/endpointGroups',
-                                    proxies=self.proxies,
-                                    verify=self.verify,
-                                    headers=headers
-                                   )
-
-            http_code = response.status_code
-        except:
-            raise
-
-        if http_code == requests.status_codes.codes.OK: # HTTP 200
-            try:
-                endpointGroups = json.loads(response.text)['_embedded']['endpointGroups']
-            except KeyError:
-                endpointGroups = []
-                pass
-        else:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        return(endpointGroups)
-
-    def getServices(self, netId):
-        """return the services object
-        """
-        try:
-            # returns a list of dicts (network objects)
-            headers = { "authorization": "Bearer " + self.auth }
-            response = requests.get(self.aud+'rest/v1/networks/'+netId+'/services',
-                                    proxies=self.proxies,
-                                    verify=self.verify,
-                                    headers=headers
-                                   )
-
-            http_code = response.status_code
-        except:
-            raise
-
-        if http_code == requests.status_codes.codes.OK: # HTTP 200
-            try:
-                services = json.loads(response.text)['_embedded']['services']
-            except KeyError:
-                services = []
-                pass
-        else:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        return(services)
-
-    def getAppWans(self, netId):
-        """return the appWans object
-        """
-        try:
-            # returns a list of dicts (network objects)
-            headers = { "authorization": "Bearer " + self.auth }
-            response = requests.get(self.aud+'rest/v1/networks/'+netId+'/appWans',
-                                    proxies=self.proxies,
-                                    verify=self.verify,
-                                    headers=headers
-                                   )
-
-            http_code = response.status_code
-        except:
-            raise
-
-        if http_code == requests.status_codes.codes.OK: # HTTP 200
-            try:
-                appWans = json.loads(response.text)['_embedded']['appWans']
-            except KeyError:
-                appWans = []
-                pass
-        else:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        return(appWans)
-
-    def post(self,
-             method,
-             json,
-             expected_response="ACCEPTED"
-            ):
-        """
-        post arbitrary data as JSON to an API method
-        """
-
-        request = json
-
-        headers = {
-            'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
-        }
-
-        try:
-            response = requests.post(self.aud+"rest/v1"+method,
-                                     json=request,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
-            http_code = response.status_code
-        except:
-            raise
-
-        if not http_code == requests.status_codes.codes[expected_response]:
-            raise Exception('unexpected response: {} (HTTP {:d})'.format(
-                requests.status_codes._codes[http_code][0].upper(),
-                http_code
-            )
-                           )
-
-        text = response.text
-
-        return(text)
-
-    def createNetwork(self, name, region, version=None, wait=0, family="DVN"):
-        """
-        create an NFN with
-        :param name: network name
-        :param region: required datacenter region name in which to create
-        :param version: optional product version string like 3.6.6.11043_2018-03-21_1434
-        :param wait: optional wait seconds for network to build before returning
-        :param family: optional product family "DVN" or "ZITI"
-        """
-        request = {
-            "name": name,
-            "locationCode": region,
-            "productFamily": family
-        }
-        if version:
-            request['productVersion'] = version
-
-        headers = {
-            'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
-        }
-
-        try:
-            response = requests.post(self.aud+"rest/v1/networks",
-                                     json=request,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
-            http_code = response.status_code
-        except:
-            raise
-
-        if not http_code == requests.status_codes.codes.ACCEPTED:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        netId = json.loads(response.text)['_links']['self']['href'].split('/')[-1]
-        # expected value is UUID
-        UUID(netId, version=4) # validate the returned value is a UUID
-
-        if not wait == 0:
-            try:
-                self.waitForEntityStatus(status='ACTIVE',
-                                         entType='network',
-                                         netId=netId,
-                                         wait=wait)
-            except:
-                raise
-
-        return(netId)
-
-    def createIpNetworkService(self,
-                             netId,
-                             name,
-                             gatewayIp,
-                             gatewayNetmask,
-                             interceptIp,
-                             endpointId,
-                             wait=0
-                            ):
-        """publish a subnetwork (IP or range described by network address and netmask)
-        :param netId: network UUID
-        :param name: descriptive name allowing whitespace
-        :param gatewayIp: the network address of the subnet (lowest IP)
-        :param gatewayNetmask: the netmask describing the size of the published subnet
-        :param interceptIp: the network address of the subnet used by clients
-        :param endpointId: UUID of the serving gateway that will provide this service
-        :param wait: optional wait seconds for service to become ACTIVE
-        """
-        request = {
-            "name": name,
-            "serviceClass": "GW",
-            "gatewayIp": gatewayIp,
-            "gatewayNetmask": gatewayNetmask,
-            "interceptIp": interceptIp,
-            "endpointId": endpointId
-        }
-
-        headers = {
-            'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
-        }
-
-        try:
-            response = requests.post(self.aud+"rest/v1/networks/"+netId+"/services",
-                                     json=request,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
-            http_code = response.status_code
-        except:
-            raise
-
-        if not http_code == requests.status_codes.codes.ACCEPTED:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        svcId = json.loads(response.text)['_links']['self']['href'].split('/')[-1]
-
-        # expected value is UUID of new endpoint
-        UUID(svcId, version=4) # validate the returned value is a UUID
-
-        if not wait == 0:
-            try:
-                self.waitForEntityStatus(status='ACTIVE',
-                                         entType='service',
-                                         netId=netId,
-                                         entId=svcId,
-                                         wait=wait)
-            except:
-                raise
-
-        return(svcId)
-
-    def createAwsGateway(self, name, netId, dataCenterId, wait=0, family="dvn", managed=False):
-        """
-        create an AWS gateway endpoint with
-        :param name: gateway name
-        :param netId: network UUID
-        :param dataCenterId: datacenter UUID
-        :param wait: optional wait seconds for endpoint to become REGISTERED (400)
-        :param family: optional family indicating endpoint type if not "dvn"
-        :param managed: optional boolean indicating instance is launched and managed by MOP
-        """
-
-        if not managed and family == "ziti":
-            endpointType = "ZTNHGW"
-        elif not managed and family == "dvn":
-            endpointType = "AWSCPEGW"
-        elif managed and family == "ziti":
-            endpointType = "ZTGW"
-        elif managed and family == "dvn":
-            endpointType = "GW"
-        else:
-            raise Exception(
-                'unexpected family "{}" or endpoint type "{}"'.format(
-                    family,
-                    endpointType
-                )
-            )
-
-        request = {
-            "name": name,
-            "endpointType": endpointType,
-            "dataCenterId": dataCenterId
-        }
-
-        headers = {
-            'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
-        }
-
-        try:
-            response = requests.post(self.aud+"rest/v1/networks/"+netId+"/endpoints",
-                                     json=request,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
-            http_code = response.status_code
-        except:
-            raise
-
-        if not http_code == requests.status_codes.codes.ACCEPTED:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        endId = json.loads(response.text)['_links']['self']['href'].split('/')[-1]
-
-        # expected value is UUID of new endpoint
-        UUID(endId, version=4) # validate the returned value is a UUID
-
-        if not wait == 0:
-            try:
-                self.waitForEntityStatus(status='REGISTERED',
-                                         entType='endpoint',
-                                         netId=netId,
-                                         entId=endId,
-                                         wait=wait)
-            except:
-                raise
-
-        return(endId)
-
-    def createVcpeGateway(self, name, netId, geoRegionId, wait=0):
-        """
-        create a self-hosted gateway endpoint with
-        :param name: gateway name
-        :param netId: network UUID
-        :param geoRegionId: geo region UUID
-        :param wait: optional wait seconds for endpoint to become REGISTERED (400)
-        """
-        request = {
-            "name": name,
-            "endpointType": "VCPEGW",
-            "geoRegionId": geoRegionId
-        }
-
-        headers = {
-            'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
-        }
-
-        try:
-            response = requests.post(self.aud+"rest/v1/networks/"+netId+"/endpoints",
-                                     json=request,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
-            http_code = response.status_code
-        except:
-            raise
-
-        if not http_code == requests.status_codes.codes.ACCEPTED:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        endId = json.loads(response.text)['_links']['self']['href'].split('/')[-1]
-
-        # expected value is UUID of new endpoint
-        UUID(endId, version=4) # validate the returned value is a UUID
-
-        if not wait == 0:
-            try:
-                self.waitForEntityStatus(status='REGISTERED',
-                                         entType='endpoint',
-                                         netId=netId,
-                                         entId=endId,
-                                         wait=wait)
-            except:
-                raise
-
-        return(endId)
-
-    def createIpHostService(self,
-                            netId,
-                            name,
-                            networkIp,
-                            networkFirstPort,
-                            networkLastPort,
-                            interceptIp,
-                            interceptFirstPort,
-                            interceptLastPort,
-                            protocolType,
-                            endpointId,
-                            wait=0
-                           ):
-        """publish a host:port(s) couplet
-        :param netId: network UUID
-        :param name: descriptive name allowing whitespace
-        :param networkIp: interface or masquerade address of the published service
-        :param networkFirstPort: lower bound of published port range
-        :param networkLastPort: upper bound of published port range
-        :param interceptIp: destination address used by clients
-        :param interceptFirstPort: lower bound of destination port range
-        :param interceptLastPort: upper bound of destination port range
-        :param protocolType: one of tcp, udp
-        :param endpointId: UUID of the serving gateway that provides this service
-        :param wait: optional wait seconds for service to become ACTIVE
-        """
-        request = {
-            "name": name,
-            "serviceClass": "CS",
-            "networkIp": networkIp,
-            "networkFirstPort": networkFirstPort,
-            "networkLastPort": networkLastPort,
-            "interceptIp": interceptIp,
-            "interceptFirstPort": interceptFirstPort,
-            "interceptLastPort": interceptLastPort,
-            "protocolType": protocolType,
-            "endpointId": endpointId,
-            "serviceType": protocolType.upper(),
-            "transparency": "NO",
-            "bridgeStp": "YES",
-            "collectionLocation": "BOTH",
-            "cryptoLevel": "STRONG",
-            "dnsOptions": "NONE",
-            "icmpTunnel": "YES",
-            "localNetworkGateway": "YES",
-            "multicast": "OFF",
-            "pbrType": "WAN",
-            "permanentConnection": "NO",
-            "rateSmoothing": "YES",
-            "serviceInterceptType": "IP"
-        }
-        headers = {
-            'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
-        }
-
-        try:
-            response = requests.post(self.aud+"rest/v1/networks/"+netId+"/services",
-                                     json=request,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
-            http_code = response.status_code
-        except:
-            raise
-
-        if not http_code == requests.status_codes.codes.ACCEPTED:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        svcId = json.loads(response.text)['_links']['self']['href'].split('/')[-1]
-
-        # expected value is UUID of new endpoint
-        UUID(svcId, version=4) # validate the returned value is a UUID
-
-        if not wait == 0:
-            try:
-                self.waitForEntityStatus(status='ACTIVE',
-                                         entType='service',
-                                         netId=netId,
-                                         entId=svcId,
-                                         wait=wait)
-            except:
-                raise
-
-        return(svcId)
-
-    def createEndpointGroup(self, name, netId):
-        """
-        create an endpoint group in a network with
-        :param name: group name
-        :param netId: network UUID
-        """
-        request = {
-            "name": name
-        }
-
-        headers = {
-            'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
-        }
-
-        try:
-            response = requests.post(self.aud+"rest/v1/networks/"+netId+"/endpointGroups",
-                                     json=request,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
-            http_code = response.status_code
-        except:
-            raise
-
-        if http_code == requests.status_codes.codes.CREATED:
-            groupId = json.loads(response.text)['_links']['self']['href'].split('/')[-1]
-        else:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        return(groupId)
-
-    def updateEndpointGroup(self,
-                            name,
-                            groupId,
-                            netId,
-                           ):
-        """
-        update an endpoint group name
-        :param name: group name
-        :param groupId: endpoint group UUID
-        :param netId: network UUID
-        """
-        request = {
-            "name": name
-        }
-
-        headers = {
-            'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
-        }
-
-        try:
-            response = requests.put(
-                self.aud+"rest/v1/networks/"+netId+"/endpointGroups/"+groupId,
-                                     json=request,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
-            #print(response)
-            http_code = response.status_code
-        except:
-            raise
-
-        if not http_code == requests.status_codes.codes.OK:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        return(True)
-
-    def addEndpointToGroup(self,
-                           groupId,
-                           netId,
-                           endpointIds):
-        """
-        add an endpoint to a group
-        :param groupId: endpoint group UUID
-        :param netId: network UUID
-        :param endpointIds: list of endpoint UUIDs to add
-        """
-        request = {
-            "ids": endpointIds # is list
-        }
-
-        headers = {
-            'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
-        }
-
-        try:
+            headers = { 
+                "authorization": "Bearer " + self.session.token 
+            }
+            for role in attributes:
+                if not role[0:1] == '#':
+                    raise Exception("ERROR: hashtag role attributes on an Endpoint must begin with #")
+            body = {
+                "networkId": self.id,
+                "name": name,
+                "attributes": attributes,
+                "linkListener": linkListener
+            }
+            if dataCenterId:
+                body['dataCenterId'] = dataCenterId
+                body['linkListener'] = True
             response = requests.post(
-                self.aud+"rest/v1/networks/"+netId+"/endpointGroups/"+groupId+"/endpoints",
-                                     json=request,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
+                self.session.audience+'core/v2/edge-routers',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                json=body
+            )
             http_code = response.status_code
         except:
             raise
-
-        if not http_code == requests.status_codes.codes.ACCEPTED:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        return(True)
-
-
-    def deleteEndpoint(self,
-                       netId,
-                       endpointId,
-                       wait=0
-                      ):
-        """
-        delete an endpoint by UUID
-        :param netId: network UUID in which to discover the endpoints
-        :param endpointId: endpoint UUID to delete
-        :param wait: optional seconds to wait for endpoint destruction
-        """
-        headers = {
-            "authorization": "Bearer " + self.auth
-        }
-
-        try:
-            response = requests.delete(self.aud+"rest/v1/networks/"+netId+"/endpoints/"+endpointId,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
-            http_code = response.status_code
-        except:
-            raise
-
-        if not http_code == requests.status_codes.codes.ACCEPTED:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        if not wait == 0:
+        if http_code == requests.status_codes.codes[RESOURCES['edge-routers']['expect']]:
             try:
-                self.waitForEntityStatus(status='DELETED',
-                                         entType='endpoint',
-                                         netId=netId,
-                                         entId=endpointId,
-                                         wait=wait)
-            except:
-                raise
-
-        return(True)
-
-    def deleteService(self,
-                       netId,
-                       svcId,
-                       wait=0
-                      ):
-        """
-        delete a service by UUID
-        :param netId: network UUID
-        :param svcId: service UUID to delete
-        :param wait: optional seconds to wait for service destruction
-        """
-        headers = {
-            "authorization": "Bearer " + self.auth
-        }
-
-        try:
-            response = requests.delete(self.aud+"rest/v1/networks/"+netId+"/services/"+svcId,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
-            http_code = response.status_code
-        except:
-            raise
-
-        if not http_code == requests.status_codes.codes.ACCEPTED:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        if not wait == 0:
-            try:
-                self.waitForEntityStatus(status='DELETED',
-                                         entType='endpoint',
-                                         netId=netId,
-                                         entId=endpointId,
-                                         wait=wait)
-            except:
-                raise
-
-        return(True)
-
-    def createAppWan(self,
-                     netId,
-                     name,
-                     wait=0
-                   ):
-        """authorize endpoint(s) for service(s) where
-        :param netId: network UUID
-        :param name: descriptive name allowing whitespace
-        """
-        request = {
-            "name": name,
-        }
-
-        headers = {
-            'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
-        }
-
-        try:
-            response = requests.post(self.aud+"rest/v1/networks/"+netId+"/appWans",
-                                     json=request,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
-            #print(response)
-            http_code = response.status_code
-        except:
-            raise
-
-        if http_code == requests.status_codes.codes.ACCEPTED:
-            appWanId = json.loads(response.text)['_links']['self']['href'].split('/')[-1]
+                router = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load {:s} object from POST response'.format("Edge Router"))
+                raise(e)
         else:
             raise Exception(
                 'unexpected response: {} (HTTP {:d})'.format(
@@ -1028,219 +698,343 @@ class nfapi(object):
                 )
             )
 
-        if not wait == 0:
-            try:
-                self.waitForEntityStatus(status='ACTIVE',
-                                         entType='appWan',
-                                         netId=netId,
-                                         entId=appWanId,
-                                         wait=wait)
-            except:
-                raise
+        return(router)
 
-        return(appWanId)
-
-    def updateAppWan(self,
-                     appWanId,
-                     netId,
-                     services,
-                     endpoints=[],
-                     endpointGroups=[],
-                     wait=0
-                   ):
-        """authorize endpoint(s) or endpoint group(s) or both for service(s) where
-        :param appWanId: AppWAN UUID to update
-        :param netId: network UUID housing the AppWAN
-        :param services: list of service UUIDs to publish
-        :param endpoints: optional list of endpoint UUIDs to authorize
-        :param endpointGroups: optional list of endpoint group UUIDs to authorize
+    def createEdgeRouterPolicy(self, name, endpointAttributes=[], edgeRouterAttributes=[]):
+        """create an Edge Router Policy
         """
-
-        appWan = dict()
-
-        appWan['services'] = {
-            "ids": services
-        }
-
-        appWan['endpoints'] = {
-            "ids": endpoints
-        }
-
-        appWan['endpointGroups'] = {
-            "ids": endpointGroups
-        }
-
-        headers = {
-            'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
-        }
-
-        for resource in ['services', 'endpoints', 'endpointGroups']:
-            try:
-                response = requests.post(
-                    self.aud+"rest/v1/networks/"+netId+"/appWans/"+appWanId+"/"+resource,
-                         json=appWan[resource],
-                         headers=headers,
-                         proxies=self.proxies,
-                         verify=self.verify)
-                #print(response)
-                http_code = response.status_code
-            except:
-                raise
-
-            if not http_code == requests.status_codes.codes.ACCEPTED:
-                raise Exception(
-                    'unexpected response: {} (HTTP {:d})'.format(
-                        requests.status_codes._codes[http_code][0].upper(),
-                        http_code
-                    )
-                )
-
-            if not wait == 0:
-                try:
-                    self.waitForEntityStatus(status='ACTIVE',
-                                             entType='appWan',
-                                             netId=netId,
-                                             entId=appWanId,
-                                             wait=wait)
-                except:
-                    raise
-
-        return(True)
-
-    def deleteAppWan(self, netId, appWanId, wait=0):
-        """
-        delete a service connection(s) by UUID
-        :param netId: network UUID in which to discover the endpoints
-        :param appWanId: AppWan UUID to delete
-        """
-        headers = {
-            "authorization": "Bearer " + self.auth
-        }
-
         try:
-            response = requests.delete(self.aud+"rest/v1/networks/"+netId+"/appWans/"+appWanId,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
-            http_code = response.status_code
-        except:
-            raise
-
-        if not http_code == requests.status_codes.codes.ACCEPTED:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
+            headers = { 
+                "authorization": "Bearer " + self.session.token 
+            }
+            for role in endpointAttributes+edgeRouterAttributes:
+                if not re.match('^[#@]', role):
+                    raise Exception("ERROR: role attributes on a policy must begin with # or @")
+            body = {
+                "networkId": self.id,
+                "name": name,
+                "endpointAttributes": endpointAttributes,
+                "edgeRouterAttributes": edgeRouterAttributes
+            }
+            response = requests.post(
+                self.session.audience+'core/v2/edge-router-policies',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                json=body
             )
-
-        if not wait == 0:
-            try:
-                self.waitForEntityStatus(status='DELETED',
-                                         entType='appWan',
-                                         netId=netId,
-                                         entId=appWanId,
-                                         wait=wait)
-            except:
-                raise
-
-        return(True)
-
-    def deleteNetwork(self, netId, wait=0):
-        """
-        delete an NFN (aka SDN) by UUID
-        :param netId: network UUID
-        :param wait: optional wait seconds for network destruction before return
-        """
-        headers = {
-            'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.auth
-        }
-
-        try:
-            response = requests.delete(self.aud+"rest/v1/networks/"+netId,
-                                     headers=headers,
-                                     proxies=self.proxies,
-                                     verify=self.verify
-                                    )
             http_code = response.status_code
         except:
             raise
-
-        if not http_code == requests.status_codes.codes.ACCEPTED:
-            raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
-                )
-            )
-
-        if not wait == 0:
+        if http_code == requests.status_codes.codes[RESOURCES['edge-router-policies']['expect']]:
             try:
-                self.waitForEntityStatus(status='DELETED',
-                                         entType='network',
-                                         netId=netId,
-                                         wait=wait)
-            except:
-                raise
-
-        return(True)
-
-    def getEntity(self, entType, netId, entId=0):
-        """return the full object describing an entity
-        :param entType: the type of entity e.g. network, endpoint, service
-        :param netId: the UUID of the network housing the entity
-        :param entId: the UUID of the entity having a status if not a network
-        """
-
-        try:
-            headers = { "authorization": "Bearer " + self.auth }
-            entUrl = self.aud+'rest/v1/networks/'+netId
-            if not entType == 'network':
-                if entId == 0:
-                    raise Exception("ERROR: entity UUID must be specified if not a network")
-                entUrl += '/'+entType+'s/'+entId
-
-            response = requests.get(entUrl,
-                                    proxies=self.proxies,
-                                    verify=self.verify,
-                                    headers=headers)
-            http_code = response.status_code
-        except:
-            raise
-
-        if http_code == requests.status_codes.codes.OK:
-            try:
-                entity = json.loads(response.text)
-            except:
-                eprint('ERROR parsing entity object in response')
-                raise
+                policy = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load {:s} object from POST response'.format("Edge Router Policy"))
+                raise(e)
         else:
-            status = None
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
 
-        return(entity)
+        return(policy)
 
-    def getEntityStatus(self, entType, netId, entId=0):
+    def createService(self, name: str, clientHostName: str, clientPortRange: int, serverHostName: str, 
+        serverPortRange: int, serverProtocol: str="TCP", attributes: list=[], edgeRouterAttributes: list=[], 
+        egressRouterId: str=None, endpoints: list=[], encryptionRequired: bool=True):
+        """create a Service
+        """
+        try:
+            headers = { 
+                "authorization": "Bearer " + self.session.token 
+            }
+            for role in attributes:
+                if not role[0:1] == '#':
+                    raise Exception("ERROR: hashtag role attributes on an Endpoint must begin with #")
+            body = {
+                "networkId": self.id,
+                "name": name,
+                "attributes": attributes,
+                "clientHostName": clientHostName,
+                "clientPortRange": clientPortRange,
+                "serverHostName": serverHostName,
+                "serverPortRange": serverPortRange,
+                "serverProtocol": serverProtocol,
+                "encryptionRequired": encryptionRequired
+            }
+            # resolve exit hosting params
+            if egressRouterId and endpoints:
+                raise Exception("ERROR: specify only one of egressRouterId or endpoints to host the exit for this Service")
+            elif endpoints:
+                body['endpoints'] = endpoints
+            elif egressRouterId:
+                body['egressRouterId'] = egressRouterId
+
+            # resolve Edge Router param
+            if edgeRouterAttributes:
+                eprint("WARN: overriding default Service Edge Router Policy #all for new Service {:s}".format(name))
+                body['edgeRouterAttributes'] = edgeRouterAttributes
+
+            response = requests.post(
+                self.session.audience+'core/v2/services',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                json=body
+            )
+            http_code = response.status_code
+        except:
+            raise
+        if http_code == requests.status_codes.codes[RESOURCES['services']['expect']]:
+            try:
+                service = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load {:s} object from POST response'.format("Service"))
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        return(service)
+
+    def createAppWan(self, name: str, endpointAttributes: list=[], serviceAttributes: list=[], postureCheckAttributes: list=[]):
+        """create an AppWAN
+        """
+        try:
+            headers = { 
+                "authorization": "Bearer " + self.session.token 
+            }
+            for role in endpointAttributes+serviceAttributes+postureCheckAttributes:
+                if not re.match('^[#@]', role):
+                    raise Exception("ERROR: role attributes on an AppWAN must begin with # or @")
+            body = {
+                "networkId": self.id,
+                "name": name,
+                "endpointAttributes": endpointAttributes,
+                "serviceAttributes": serviceAttributes,
+                "postureCheckAttributes": postureCheckAttributes
+            }
+
+            response = requests.post(
+                self.session.audience+'core/v2/app-wans',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                json=body
+            )
+            http_code = response.status_code
+        except:
+            raise
+        if http_code == requests.status_codes.codes[RESOURCES['app-wans']['expect']]:
+            try:
+                appwan = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load {:s} object from POST response'.format("AppWAN"))
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        return(appwan)
+
+
+
+
+
+
+
+
+
+
+    def getNetworkByName(self,name):
+        """return exactly one network object
+            :name required name of the NF network may contain quoted whitespace
+        """
+        try:
+            headers = { 
+                "authorization": "Bearer " + self.session.token 
+            }
+            params = {
+                "findByName": name
+            }
+            response = requests.get(
+                self.session.audience+'/core/v2/networks',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                params=params
+            )
+            http_code = response.status_code
+        except:
+            raise
+
+        if http_code == requests.status_codes.codes.OK: # HTTP 200
+            try:
+                networks = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load endpoints object from GET response')
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+        hits = networks['page']['totalElements']
+        if hits == 1:
+            network = networks['_embedded'][RESOURCES['networks']['embedded']][0]
+            return(network)
+        else:
+            raise Exception("ERROR: failed to find exactly one match for {}".format(name))
+
+    def getNetworkById(self,networkId):
+        """return the network object for a particular UUID
+            :networkId [required] the UUID of the network
+        """
+        try:
+            headers = { 
+                "authorization": "Bearer " + self.session.token 
+            }
+            response = requests.get(
+                self.session.audience+'/core/v2/networks/'+networkId,
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers
+            )
+            http_code = response.status_code
+        except:
+            raise
+
+        if http_code == requests.status_codes.codes.OK: # HTTP 200
+            try:
+                network = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load {r} object from GET response'.format(r = "network"))
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        return(network)
+
+    def waitForStatus(self, expect, type="network", wait=300, sleep=9, id=None, progress=False):
+        """continuously poll for the expected status until expiry
+        :param expect: the expected status symbol e.g. PROVISIONED
+        :param id: the UUID of the entity having a status if entity is not a network
+        :param type: optional type of entity e.g. network (default), endpoint, service, edge-router
+        :param wait: optional SECONDS after which to raise an exception defaults to five minutes (300)
+        :param sleep: SECONDS polling interval
+        """
+
+        now = time.time()
+
+        if not wait >= sleep:
+            raise Exception(
+                "ERROR: wait duration ({:d}) must be greater than or equal to polling interval ({:d})".format(
+                    wait, sleep
+                )
+            )
+
+        # poll for status until expiry
+        if progress:
+            sys.stdout.write(
+                '\twaiting for status {:s} or until {:s}.'.format(
+                    expect,
+                    time.ctime(now+wait)
+                )
+            )
+
+        status = str()
+        http_code = int()
+        while (
+            time.time() < now+wait
+        ) and (
+            not status == expect
+        ) and (
+            not http_code == requests.status_codes.codes.NOT_FOUND
+        ):
+            if progress:
+                sys.stdout.write('.') # print a stop each iteration to imply progress
+                sys.stdout.flush()
+
+            try:
+                entity = self.getResourceStatus(type=type, id=id)
+            except:
+                raise
+
+            if entity['status']: # attribute is not None if HTTP OK
+                if not status or ( # print the starting status
+                    status and not entity['status'] == status # print on subsequent changes
+                ):
+                    if progress:
+                        sys.stdout.write('\n{:^19s}:{:^19s}:'.format(entity['name'],entity['status']))
+                status = entity['status']
+            else:
+                http_code = entity['http_code']
+
+            if not expect == status:
+                time.sleep(sleep)
+        print() # newline terminates progress meter
+
+        if (
+            status == expect
+        ) or (
+            status == 'DELETED' and
+            http_code == requests.status_codes.codes.FORBIDDEN
+        ):
+            return(True)
+        elif not status:
+            raise Exception(
+                'failed to read status while waiting for {:s}; got {} ({:d})'.format(
+                    expect,
+                    entity['http_status'],
+                    entity['http_code']
+                )
+            )
+        else:
+            raise Exception(
+                'timed out with status {} while waiting for {:s}'.format(
+                    status,
+                    expect
+                )
+            )
+
+    def getResourceStatus(self, type, id=None):
         """return an object describing an entity's API status or the symbolic HTTP code
-        :param entType: the type of entity e.g. network, endpoint, service
-        :param netId: the UUID of the network housing the entity
-        :param entId: the UUID of the entity having a status if not a network
+        :param type: the type of entity e.g. network, endpoint, service, edge-router
+        :param id: the UUID of the entity having a status if not a network
         """
 
         try:
-            headers = { "authorization": "Bearer " + self.auth }
-            entUrl = self.aud+'rest/v1/networks/'+netId
-            if not entType == 'network':
-                if entId == 0:
+            headers = { "authorization": "Bearer " + self.session.token }
+            entityUrl = self.session.audience+'core/v2/networks/'+self.id
+            if not type == 'network':
+                if id is None:
                     raise Exception("ERROR: entity UUID must be specified if not a network")
-                entUrl += '/'+entType+'s/'+entId
+                entityUrl += '/'+type+'s/'+id
 
-            response = requests.get(entUrl,
-                                    proxies=self.proxies,
-                                    verify=self.verify,
-                                    headers=headers)
+            response = requests.get(
+                entityUrl,
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers
+            )
             http_code = response.status_code
         except:
             raise
@@ -1248,6 +1042,7 @@ class nfapi(object):
         if http_code == requests.status_codes.codes.OK:
             try:
                 status = json.loads(response.text)['status']
+                name = json.loads(response.text)['name']
             except:
                 eprint('ERROR parsing entity object in response')
                 raise
@@ -1257,159 +1052,56 @@ class nfapi(object):
         return {
             'http_status': requests.status_codes._codes[http_code][0].upper(),
             'http_code': http_code,
-            'status': status
+            'status': status,
+            'name': name
         }
 
-    def waitForEntityStatus(self, status, entType, netId, wait, entId=0):
-        """continuously poll for the expected status until expiry
-        :param status: string that is the symbolic name of the expected status code
-        :param netId: the UUID of the network housing the entity
-        :param entId: the UUID of the entity having a status if entity is not a network
-        :param entType: the type of entity e.g. network, endpoint, service
-        :param wait: SECONDS after which to raise an exception
+    def deleteResource(self, type, id=None, wait=int(0), progress=False):
         """
-
-        now = time.time()
-
-        # poll for status until expiry
-        sys.stdout.write(
-            '\twaiting for status {:s} ({:d}) or until {:s}.'.format(
-                status,
-                self.codes[status],
-                time.ctime(now+wait)
-            )
-        )
-
-        status_code = int()
-        http_code = int()
-        while (
-            time.time() < now+wait
-        ) and (
-            not status_code == self.codes[status]
-        ) and (
-            not http_code == requests.status_codes.codes.NOT_FOUND
-        ):
-            sys.stdout.write('.') # print a stop each iteration to imply progress
-            sys.stdout.flush()
-
-            try:
-                entity = self.getEntityStatus(entType=entType,
-                                        netId=netId,
-                                        entId=entId)
-            except:
-                raise
-
-            if entity['status']: # attribute is not None if HTTP OK
-                if not status_code or ( # print the starting status
-                    status_code and     # print on subsequent changes
-                    not status_code == entity['status']
-                ):
-                    sys.stdout.write(
-                        '\n\t\t:'
-                        +'{:^19s}'.format(
-                            self.statusesByCode[
-                                entity['status']
-                            ][0].upper()
-                        )
-                        +':'
-                    )
-                status_code = entity['status']
-            else:
-                http_code = entity['http_code']
-
-            time.sleep(15)
-        print() # newline terminates progress meter
-
-        if (
-            status_code == self.codes[status]
-        ) or (
-            status == 'DELETED' and
-            http_code == requests.status_codes.codes.FORBIDDEN
-        ):
-            return(True)
-        elif not status_code:
-            raise Exception(
-                'failed to read status while waiting for {:s} ({:d}); got {} ({:d})'.format(
-                    status,
-                    self.codes[status],
-                    entity['http_status'],
-                    entity['http_code']
-                )
-            )
-        else:
-            raise Exception(
-                'timed out with status {} ({:d}) while waiting for {:s} ({:d})'.format(
-                    self.statusesByCode[status_code][0].upper(),
-                    status_code,
-                    status,
-                    self.codes[status]
-                )
-            )
-
-    def waitForEntityHttpStatus(self, status, entType, netId, wait, entId=0):
-        """continuously poll for the expected HTTP response code until expiry
-        :param entType: the type of entity e.g. network, endpoint, service
-        :param id: the UUID of the entity having a status
-        :param status: string that is the symbolic name of the expected status code
-        :param wait: SECONDS after which to raise an exception
-        Example: status NOT_FOUND will succeed when response is HTTP 404
+        delete a resource
+        :param type: required entity type to delete i.e. network, endpoint, service, edge-router
+        :param id: required entity UUID to delete
+        :param wait: optional seconds to wait for entity destruction
         """
+        try:
+            headers = { "authorization": "Bearer " + self.session.token }
+            entityUrl = self.session.audience+'core/v2/networks/'+self.id
+            if not type == 'network':
+                if id is None:
+                    raise Exception("ERROR: need entity UUID to delete")
+                entityUrl += '/'+type+'s/'+id
 
-        now = time.time()
-
-        # poll for status until expiry
-        sys.stdout.write(
-            '\twaiting for status {:s} ({:d}) or until {:s}.'.format(
-                status,
-                requests.status_codes.codes[status],
-                time.ctime(now+wait)
+            response = requests.delete(
+                entityUrl,
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers
             )
-        )
-        # resolve the expected status to an HTTP code
-        status_code = requests.status_codes.codes[status]
-        # initialize a variable to store the last checked HTTP code
-        http_code = int()
-        while time.time() < now+wait and not status_code == http_code:
-            sys.stdout.write('.')
-            sys.stdout.flush()
-            try:
-                entity = self.getEntityStatus(entType=entType,
-                                        netId=netId,
-                                        entId=entId)
-                if not http_code or (
-                    http_code and
-                    not http_code == entity['http_code']
-                ):
-                    sys.stdout.write(
-                        '\n\t\t:'
-                        +'{:^19s}'.format(
-                            requests.status_codes._codes[
-                                entity['http_code']
-                            ][0].upper()
-                        )
-                        +':'
+            http_code = response.status_code
+        except:
+            raise
 
-                    )
-
-                http_code = entity['http_code']
-            except:
-                raise
-
-            time.sleep(15)
-
-        print() # newline terminates progress meter
-
-        if status_code == http_code:
-            return(True)
-        else:
+        if not http_code == requests.status_codes.codes.ACCEPTED:
             raise Exception(
-                'timed out with status {} ({}) while waiting for {} ({})'.format(
+                'unexpected response: {} (HTTP {:d})'.format(
                     requests.status_codes._codes[http_code][0].upper(),
-                    http_code,
-                    status,
-                    status_code,
+                    http_code
                 )
             )
+
+        if not wait == 0:
+            try:
+                self.waitForStatus(
+                    expect='DELETED',
+                    type=type,
+                    id=self.id if type == 'network' else id,
+                    wait=wait,
+                    progress=progress
+                )
+            except:
+                raise
+
+        return(True)
 
 class LookupDict(dict):
     """Dictionary lookup object."""
@@ -1428,3 +1120,59 @@ class LookupDict(dict):
 
     def get(self, key, default=None):
         return self.__dict__.get(key, default)
+
+def eprint(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
+
+STATUSES_BY_CODE = {
+    100: ('new', 'created'),
+    200: ('building', 'incomplete', 'allocated'),
+    300: ('active', 'complete', 'provisioned'),
+    400: ('registered', 'enrolled'),
+    500: ('error', 'server_error'),
+    600: ('updating', 'modifying'),
+    800: ('deleting', 'released', 'decommissioned'),
+    900: ('defunct', 'deleted')
+}
+
+CODES = LookupDict(name='statuses')
+for code, titles in STATUSES_BY_CODE.items():
+    for title in titles:
+        setattr(CODES, title.upper(), code)
+
+RESOURCES = {
+    'networks': {
+        'embedded': "networkList",
+        'expect': "ACCEPTED"
+    },
+    'endpoints': {
+        'embedded': "endpointList",
+        'expect': "OK"
+    },
+    'edge-routers': {
+        'embedded': "edgeRouterList",
+        'expect': "ACCEPTED"
+    },
+    'edge-router-policies': {
+        'embedded': "edgeRouterPolicyList",
+        'expect': "ACCEPTED"
+    },
+    'app-wans': {
+        'embedded': "appWanList",
+        'expect': "OK"
+    },
+    'services': {
+        'embedded': "serviceList",
+        'expect': "OK"
+    }
+}
+
+# TODO: [MOP-13441] associate locations with a short list of major regions / continents
+MAJOR_REGIONS = {
+    "AWS" : {
+        "Americas": ("Canada Central","N. California","N. Virginia","Ohio","Oregon","Sao Paulo"),
+        "EuropeMiddleEastAfrica": ("Bahrain","Cape Town South Africa","Frankfurt","Ireland","London","Milan","Paris","Stockholm"),
+        "AsiaPacific": ("Hong Kong","Mumbai","Seoul","Singapore","Sydney","Tokyo")
+    }
+}
+
