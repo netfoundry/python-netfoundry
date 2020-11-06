@@ -6,19 +6,15 @@ pipelines:
       - step:
           script:
             - echo "[pypi]" > ~/.pypirc
-            - echo "username: $PYPI_USER" >> ./pypirc
-            - echo "password: $PYPI_PASSWORD" >> ./pypirc
-#            - cat ~/.pypirc
-            # requires a new version in setup.py
+            - echo "username: $PYPI_USER" >> ~/.pypirc
+            - echo "password: $PYPI_PASSWORD" >> ~/.pypirc
             - python setup.py sdist bdist_wheel
             - twine upload dist/*
     develop:
       - step:
           script:
             - echo "[testpypi]" > ~/.pypirc
-            - echo "username: $PYPI_TEST_USER" >> ./pypirc
-            - echo "password: $PYPI_TEST_PASSWORD" >> ./pypirc
-#            - cat ~/.pypirc
-            # requires a new version in setup.py
+            - echo "username: $PYPI_TEST_USER" >> ~/.pypirc
+            - echo "password: $PYPI_TEST_PASSWORD" >> ~/.pypirc
             - python setup.py sdist bdist_wheel
             - twine upload --repository testpypi dist/*
