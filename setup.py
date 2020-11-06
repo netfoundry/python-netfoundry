@@ -6,15 +6,15 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name='netfoundry',
+    version='3.0.1',
     py_modules=['netfoundry'],
-    author='Kenneth Bingham',
-    author_email='support@netfoundry.io',
     url='https://developer.netfoundry.io/',
     description='Interface to the NetFoundry network-as-code orchestration Platform',
     long_description=long_description,
     long_description_content_type="text/markdown",
     license='MIT',
-    version='3.0.0',
+    author='Kenneth Bingham',
+    author_email='support@netfoundry.io',
     packages=setuptools.find_packages(),
     python_requires='>=3.6',
     classifiers=[
