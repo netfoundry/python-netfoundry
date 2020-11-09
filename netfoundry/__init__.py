@@ -24,7 +24,7 @@ class Session:
     def __init__(
         self, 
         token=None, 
-        credentials=str(Path.home())+"/.netfoundry/credentials.json", 
+        credentials=None, 
         proxy=None):
         """initialize with a reusable API client
         :param token: optional temporary API bearer/session token
@@ -33,9 +33,6 @@ class Session:
         The init function also gathers a few essential objects from the API and
         stores them for reuse in the instance namespace
         """
-
-        # persist the credentials filename in instances so that it may be used to refresh the token
-        self.credentials = credentials
 
         # verify auth endpoint's server certificate if proxy is type SOCKS or None
         if proxy == None:
@@ -51,19 +48,34 @@ class Session:
             else:
                 self.verify = False
         
+        # if not token then use standard env var if defined
         if token:
+            self.token = token
+        elif os.environ['NETFOUNDRY_API_TOKEN']:
+            self.token = os.environ['NETFOUNDRY_API_TOKEN']
+
+        # if the token was found then extract the expiry
+        if self.token:
             claim = jwt.decode(token,verify=False)
             # TODO: [MOP-13438] auto-renew token when near expiry (now+1hour in epoch seconds)
             expiry = claim['exp']
             epoch = time.time()
+
+        # if no token or near expiry then use credentials to obtain a token
+        if self.token and epoch < (expiry - 600):
             # extract the API URL from the claim
             self.audience = claim['scope'].replace('/ignore-scope','')
             # e.g. https://gateway.production.netfoundry.io/
-
-        # if no token or near expiry then use credentials to obtain a token
-        if token and epoch < (expiry - 600):
-            self.token = token
         else:
+            # persist the credentials filename in instances so that it may be used to refresh the token
+            if credentials:
+                self.credentials = credentials
+                os.environ['NETFOUNDRY_API_ACCOUNT'] = self.credentials
+            elif os.environ['NETFOUNDRY_API_ACCOUNT']:
+                self.credentials = os.environ['NETFOUNDRY_API_ACCOUNT']
+            else:
+                self.credentials = str(Path.home())+"/.netfoundry/credentials.json"
+
             with open(self.credentials) as f:
                 account = json.load(f)
             tokenEndpoint = account['authenticationUrl']
