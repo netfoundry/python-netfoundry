@@ -1,9 +1,12 @@
-import netfoundry
-import os
 
-Session = netfoundry.Session(
-    credentials=os.environ['HOME']+"/.netfoundry/credentials.json"#, proxy="http://localhost:4321"
-)
+
+
+```python
+#!/usr/bin/env python3
+import netfoundry
+
+# default API account credential file is ~/.netfoundry/credentials.json
+Session = netfoundry.Session()
 
 # yields a list of Network Groups in Organization.networkGroups[], but there's typically only one group
 Organization = netfoundry.Organization(Session)
@@ -12,7 +15,7 @@ Organization = netfoundry.Organization(Session)
 NetworkGroup = netfoundry.NetworkGroup(Organization)
 
 # create a Network
-netName = "BibbidiBobbidiBoo2312"
+netName = "BibbidiBobbidiBoo"
 if netName in NetworkGroup.networksByName.keys():
     # use the Network
     Network = netfoundry.Network(Session, networkName=netName)
@@ -22,8 +25,4 @@ else:
     Network = netfoundry.Network(Session, networkId=netId)
     Network.waitForStatus("PROVISIONED",wait=999,progress=True)
     Network = netfoundry.Network(Session, networkId=netId)
-
-# delete the Network and wait for confirmation
-#Network.deleteNetwork()
-
-#print('{} is {}\n'.format(Network.name, Network.status))
+```

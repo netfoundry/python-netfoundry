@@ -1,13 +1,23 @@
-image: python:3.6.0
+image: python:3.8.0
 
 pipelines:
   branches:
     master:
-      - step:
-          script:
-            - echo "username = $ARTIFACTORY_USER" >> ./pypirc
-            - echo "password = $ARTIFACTORY_PASSWORD" >> ./pypirc
-            - cp ./pypirc ~/.pypirc
-#            - cat ~/.pypirc
-            # requires a new version in setup.py
-            - python setup.py sdist upload -r pypi
+    - step:
+        script:
+        - pip install --upgrade twine
+        - echo "[pypi]" >| ~/.pypirc
+        - "echo \"username: $PYPI_USER\" >> ~/.pypirc"
+        - "echo \"password: $PYPI_PASSWORD\" >> ~/.pypirc"
+        - python setup.py sdist bdist_wheel
+        - twine upload dist/*
+    develop:
+    - step:
+        script:
+        - pip install --upgrade twine
+        - echo "[testpypi]" >| ~/.pypirc
+        - "echo \"username: $TEST_PYPI_USER\" >> ~/.pypirc"
+        - "echo \"password: $TEST_PYPI_PASSWORD\" >> ~/.pypirc"
+#        - cat ~/.pypirc
+        - python setup.py sdist bdist_wheel
+        - twine upload --repository testpypi dist/*
