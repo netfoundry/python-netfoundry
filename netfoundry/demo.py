@@ -7,6 +7,7 @@ Usage::
 import netfoundry
 import sys
 import random
+import os
 from pathlib import Path
 
 def main(netName = "BibbidiBobbidiBoo"):
@@ -112,9 +113,15 @@ def main(netName = "BibbidiBobbidiBoo"):
         EXIT1 = [end for end in ENDPOINTS if end['name'] == EXIT1_NAME][0]
         print("INFO: found Endpoint {:s}".format(EXIT1['name']))
 
+    if os.path.exists('/netfoundry'):
+        JWT_PATH = '/netfoundry'
+    else:
+        JWT_PATH = str(Path.cwd())
     for end in [DIALER1, DIALER2, DIALER3, EXIT1]:
         if end['jwt']:
-            text = open(str(Path.cwd())+'/'+end['name']+'.jwt', "wt")
+            jwt_file = JWT_PATH+'/'+end['name']+'.jwt'
+            print("DEBUG: saving OTT for {end} in {path}".format(end=end['name'],path=jwt_file))
+            text = open(jwt_file, "wt")
             text.write(end['jwt'])
             text.close()
 
