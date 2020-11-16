@@ -7,7 +7,7 @@ Learn about getting an API account by reading the [Authentication Guide](https:/
 
 ```bash
 $ python3 -m netfoundry.demo BibbidiBobbidiBoo
-INFO: running demo script in /home/kbingham/Sites/netfoundry/bitbucket/python-netfoundry/netfoundry/demo.py
+INFO: running demo script in /home/alice/.pyenv/versions/3.9.0/lib/python3.9/site-packages/netfoundry/demo.py
 ```
 
 ## Create network snippet from demo.py
