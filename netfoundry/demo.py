@@ -7,7 +7,7 @@ Usage::
 import netfoundry
 import sys
 import random
-import os
+from pathlib import Path
 
 def main(netName = "BibbidiBobbidiBoo"):
 
@@ -114,7 +114,7 @@ def main(netName = "BibbidiBobbidiBoo"):
 
     for end in [DIALER1, DIALER2, DIALER3, EXIT1]:
         if end['jwt']:
-            text = open(os.environ['HOME']+'/.netfoundry/'+end['name']+'.jwt', "wt")
+            text = open(str(Path.cwd())+'/'+end['name']+'.jwt', "wt")
             text.write(end['jwt'])
             text.close()
 
