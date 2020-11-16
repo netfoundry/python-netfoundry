@@ -76,8 +76,18 @@ class Session:
                 os.environ['NETFOUNDRY_API_ACCOUNT'] = self.credentials
             elif 'NETFOUNDRY_API_ACCOUNT' in os.environ:
                 self.credentials = os.environ['NETFOUNDRY_API_ACCOUNT']
-            else:
+            elif os.path.exists(str(Path.cwd())+"/credentials.json"):
+                self.credentials = str(Path.cwd())+"/credentials.json"
+            elif os.path.exists(str(Path.home())+"/.netfoundry/credentials.json"):
                 self.credentials = str(Path.home())+"/.netfoundry/credentials.json"
+            elif os.path.exists("/netfoundry/credentials.json"):
+                self.credentials = "/netfoundry/credentials.json"
+            else:
+                raise Exception("ERROR: need credentials file. Specify as param to Session or save in default location for project: {project} or user: {user} or device: {device}".format(
+                    project=str(Path.cwd())+"/credentials.json",
+                    user=str(Path.home())+"/.netfoundry/credentials.json",
+                    device="/netfoundry/credentials.json"
+                ))
 
             with open(self.credentials) as f:
                 account = json.load(f)
@@ -311,7 +321,7 @@ class NetworkGroup:
         try:
             headers = { "authorization": "Bearer " + self.session.token }
             response = requests.get(
-                self.session.audience+'rest/v1/networkConfigMetadata',
+                self.session.audience+'core/v2/network-configs',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
                 headers=headers
@@ -323,9 +333,9 @@ class NetworkGroup:
 
         if http_code == requests.status_codes.codes.OK: # HTTP 200
             try:
-                networkConfigMetadatas = json.loads(response.text)['_embedded']['networkConfigMetadatas']
+                networkConfigMetadatas = json.loads(response.text)['_embedded']['networkConfigMetadataList']
             except ValueError as e:
-                eprint('ERROR getting network config metadatas')
+                eprint('ERROR getting network config metadata')
                 raise(e)
         else:
             raise Exception(

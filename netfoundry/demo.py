@@ -7,7 +7,7 @@ Usage::
 import netfoundry
 import sys
 import random
-import os
+from pathlib import Path
 
 def main(netName = "BibbidiBobbidiBoo"):
 
@@ -85,6 +85,24 @@ def main(netName = "BibbidiBobbidiBoo"):
         DIALER1 = [end for end in ENDPOINTS if end['name'] == DIALER1_NAME][0]
         print("INFO: found Endpoint {:s}".format(DIALER1['name']))
 
+    DIALER2_NAME = "dialer2"
+    if not DIALER2_NAME in [end['name'] for end in ENDPOINTS]:
+        # create an Endpoint for the dialing device that will access Services
+        DIALER2 = Network.createEndpoint(name=DIALER2_NAME,attributes=["#dialers"])
+        print("INFO: created Endpoint {:s}".format(DIALER2['name']))
+    else:
+        DIALER2 = [end for end in ENDPOINTS if end['name'] == DIALER2_NAME][0]
+        print("INFO: found Endpoint {:s}".format(DIALER2['name']))
+
+    DIALER3_NAME = "dialer3"
+    if not DIALER3_NAME in [end['name'] for end in ENDPOINTS]:
+        # create an Endpoint for the dialing device that will access Services
+        DIALER3 = Network.createEndpoint(name=DIALER3_NAME,attributes=["#dialers"])
+        print("INFO: created Endpoint {:s}".format(DIALER3['name']))
+    else:
+        DIALER3 = [end for end in ENDPOINTS if end['name'] == DIALER3_NAME][0]
+        print("INFO: found Endpoint {:s}".format(DIALER3['name']))
+
     EXIT1_NAME = "exit1"
     if not EXIT1_NAME in [end['name'] for end in ENDPOINTS]:
         # create an Endpoint for the hosting device that will provide access to the server
@@ -94,9 +112,9 @@ def main(netName = "BibbidiBobbidiBoo"):
         EXIT1 = [end for end in ENDPOINTS if end['name'] == EXIT1_NAME][0]
         print("INFO: found Endpoint {:s}".format(EXIT1['name']))
 
-    for end in [DIALER1, EXIT1]:
+    for end in [DIALER1, DIALER2, DIALER3, EXIT1]:
         if end['jwt']:
-            text = open(os.environ['HOME']+'/.netfoundry/'+end['name']+'.jwt', "wt")
+            text = open(str(Path.cwd())+'/'+end['name']+'.jwt', "wt")
             text.write(end['jwt'])
             text.close()
 
@@ -179,6 +197,7 @@ def main(netName = "BibbidiBobbidiBoo"):
 
 
 if __name__ == '__main__':
+    print("INFO: running demo script in {:s}".format(sys.argv[0]))
     if len(sys.argv) == 1:
         main()
     elif len(sys.argv) == 2:
