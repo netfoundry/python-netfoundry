@@ -1,5 +1,16 @@
 
+## Play the demo
 
+This creates a demo network named "BibbidiBobbidiBoo" with your API account stored in ~/.netfoundry/credentials.json
+
+Learn about getting an API account by reading the [Authentication Guide](https://developer.netfoundry.io/v2/guides/authentication/)
+
+```bash
+$ python3 -m netfoundry.demo BibbidiBobbidiBoo
+INFO: running demo script in /home/alice/.pyenv/versions/3.9.0/lib/python3.9/site-packages/netfoundry/demo.py
+```
+
+## Create network snippet from demo.py
 
 ```python
 #!/usr/bin/env python3

@@ -11,7 +11,7 @@ pipelines:
         - "echo \"password: $PYPI_PASSWORD\" >> ~/.pypirc"
         - python setup.py sdist bdist_wheel
         - twine upload dist/*
-    develop:
+    release/*:
     - step:
         script:
         - pip install --upgrade twine

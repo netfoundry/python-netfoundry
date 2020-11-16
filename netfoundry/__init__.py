@@ -318,7 +318,7 @@ class NetworkGroup:
         try:
             headers = { "authorization": "Bearer " + self.session.token }
             response = requests.get(
-                self.session.audience+'rest/v1/networkConfigMetadata',
+                self.session.audience+'core/v2/network-configs',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
                 headers=headers
@@ -330,9 +330,9 @@ class NetworkGroup:
 
         if http_code == requests.status_codes.codes.OK: # HTTP 200
             try:
-                networkConfigMetadatas = json.loads(response.text)['_embedded']['networkConfigMetadatas']
+                networkConfigMetadatas = json.loads(response.text)['_embedded']['networkConfigMetadataList']
             except ValueError as e:
-                eprint('ERROR getting network config metadatas')
+                eprint('ERROR getting network config metadata')
                 raise(e)
         else:
             raise Exception(
