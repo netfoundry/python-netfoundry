@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name='netfoundry',
-    version='3.1.3',
+    version='3.1.4',
     py_modules=['netfoundry'],
     url='https://developer.netfoundry.io/v2/',
     description='Interface to the NetFoundry network-as-code orchestration Platform',
