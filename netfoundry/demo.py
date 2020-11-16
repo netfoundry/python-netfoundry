@@ -8,7 +8,6 @@ import netfoundry
 import sys
 import random
 
-
 def main(netName = "BibbidiBobbidiBoo"):
 
     Session = netfoundry.Session()
@@ -96,7 +95,7 @@ def main(netName = "BibbidiBobbidiBoo"):
 
     for end in [DIALER1, EXIT1]:
         if end['jwt']:
-            text = open('/root/.netfoundry/'+end['name']+'.jwt', "wt")
+            text = open(os.environ['HOME']+'/.netfoundry/'+end['name']+'.jwt', "wt")
             text.write(end['jwt'])
             text.close()
 
