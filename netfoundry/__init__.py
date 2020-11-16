@@ -10,12 +10,13 @@ import time                 # enforce a timeout; sleep
 from uuid import UUID       # validate UUIDv4 strings
 import jwt                  # decode the JWT claimset
 from pathlib import Path    #
+import os
 
 class Session:
     """ Use an API account from a credentials file as described in https://developer.netfoundry.io/v2/guides/authentication/
     Example credentials file:
     {
-        "cliid": "3tcm6to3qqfu78juj9huppk9g3",
+        "clientId": "3tcm6to3qqfu78juj9huppk9g3",
         "password": "149a7ksfj3t5lstg0pesun69m1l4k91d6h8m779l43q0ekekr782",
         "authenticationUrl": "https://netfoundry-production-xfjiye.auth.us-east-1.amazoncognito.com/oauth2/token"
     }
@@ -49,29 +50,31 @@ class Session:
                 self.verify = False
         
         # if not token then use standard env var if defined
-        if token:
+        if token is not None:
             self.token = token
-        elif os.environ['NETFOUNDRY_API_TOKEN']:
+        elif 'NETFOUNDRY_API_TOKEN' in os.environ:
             self.token = os.environ['NETFOUNDRY_API_TOKEN']
 
         # if the token was found then extract the expiry
-        if self.token:
+        try: self.token
+        except AttributeError: epoch = None
+        else:
             claim = jwt.decode(token,verify=False)
             # TODO: [MOP-13438] auto-renew token when near expiry (now+1hour in epoch seconds)
             expiry = claim['exp']
             epoch = time.time()
 
         # if no token or near expiry then use credentials to obtain a token
-        if self.token and epoch < (expiry - 600):
+        if epoch is not None and epoch < (expiry - 600):
             # extract the API URL from the claim
             self.audience = claim['scope'].replace('/ignore-scope','')
             # e.g. https://gateway.production.netfoundry.io/
         else:
             # persist the credentials filename in instances so that it may be used to refresh the token
-            if credentials:
+            if credentials is not None:
                 self.credentials = credentials
                 os.environ['NETFOUNDRY_API_ACCOUNT'] = self.credentials
-            elif os.environ['NETFOUNDRY_API_ACCOUNT']:
+            elif 'NETFOUNDRY_API_ACCOUNT' in os.environ:
                 self.credentials = os.environ['NETFOUNDRY_API_ACCOUNT']
             else:
                 self.credentials = str(Path.home())+"/.netfoundry/credentials.json"
