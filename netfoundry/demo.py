@@ -179,6 +179,7 @@ def main(netName = "BibbidiBobbidiBoo"):
 
 
 if __name__ == '__main__':
+    print("INFO: running demo script in {:s}".format(sys.argv[0]))
     if len(sys.argv) == 1:
         main()
     elif len(sys.argv) == 2:
