@@ -76,8 +76,15 @@ class Session:
                 os.environ['NETFOUNDRY_API_ACCOUNT'] = self.credentials
             elif 'NETFOUNDRY_API_ACCOUNT' in os.environ:
                 self.credentials = os.environ['NETFOUNDRY_API_ACCOUNT']
-            else:
+            elif os.path.exists(str(Path.home())+"/.netfoundry/credentials.json"):
                 self.credentials = str(Path.home())+"/.netfoundry/credentials.json"
+            elif os.path.exists("/netfoundry/credentials.json"):
+                self.credentials = "/netfoundry/credentials.json"
+            else:
+                raise Exception("ERROR: need credentials file. Specify as param to Session or save in default location for user: {user} or device: {device}".format(
+                    user=str(Path.home())+"/.netfoundry/credentials.json"),
+                    device="/netfoundry/credentials.json"
+                )
 
             with open(self.credentials) as f:
                 account = json.load(f)
