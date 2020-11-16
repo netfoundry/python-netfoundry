@@ -7,6 +7,7 @@ Usage::
 import netfoundry
 import sys
 import random
+import os
 
 def main(netName = "BibbidiBobbidiBoo"):
 
