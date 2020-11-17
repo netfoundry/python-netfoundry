@@ -134,7 +134,7 @@ def main(netName = "BibbidiBobbidiBoo"):
         EXIT1 = [end for end in ENDPOINTS if end['name'] == EXIT1_NAME][0]
     #    print("INFO: found Endpoint {:s}".format(EXIT1['name']))
 
-    # create Services unless name exists
+    # create Endpoint-hosted Services unless name exists
     HELLO1_NAME = "hello Service"
     SERVICES = Network.services()
     if not HELLO1_NAME in [svc['name'] for svc in SERVICES]:
@@ -174,7 +174,7 @@ def main(netName = "BibbidiBobbidiBoo"):
 
     HTTPBIN1_NAME = "httpbin Service"
     if not HTTPBIN1_NAME in [svc['name'] for svc in SERVICES]:
-        # traffic sent to speedtest.netfoundry:80 leaves Endpoint exit1 to server speedtest:8080
+        # traffic sent to httpbin.netfoundry:80 leaves Endpoint exit1 to server httpbin:80
         HTTPBIN1 = Network.createService(
             name=HTTPBIN1_NAME,
             attributes=["#welcomeWagon"],
@@ -190,6 +190,45 @@ def main(netName = "BibbidiBobbidiBoo"):
         HTTPBIN1 = [svc for svc in SERVICES if svc['name'] == HTTPBIN1_NAME][0]
         print("INFO: found Service {:s}".format(HTTPBIN1['name']))
 
+    # Create router-hosted Services unless exists
+    HOSTED_ROUTERS = [er for er in Network.edgeRouters() if er['dataCenterId']]
+    EGRESS_ROUTER = random.choice(HOSTED_ROUTERS)
+
+    WEATHER1_NAME = "Weather Service"
+    if not WEATHER1_NAME in [svc['name'] for svc in SERVICES]:
+        # traffic sent to weather.netfoundry:80 leaves Routers to wttr.in:80
+        WEATHER1 = Network.createService(
+            name=WEATHER1_NAME,
+            attributes=["#welcomeWagon"],
+            clientHostName="weather.netfoundry",
+            clientPortRange="80",
+            egressRouterId=EGRESS_ROUTER['id'],
+            serverHostName="wttr.in",
+            serverPortRange="80",
+            serverProtocol="TCP"
+        )
+        print("INFO: created Service {:s}".format(WEATHER1['name']))
+    else:
+        WEATHER1 = [svc for svc in SERVICES if svc['name'] == WEATHER1_NAME][0]
+        print("INFO: found Service {:s}".format(WEATHER1['name']))
+
+    ECHO1_NAME = "Echo Service"
+    if not ECHO1_NAME in [svc['name'] for svc in SERVICES]:
+        # traffic sent to echo.netfoundry:80 leaves Routers to eth0.me:80
+        ECHO1 = Network.createService(
+            name=ECHO1_NAME,
+            attributes=["#welcomeWagon"],
+            clientHostName="echo.netfoundry",
+            clientPortRange="80",
+            egressRouterId=EGRESS_ROUTER['id'],
+            serverHostName="eth0.me",
+            serverPortRange="80",
+            serverProtocol="TCP"
+        )
+        print("INFO: created Service {:s}".format(ECHO1['name']))
+    else:
+        ECHO1 = [svc for svc in SERVICES if svc['name'] == ECHO1_NAME][0]
+        print("INFO: found Service {:s}".format(ECHO1['name']))
 
     # create unless exists
     WELCOMEWAN1_NAME = "Welcome"
