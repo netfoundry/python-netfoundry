@@ -63,12 +63,14 @@ class Session:
             # TODO: [MOP-13438] auto-renew token when near expiry (now+1hour in epoch seconds)
             expiry = claim['exp']
             epoch = time.time()
+            print("DEBUG: found API token in env NETFOUNDRY_API_TOKEN")
 
         # if no token or near expiry then use credentials to obtain a token
         if epoch is not None and epoch < (expiry - 600):
             # extract the API URL from the claim
             self.audience = claim['scope'].replace('/ignore-scope','')
             # e.g. https://gateway.production.netfoundry.io/
+            print("DEBUG: using API token from env NETFOUNDRY_API_TOKEN")
         else:
             # persist the credentials filename in instances so that it may be used to refresh the token
             if credentials is not None:
