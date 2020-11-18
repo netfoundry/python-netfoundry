@@ -163,24 +163,6 @@ def main(netName, privateServices=False):
             HELLO1 = [svc for svc in SERVICES if svc['name'] == HELLO1_NAME][0]
             print("INFO: found Service \"{:s}\"".format(HELLO1['name']))
 
-        SPEED1_NAME = "speedtest Service"
-        if not SPEED1_NAME in [svc['name'] for svc in SERVICES]:
-            # traffic sent to speedtest.netfoundry:80 leaves Endpoint exit1 to server speedtest:8080
-            SPEED1 = Network.createService(
-                name=SPEED1_NAME,
-                attributes=["#welcomeWagon"],
-                clientHostName="speedtest.netfoundry",
-                clientPortRange="80",
-                endpoints=[EXIT1['id']],
-                serverHostName="speedtest",
-                serverPortRange="8080",
-                serverProtocol="TCP"
-            )
-            print("INFO: created Service \"{:s}\"".format(SPEED1['name']))
-        else:
-            SPEED1 = [svc for svc in SERVICES if svc['name'] == SPEED1_NAME][0]
-            print("INFO: found Service \"{:s}\"".format(SPEED1['name']))
-
         HTTPBIN1_NAME = "httpbin Service"
         if not HTTPBIN1_NAME in [svc['name'] for svc in SERVICES]:
             # traffic sent to httpbin.netfoundry:80 leaves Endpoint exit1 to server httpbin:80
@@ -220,6 +202,9 @@ def main(netName, privateServices=False):
         WEATHER1 = [svc for svc in SERVICES if svc['name'] == WEATHER1_NAME][0]
         print("INFO: found Service \"{:s}\"".format(WEATHER1['name']))
 
+    # fireworks
+    # heartbeat
+    
     ECHO1_NAME = "Echo Service"
     if not ECHO1_NAME in [svc['name'] for svc in SERVICES]:
         # traffic sent to echo.netfoundry:80 leaves Routers to eth0.me:80
