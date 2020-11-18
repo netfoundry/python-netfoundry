@@ -134,9 +134,9 @@ def main(netName = "BibbidiBobbidiBoo"):
         EXIT1 = [end for end in ENDPOINTS if end['name'] == EXIT1_NAME][0]
     #    print("INFO: found Endpoint {:s}".format(EXIT1['name']))
 
+    SERVICES = Network.services()
     # create Endpoint-hosted Services unless name exists
     HELLO1_NAME = "hello Service"
-    SERVICES = Network.services()
     if not HELLO1_NAME in [svc['name'] for svc in SERVICES]:
         # traffic sent to hello.netfoundry:80 leaves Endpoint exit1 to server hello:3000
         HELLO1 = Network.createService(
