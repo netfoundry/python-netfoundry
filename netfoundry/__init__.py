@@ -76,21 +76,42 @@ class Session:
                 os.environ['NETFOUNDRY_API_ACCOUNT'] = self.credentials
             elif 'NETFOUNDRY_API_ACCOUNT' in os.environ:
                 self.credentials = os.environ['NETFOUNDRY_API_ACCOUNT']
-            elif os.path.exists(str(Path.cwd())+"/credentials.json"):
-                self.credentials = str(Path.cwd())+"/credentials.json"
-            elif os.path.exists(str(Path.home())+"/.netfoundry/credentials.json"):
-                self.credentials = str(Path.home())+"/.netfoundry/credentials.json"
-            elif os.path.exists("/netfoundry/credentials.json"):
-                self.credentials = "/netfoundry/credentials.json"
             else:
-                raise Exception("ERROR: need credentials file. Specify as param to Session or save in default location for project: {project} or user: {user} or device: {device}".format(
-                    project=str(Path.cwd())+"/credentials.json",
-                    user=str(Path.home())+"/.netfoundry/credentials.json",
-                    device="/netfoundry/credentials.json"
+                self.credentials = "credentials.json"
+
+            # unless a valid path assume relative and search the default chain
+            if not os.path.exists(self.credentials):
+                default_creds_chain = [
+                    {
+                        "scope": "project",
+                        "base": str(Path.cwd())
+                    },
+                    {
+                        "scope": "user",
+                        "base": str(Path.home())+"/.netfoundry"
+                    },
+                    {
+                        "scope": "device",
+                        "base": "/netfoundry"
+                    }
+                ]
+                for link in default_creds_chain:
+                    candidate = link['base']+"/"+self.credentials
+                    if os.path.exists(candidate):
+                        print("INFO: using default {scope} credentials in {path}".format(
+                            scope=link['scope'],
+                            path=candidate
+                        ))
+                        self.credentials = candidate
+                        break
+            else:
+                print("INFO: using credentials in {path}".format(
+                    path=self.credentials
                 ))
 
-            with open(self.credentials) as f:
-                account = json.load(f)
+            with open(self.credentials) as file:
+                try: account = json.load(file)
+                except: raise Exception("ERROR: failed to load JSON from {file}".format(file=file))
             tokenEndpoint = account['authenticationUrl']
             clientId = account['clientId']
             password = account['password']
