@@ -569,6 +569,42 @@ class Network:
         self.deleteResource(type="network",wait=wait,progress=progress)
 #        raise Exception("ERROR: failed to delete Network {:s}".format(self.name))
 
+    def shareEndpoint(self,recipient,endpointId):
+        """share the new endpoint enrollment token with an email address
+            :recipient [required] the email address
+            :endpointId [required] the UUID of the endpoint
+        """
+        try:
+            headers = {
+                "authorization": "Bearer " + self.session.token 
+            }
+            body = [
+                {
+                    "toList": [recipient],
+                    "subject": "Your enrollment token for {:s}".format(self.name),
+                    "id": endpointId
+                }
+            ]
+            response = requests.post(
+                self.session.audience+'core/v2/endpoints/share',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                json=body
+            )
+            http_code = response.status_code
+        except:
+            raise
+
+        if not http_code == requests.status_codes.codes['ACCEPTED']:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d}\n{})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code,
+                    response.text
+                )
+            )
+            
     def getResources(self,type):
         """return the resources object
             :type [required] one of endpoints, edge-routers, services
