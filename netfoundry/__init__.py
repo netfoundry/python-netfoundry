@@ -32,7 +32,7 @@ class Session:
         :param credentials: optional alternative path to API account credentials file
         :param proxy: optional HTTP proxy, e.g., http://localhost:8080
         The init function also gathers a few essential objects from the API and
-        stores them for reuse in the instance namespace
+        stores them as attributes on the model
         """
 
         # verify auth endpoint's server certificate if proxy is type SOCKS or None
@@ -59,7 +59,7 @@ class Session:
         try: self.token
         except AttributeError: epoch = None
         else:
-            claim = jwt.decode(token,verify=False)
+            claim = jwt.decode(self.token,verify=False)
             # TODO: [MOP-13438] auto-renew token when near expiry (now+1hour in epoch seconds)
             expiry = claim['exp']
             epoch = time.time()
@@ -291,6 +291,21 @@ class NetworkGroup:
         self.session = Organization.session
         self.id = self.networkGroupId
         self.name = self.networkGroupName
+        self.vanity = self.networkGroupName.lower()
+
+        # learn about the environment from the token and predict the web console URL
+        try:
+            claim = jwt.decode(self.session.token,verify=False)
+            iss = claim['iss']
+            if re.match('.*cognito.*', iss):
+                self.environment = re.sub(r'https://gateway\.([^.]+)\.netfoundry\.io.*',r'\1',claim['scope'])
+            elif re.match('auth0', iss):
+                self.environment = re.sub(r'https://netfoundry-([^.]+)\.auth0\.com.*',r'\1',claim['iss'])
+            if self.environment == "production":
+                self.nfconsole = "https://{vanity}.nfconsole.io".format(vanity=self.vanity)
+            else:
+                self.nfconsole = "https://{vanity}.{env}-nfconsole.io".format(vanity=self.vanity, env=self.environment)
+        except: raise
 
         # an attribute that is a dict for resolving network UUIDs by name
         self.networksByName = dict()
@@ -529,10 +544,8 @@ class Network:
         self.status = self.describe['status']
         self.productVersion = self.describe['productVersion']
         self.ownerIdentityId = self.describe['ownerIdentityId']
-        self.deletedBy = self.describe['deletedBy']
         self.networkConfigMetadataId = self.describe['networkConfigMetadataId']
         self.o365BreakoutCategory = self.describe['o365BreakoutCategory']
-        self.deletedAt = self.describe['deletedAt']
         self.createdAt = self.describe['createdAt']
         self.updatedAt = self.describe['updatedAt']
         self.createdBy = self.describe['createdBy']
@@ -873,15 +886,6 @@ class Network:
 
         return(appwan)
 
-
-
-
-
-
-
-
-
-
     def getNetworkByName(self,name):
         """return exactly one network object
             :name required name of the NF network may contain quoted whitespace
@@ -1048,17 +1052,22 @@ class Network:
 
         try:
             headers = { "authorization": "Bearer " + self.session.token }
-            entityUrl = self.session.audience+'core/v2/networks/'+self.id
-            if not type == 'network':
-                if id is None:
-                    raise Exception("ERROR: entity UUID must be specified if not a network")
-                entityUrl += '/'+type+'s/'+id
-
+            entityUrl = self.session.audience+'core/v2/'
+            if type == 'network':
+                entityUrl += 'networks/'+self.id
+            elif id is None:
+                raise Exception("ERROR: entity UUID must be specified if not a network")
+            else:
+                entityUrl += type+'s/'+id
+            params = {
+                "networkId": self.id
+            }
             response = requests.get(
                 entityUrl,
                 proxies=self.session.proxies,
                 verify=self.session.verify,
-                headers=headers
+                headers=headers,
+                params=params
             )
             http_code = response.status_code
         except:
@@ -1071,15 +1080,18 @@ class Network:
             except:
                 eprint('ERROR parsing entity object in response')
                 raise
+            else:
+                return {
+                    'http_status': requests.status_codes._codes[http_code][0].upper(),
+                    'http_code': http_code,
+                    'status': status,
+                    'name': name
+                }
         else:
-            status = None
-
-        return {
-            'http_status': requests.status_codes._codes[http_code][0].upper(),
-            'http_code': http_code,
-            'status': status,
-            'name': name
-        }
+            return {
+                'http_status': requests.status_codes._codes[http_code][0].upper(),
+                'http_code': http_code
+            }
 
     def deleteResource(self, type, id=None, wait=int(0), progress=False):
         """
