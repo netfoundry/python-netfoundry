@@ -344,7 +344,7 @@ class NetworkGroup:
         self.session = Organization.session
         self.id = self.networkGroupId
         self.name = self.networkGroupName
-        self.vanity = Organization.label
+        self.vanity = Organization.label.lower()
 
         # learn about the environment from the token and predict the web console URL
         try:
