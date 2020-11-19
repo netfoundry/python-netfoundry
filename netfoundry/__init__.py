@@ -63,12 +63,14 @@ class Session:
             # TODO: [MOP-13438] auto-renew token when near expiry (now+1hour in epoch seconds)
             expiry = claim['exp']
             epoch = time.time()
+            print("DEBUG: found API token in env NETFOUNDRY_API_TOKEN")
 
         # if no token or near expiry then use credentials to obtain a token
         if epoch is not None and epoch < (expiry - 600):
             # extract the API URL from the claim
             self.audience = claim['scope'].replace('/ignore-scope','')
             # e.g. https://gateway.production.netfoundry.io/
+            print("DEBUG: using API token from env NETFOUNDRY_API_TOKEN")
         else:
             # persist the credentials filename in instances so that it may be used to refresh the token
             if credentials is not None:
@@ -170,9 +172,39 @@ class Organization:
         # always resolve Network Groups so we can specify either name or ID when calling super()
         self.networkGroups = self.getNetworkGroups()
         self.networkGroupsByName = dict()
-        for ng in self.networkGroups:
-            self.networkGroupsByName[ng['organizationShortName']] = ng['id']
-            # e.g. { NFADMIN: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
+        self.label = self.getOrganization()['label']
+
+    def getOrganization(self):
+        """return the Organizations object (formerly "tenants")
+        """
+        try:
+            headers = { "authorization": "Bearer " + self.session.token }
+            response = requests.get(
+                self.session.audience+'identity/v1/organizations',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers
+            )
+            http_code = response.status_code
+        except:
+            raise
+
+        if http_code == requests.status_codes.codes.OK: # HTTP 200
+            try:
+                organizations = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR getting Network Groups')
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        return(organizations[0])
+
 
     def getNetworkGroups(self):
         """return the Network Groups object (formerly "organizations")
@@ -312,7 +344,7 @@ class NetworkGroup:
         self.session = Organization.session
         self.id = self.networkGroupId
         self.name = self.networkGroupName
-        self.vanity = self.networkGroupName.lower()
+        self.vanity = Organization.label
 
         # learn about the environment from the token and predict the web console URL
         try:
@@ -341,15 +373,11 @@ class NetworkGroup:
         for config in self.networkConfigMetadatas:
             self.networkConfigMetadatasByName[config['name']] = config['id']
             # e.g. { small: 2616da5c-4441-4c3d-a9a2-ed37262f2ef4 }
-        self.dataCenters = self.getDataCenters()
-        self.dataCentersByLocationCode = dict()
-        for dc in self.dataCenters:
-            self.dataCentersByLocationCode[dc['locationCode']] = dc['id']
+        self.ncDataCenters = self.getControllerDataCenters()
+        self.ncDataCentersByLocationCode = dict()
+        for dc in self.ncDataCenters:
+            self.ncDataCentersByLocationCode[dc['locationCode']] = dc['id']
             # e.g. { us-east-1: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
-
-        self.dataCentersByMajorRegion = dict()
-        for major in MAJOR_REGIONS['AWS'].keys():
-            self.dataCentersByMajorRegion[major] = [dc for dc in self.dataCenters if dc['provider'] == "AWS" and dc['locationName'] in MAJOR_REGIONS['AWS'][major]]
 
     def getNetworkConfigMetadatas(self):
         """return the list of network config metadata which are required to create a network
@@ -383,18 +411,22 @@ class NetworkGroup:
 
         return(networkConfigMetadatas)
 
-    def getDataCenters(self):
-        """return the dataCenters object
-        :param kwargs: optional named parameters as field filters
+    def getControllerDataCenters(self):
+        """list the dataCenters where a Network Controller may be created
         """
         try:
             # dataCenters returns a list of dicts (datacenter objects)
             headers = { "authorization": "Bearer " + self.session.token }
+            params = {
+                "hostType": "NC",
+                "provider": "AWS"
+            }
             response = requests.get(
-                self.session.audience+'rest/v1/dataCenters',
+                self.session.audience+'core/v2/data-centers',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
-                headers=headers
+                headers=headers,
+                params=params
             )
             http_code = response.status_code
         except:
@@ -571,6 +603,10 @@ class Network:
         self.updatedAt = self.describe['updatedAt']
         self.createdBy = self.describe['createdBy']
 
+        self.awsGeoRegions = dict()
+        for geo in MAJOR_REGIONS['AWS'].keys():
+            self.awsGeoRegions[geo] = [dc for dc in self.getEdgeRouterDataCenters(provider="AWS") if dc['locationName'] in MAJOR_REGIONS['AWS'][geo]]
+
     def endpoints(self):
         return(self.getResources("endpoints"))
 
@@ -589,6 +625,48 @@ class Network:
     def deleteNetwork(self,wait=300,progress=True):
         self.deleteResource(type="network",wait=wait,progress=progress)
 #        raise Exception("ERROR: failed to delete Network {:s}".format(self.name))
+
+    def getEdgeRouterDataCenters(self,provider=None):
+        """list the dataCenters where an Edge Router may be created
+        """
+        try:
+            # dataCenters returns a list of dicts (datacenter objects)
+            headers = { "authorization": "Bearer " + self.session.token }
+            params = {
+                "productVersion": self.productVersion,
+                "hostType": "ER"
+            }
+            if provider is not None:
+                if provider in ["AWS", "AZURE", "GCP", "ALICLOUD", "NetFoundry"]:
+                    params['provider'] = provider
+                else:
+                    raise Exception("ERROR: illegal cloud provider {:s}".format(provider))
+            response = requests.get(
+                self.session.audience+'core/v2/data-centers',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                params=params
+            )
+            http_code = response.status_code
+        except:
+            raise
+
+        if http_code == requests.status_codes.codes.OK: # HTTP 200
+            try:
+                dataCenters = json.loads(response.text)['_embedded']['dataCenters']
+            except ValueError as e:
+                eprint('ERROR getting dataCenters')
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        return(dataCenters)
 
     def shareEndpoint(self,recipient,endpointId):
         """share the new endpoint enrollment token with an email address
@@ -1261,7 +1339,7 @@ RESOURCES = {
     }
 }
 
-# TODO: [MOP-13441] associate locations with a short list of major regions / continents
+# TODO: [MOP-13441] associate locations with a short list of major geographic regions / continents
 MAJOR_REGIONS = {
     "AWS" : {
         "Americas": ("Canada Central","N. California","N. Virginia","Ohio","Oregon","Sao Paulo"),

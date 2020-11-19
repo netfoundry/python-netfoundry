@@ -9,6 +9,7 @@ import sys
 import random
 import os
 from pathlib import Path
+import argparse
 
 def main(netName, privateServices=False):
 
@@ -44,10 +45,10 @@ def main(netName, privateServices=False):
     FABRIC_PLACEMENTS = list()
     DESIRED_COUNT = 1
     for region in MAJOR_REGIONS:
-        dataCenterIds = [dc['id'] for dc in NetworkGroup.dataCentersByMajorRegion[region]]
+        dataCenterIds = [dc['id'] for dc in Network.awsGeoRegions[region]]
         existing_count = len([er for er in EDGE_ROUTERS if er['dataCenterId'] in dataCenterIds])
         if existing_count < DESIRED_COUNT:
-            choice = random.choice(NetworkGroup.dataCentersByMajorRegion[region])
+            choice = random.choice(Network.awsGeoRegions[region])
             # append the current major region to the randomly-chosen dataCenter object
             #   so we can use it as a role attribute when we create the hosted Edge Router
             choice['majorRegion'] = region
@@ -57,7 +58,7 @@ def main(netName, privateServices=False):
 
     for location in FABRIC_PLACEMENTS:
         er = Network.createEdgeRouter(
-            name=location['name'],
+            name=location['locationName'],
             attributes=[
                 "#defaultRouters",
                 "#"+location['locationCode'],
@@ -67,7 +68,7 @@ def main(netName, privateServices=False):
         )
         print("INFO: Placed Edge Router in {major} ({locationName})".format(
             major=location['majorRegion'],
-            locationName=location['name']
+            locationName=location['locationName']
         ))
 
     HOSTED_ROUTERS = [er for er in Network.edgeRouters() if er['dataCenterId']]
@@ -125,7 +126,10 @@ def main(netName, privateServices=False):
     else:
         JWT_PATH = str(Path.cwd())
     for end in [DIALER1, DIALER2, DIALER3, EXIT1]:
-        if end['jwt']:
+        try:
+            end['jwt']
+        except KeyError: pass
+        else:
             jwt_file = JWT_PATH+'/'+end['name']+'.jwt'
             print("DEBUG: saving OTT for {end} in {path}".format(end=end['name'],path=jwt_file))
             text = open(jwt_file, "wt")
@@ -241,13 +245,20 @@ def main(netName, privateServices=False):
 
 
 if __name__ == '__main__':
-    print("INFO: running demo script in \"{:s}\"".format(sys.argv[0]))
-    if len(sys.argv) == 1:
-        raise Exception("ERROR: Network name expected as first parameter")
-    elif len(sys.argv) == 2:
-        main(netName=sys.argv[1])
-    elif len(sys.argv) == 3 and sys.argv[2] == "privateServices":
-        main(netName=sys.argv[1], privateServices=True)
-    else:
-        raise Exception("ERROR: too many args, only network name expected")
 
+    PARSER = argparse.ArgumentParser()
+    PARSER.add_argument(
+        "-n", "--network",
+        default=None,
+        help="The name of your demo network"
+    )
+    PARSER.add_argument(
+        "-p", "--private",
+        default=False,
+        action="store_true",
+        help="Also create private Services for the Docker Compose Demo"
+    )
+    ARGS = PARSER.parse_args()
+
+    print("INFO: running demo script in \"{:s}\"".format(sys.argv[0]))
+    main(netName=ARGS.network, privateServices=ARGS.private)
