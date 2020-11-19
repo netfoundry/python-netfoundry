@@ -253,7 +253,8 @@ if __name__ == '__main__':
         help="The name of your demo network"
     )
     PARSER.add_argument(
-        "-p", "--private",
+        "-p", "--make-private-services",
+        dest="private",
         default=False,
         action="store_true",
         help="Also create private Services for the Docker Compose Demo"
