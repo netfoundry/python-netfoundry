@@ -741,7 +741,7 @@ class Network:
                 )
             )
             
-    def getResources(self,type):
+    def getResources(self,type,name=None):
         """return the resources object
             :type [required] one of endpoints, edge-routers, services
         """
@@ -755,6 +755,8 @@ class Network:
                 "size": 10,
                 "sort": "name,asc"
             }
+            if name is not None:
+                params['name'] = name
             response = requests.get(
                 self.session.audience+'core/v2/'+type,
                 proxies=self.session.proxies,
@@ -822,6 +824,40 @@ class Network:
                         )
                     )
             return(all_pages)
+
+    def patchResource(self,patch):
+        """return a resources
+            :patch: required dictionary with the new properties 
+        """
+        try:
+            headers = {
+                "authorization": "Bearer " + self.session.token 
+            }
+            response = requests.patch(
+                patch['_links']['self']['href'],
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                json=patch
+            )
+            http_code = response.status_code
+        except:
+            raise
+
+        if http_code == requests.status_codes.codes.OK: # HTTP 200
+            try:
+                resource = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load {r} object from PATCH response'.format(r = type))
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+        return(resource)
 
     def createEndpoint(self, name, attributes=[]):
         """create an Endpoint
@@ -900,6 +936,8 @@ class Network:
             except ValueError as e:
                 eprint('ERROR: failed to load {:s} object from POST response'.format("Edge Router"))
                 raise(e)
+            else:
+                print('DEBUG: created Edge Router trace ID {:s}'.format(response.headers._store['x-b3-traceid'][1]))
         else:
             raise Exception(
                 'unexpected response: {} (HTTP {:d})'.format(
@@ -1134,7 +1172,7 @@ class Network:
 
         return(network)
 
-    def waitForStatus(self, expect, type="network", wait=300, sleep=9, id=None, progress=False):
+    def waitForStatus(self, expect, type="network", wait=300, sleep=20, id=None, progress=False):
         """continuously poll for the expected status until expiry
         :param expect: the expected status symbol e.g. PROVISIONED
         :param id: the UUID of the entity having a status if entity is not a network
@@ -1264,11 +1302,13 @@ class Network:
         try:
             headers = { "authorization": "Bearer " + self.session.token }
             entityUrl = self.session.audience+'core/v2/networks/'+self.id
+            expect = requests.status_codes.codes.ACCEPTED
             if not type == 'network':
                 if id is None:
                     raise Exception("ERROR: need entity UUID to delete")
-                entityUrl += '/'+type+'s/'+id
-
+                entityUrl = self.session.audience+'core/v2/'+type+'s/'+id
+                expect = requests.status_codes.codes.OK
+            eprint("WARN: deleting {:s}".format(entityUrl))
             response = requests.delete(
                 entityUrl,
                 proxies=self.session.proxies,
@@ -1279,7 +1319,7 @@ class Network:
         except:
             raise
 
-        if not http_code == requests.status_codes.codes.ACCEPTED:
+        if not http_code == expect:
             raise Exception(
                 'unexpected response: {} (HTTP {:d})'.format(
                     requests.status_codes._codes[http_code][0].upper(),

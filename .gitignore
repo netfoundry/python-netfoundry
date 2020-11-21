@@ -361,5 +361,5 @@ jenkins_home
 typescript
 typescript*.*
 
-/credentials.json
+/*.json
 /*.jwt
