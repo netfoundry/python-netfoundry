@@ -131,7 +131,7 @@ def main():
 
     ENDPOINTS = Network.endpoints()
     DIALERS = list()
-    DIALER1_NAME = "Desktop 1"
+    DIALER1_NAME = "Desktop1"
     if not DIALER1_NAME in [end['name'] for end in ENDPOINTS]:
         # create an Endpoint for the dialing device that will access Services
         DIALER1 = Network.createEndpoint(name=DIALER1_NAME,attributes=["#dialers"])
@@ -141,7 +141,7 @@ def main():
         print("INFO: found Endpoint \"{:s}\"".format(DIALER1['name']))
     DIALERS += [DIALER1]
 
-    DIALER2_NAME = "Mobile 1"
+    DIALER2_NAME = "Mobile1"
     if not DIALER2_NAME in [end['name'] for end in ENDPOINTS]:
         # create an Endpoint for the dialing device that will access Services
         DIALER2 = Network.createEndpoint(name=DIALER2_NAME,attributes=["#dialers"])
@@ -152,7 +152,7 @@ def main():
     DIALERS += [DIALER2]
 
     if ARGS.dialer:
-        DIALER3_NAME = "Linux 1"
+        DIALER3_NAME = "Linux1"
         if not DIALER3_NAME in [end['name'] for end in ENDPOINTS]:
             # create an Endpoint for the dialing device that will access Services
             DIALER3 = Network.createEndpoint(name=DIALER3_NAME,attributes=["#dialers"])
@@ -164,7 +164,7 @@ def main():
 
     EXITS = list()
     if ARGS.private:
-        EXIT1_NAME = "exit1"
+        EXIT1_NAME = "Exit1"
         if not EXIT1_NAME in [end['name'] for end in ENDPOINTS]:
             # create an Endpoint for the hosting device that will provide access to the server
             EXIT1 = Network.createEndpoint(name=EXIT1_NAME,attributes=["#exits"])
@@ -195,14 +195,6 @@ def main():
     SERVICES = Network.services()
 
     if ARGS.private:
-        # check Endpoint exit1 exists
-        ENDPOINTS = Network.endpoints()
-        EXIT1_NAME = "exit1"
-        if not EXIT1_NAME in [end['name'] for end in ENDPOINTS]:
-            raise Exception("ERROR: missing hosting Endpoint \"{:s}\"".format(EXIT1_NAME))
-        else:
-            EXIT1 = [end for end in ENDPOINTS if end['name'] == EXIT1_NAME][0]
-
         # create Endpoint-hosted Services unless name exists
         HELLO1_NAME = "hello Service"
         if not HELLO1_NAME in [svc['name'] for svc in SERVICES]:
