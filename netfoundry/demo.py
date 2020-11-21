@@ -21,11 +21,29 @@ def main():
         help="The name of your demo network"
     )
     PARSER.add_argument(
-        "-p", "--make-private-services",
+        "-p", "--create-private",
         dest="private",
         default=False,
         action="store_true",
         help="Also create private Services for the Docker Compose Demo"
+    )
+    PARSER.add_argument(
+        "-d", "--create-dialer",
+        dest="dialer",
+        default=False,
+        action="store_true",
+        help="Also create a Linux dialer for the Docker Compose Demo"
+    )
+    PARSER.add_argument("--credentials",
+        default=None,
+        help="path to API account credentials JSON file overrides NETFOUNDRY_API_ACCOUNT"
+    )
+    PARSER.add_argument("--regions",
+        default=["Americas"],
+        nargs="+",
+        required=False,
+        help="space-separated one or more major geographic regions in which to place Edge Routers for overlay fabric: "
+                +' '.join(["Americas", "EuropeMiddleEastAfrica", "AsiaPacific"])
     )
     PARSER.add_argument("--proxy",
         default=None,
@@ -37,7 +55,10 @@ def main():
 
     netName = ARGS.network
     
-    Session = netfoundry.Session(proxy=ARGS.proxy)
+    Session = netfoundry.Session(
+        credentials=ARGS.credentials if ARGS.credentials is not None else None,
+        proxy=ARGS.proxy,
+    )
 
     # yields a list of Network Groups in Organization.networkGroups[], but there's typically only one group
     Organization = netfoundry.Organization(Session)
@@ -64,7 +85,7 @@ def main():
     # existing ERs
     EDGE_ROUTERS = Network.edgeRouters()
     # a list of places where Endpoints are dialing from
-    MAJOR_REGIONS = ("Americas", "EuropeMiddleEastAfrica")
+    MAJOR_REGIONS = ARGS.regions
     # a list of locations to place one hosted ER
     FABRIC_PLACEMENTS = list()
     DESIRED_COUNT = 1
@@ -98,9 +119,9 @@ def main():
     HOSTED_ROUTERS = [er for er in Network.edgeRouters() if er['dataCenterId']]
     for routerId in [r['id'] for r in HOSTED_ROUTERS]:
         try:
-            Network.waitForStatus("PROVISIONED",id=routerId,type="edge-router",wait=333,progress=True)
+            Network.waitForStatus("PROVISIONED",id=routerId,type="edge-router",wait=999,progress=True)
         except:
-            pass
+            raise
 
     # create a simple global Edge Router Policy unless one exists with the same name
     ERPs = Network.edgeRouterPolicies()
@@ -109,7 +130,8 @@ def main():
         DEFAULT_ERP = Network.createEdgeRouterPolicy(name=DEFAULT_ERP_NAME,edgeRouterAttributes=["#defaultRouters"],endpointAttributes=["#all"])
 
     ENDPOINTS = Network.endpoints()
-    DIALER1_NAME = "dialer1"
+    DIALERS = list()
+    DIALER1_NAME = "Desktop 1"
     if not DIALER1_NAME in [end['name'] for end in ENDPOINTS]:
         # create an Endpoint for the dialing device that will access Services
         DIALER1 = Network.createEndpoint(name=DIALER1_NAME,attributes=["#dialers"])
@@ -117,8 +139,9 @@ def main():
     else:
         DIALER1 = [end for end in ENDPOINTS if end['name'] == DIALER1_NAME][0]
         print("INFO: found Endpoint \"{:s}\"".format(DIALER1['name']))
+    DIALERS += [DIALER1]
 
-    DIALER2_NAME = "dialer2"
+    DIALER2_NAME = "Mobile 1"
     if not DIALER2_NAME in [end['name'] for end in ENDPOINTS]:
         # create an Endpoint for the dialing device that will access Services
         DIALER2 = Network.createEndpoint(name=DIALER2_NAME,attributes=["#dialers"])
@@ -126,52 +149,60 @@ def main():
     else:
         DIALER2 = [end for end in ENDPOINTS if end['name'] == DIALER2_NAME][0]
         print("INFO: found Endpoint \"{:s}\"".format(DIALER2['name']))
+    DIALERS += [DIALER2]
 
-    DIALER3_NAME = "dialer3"
-    if not DIALER3_NAME in [end['name'] for end in ENDPOINTS]:
-        # create an Endpoint for the dialing device that will access Services
-        DIALER3 = Network.createEndpoint(name=DIALER3_NAME,attributes=["#dialers"])
-        print("INFO: created Endpoint \"{:s}\"".format(DIALER3['name']))
-    else:
-        DIALER3 = [end for end in ENDPOINTS if end['name'] == DIALER3_NAME][0]
-        print("INFO: found Endpoint \"{:s}\"".format(DIALER3['name']))
+    if ARGS.dialer:
+        DIALER3_NAME = "Linux 1"
+        if not DIALER3_NAME in [end['name'] for end in ENDPOINTS]:
+            # create an Endpoint for the dialing device that will access Services
+            DIALER3 = Network.createEndpoint(name=DIALER3_NAME,attributes=["#dialers"])
+            print("INFO: created Endpoint \"{:s}\"".format(DIALER3['name']))
+        else:
+            DIALER3 = [end for end in ENDPOINTS if end['name'] == DIALER3_NAME][0]
+            print("INFO: found Endpoint \"{:s}\"".format(DIALER3['name']))
+        DIALERS += [DIALER3]
 
-    EXIT1_NAME = "exit1"
-    if not EXIT1_NAME in [end['name'] for end in ENDPOINTS]:
-        # create an Endpoint for the hosting device that will provide access to the server
-        EXIT1 = Network.createEndpoint(name=EXIT1_NAME,attributes=["#exits"])
-        print("INFO: created Endpoint \"{:s}\"".format(EXIT1['name']))
-    else:
-        EXIT1 = [end for end in ENDPOINTS if end['name'] == EXIT1_NAME][0]
-        print("INFO: found Endpoint \"{:s}\"".format(EXIT1['name']))
+    EXITS = list()
+    if ARGS.private:
+        EXIT1_NAME = "exit1"
+        if not EXIT1_NAME in [end['name'] for end in ENDPOINTS]:
+            # create an Endpoint for the hosting device that will provide access to the server
+            EXIT1 = Network.createEndpoint(name=EXIT1_NAME,attributes=["#exits"])
+            print("INFO: created Endpoint \"{:s}\"".format(EXIT1['name']))
+        else:
+            EXIT1 = [end for end in ENDPOINTS if end['name'] == EXIT1_NAME][0]
+            print("INFO: found Endpoint \"{:s}\"".format(EXIT1['name']))
+        EXITS += [EXIT1]
 
+    # the demo containers have the demo working dir mounted on /netfoundry
     if os.access('/netfoundry', os.W_OK):
         JWT_PATH = '/netfoundry'
     else:
         JWT_PATH = str(Path.cwd())
-    for end in [DIALER1, DIALER2, DIALER3, EXIT1]:
+    for end in DIALERS+EXITS:
+        jwt_file = JWT_PATH+'/'+end['name']+'.jwt'
         try:
             end['jwt']
-        except KeyError: pass
+        except KeyError:
+            if os.path.exists(jwt_file):
+                print("DEBUG: cleaning up used OTT for enrolled Endpoint {end} from {path}".format(end=end['name'],path=jwt_file))
+                os.remove(jwt_file)
         else:
-            jwt_file = JWT_PATH+'/'+end['name']+'.jwt'
-            print("DEBUG: saving OTT for {end} in {path}".format(end=end['name'],path=jwt_file))
             text = open(jwt_file, "wt")
             text.write(end['jwt'])
             text.close()
 
-    # check Endpoint exit1 exists
-    ENDPOINTS = Network.endpoints()
-    EXIT1_NAME = "exit1"
-    if not EXIT1_NAME in [end['name'] for end in ENDPOINTS]:
-        raise Exception("ERROR: missing Endpoint \"{:s}\"".format(EXIT1_NAME))
-    else:
-        EXIT1 = [end for end in ENDPOINTS if end['name'] == EXIT1_NAME][0]
-    #    print("INFO: found Endpoint \"{:s}\"".format(EXIT1['name']))
-
     SERVICES = Network.services()
 
     if ARGS.private:
+        # check Endpoint exit1 exists
+        ENDPOINTS = Network.endpoints()
+        EXIT1_NAME = "exit1"
+        if not EXIT1_NAME in [end['name'] for end in ENDPOINTS]:
+            raise Exception("ERROR: missing hosting Endpoint \"{:s}\"".format(EXIT1_NAME))
+        else:
+            EXIT1 = [end for end in ENDPOINTS if end['name'] == EXIT1_NAME][0]
+
         # create Endpoint-hosted Services unless name exists
         HELLO1_NAME = "hello Service"
         if not HELLO1_NAME in [svc['name'] for svc in SERVICES]:
@@ -211,6 +242,24 @@ def main():
 
     # Create router-hosted Services unless exists
     EGRESS_ROUTER = random.choice(HOSTED_ROUTERS)
+
+    FIREWORKS1_NAME = "Fireworks Service"
+    if not FIREWORKS1_NAME in [svc['name'] for svc in SERVICES]:
+        # traffic sent to fireworks.netfoundry:80 leaves Routers to 34.204.78.203:80
+        FIREWORKS1 = Network.createService(
+            name=FIREWORKS1_NAME,
+            attributes=["#welcomeWagon"],
+            clientHostName="fireworks.netfoundry",
+            clientPortRange="80",
+            egressRouterId=EGRESS_ROUTER['id'],
+            serverHostName="34.204.78.203",
+            serverPortRange="80",
+            serverProtocol="TCP"
+        )
+        print("INFO: created Service \"{:s}\"".format(FIREWORKS1['name']))
+    else:
+        FIREWORKS1 = [svc for svc in SERVICES if svc['name'] == FIREWORKS1_NAME][0]
+        print("INFO: found Service \"{:s}\"".format(FIREWORKS1['name']))
 
     WEATHER1_NAME = "Weather Service"
     if not WEATHER1_NAME in [svc['name'] for svc in SERVICES]:
