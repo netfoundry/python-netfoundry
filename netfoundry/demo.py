@@ -11,9 +11,33 @@ import os
 from pathlib import Path
 import argparse
 
-def main(netName, privateServices=False):
+def main():
 
-    Session = netfoundry.Session()
+    print("DEBUG: running demo script in \"{:s}\"".format(sys.argv[0]))
+
+    PARSER = argparse.ArgumentParser()
+    PARSER.add_argument(
+        "-n", "--network",
+        help="The name of your demo network"
+    )
+    PARSER.add_argument(
+        "-p", "--make-private-services",
+        dest="private",
+        default=False,
+        action="store_true",
+        help="Also create private Services for the Docker Compose Demo"
+    )
+    PARSER.add_argument("--proxy",
+        default=None,
+        help="'http://localhost:8080'"+
+        " (implies certificate verification is disabled); or"+
+        " 'socks5://localhost:9046'"
+    )
+    ARGS = PARSER.parse_args()
+
+    netName = ARGS.network
+    
+    Session = netfoundry.Session(proxy=ARGS.proxy)
 
     # yields a list of Network Groups in Organization.networkGroups[], but there's typically only one group
     Organization = netfoundry.Organization(Session)
@@ -147,7 +171,7 @@ def main(netName, privateServices=False):
 
     SERVICES = Network.services()
 
-    if privateServices:
+    if ARGS.private:
         # create Endpoint-hosted Services unless name exists
         HELLO1_NAME = "hello Service"
         if not HELLO1_NAME in [svc['name'] for svc in SERVICES]:
@@ -245,21 +269,4 @@ def main(netName, privateServices=False):
 
 
 if __name__ == '__main__':
-
-    PARSER = argparse.ArgumentParser()
-    PARSER.add_argument(
-        "-n", "--network",
-        default=None,
-        help="The name of your demo network"
-    )
-    PARSER.add_argument(
-        "-p", "--make-private-services",
-        dest="private",
-        default=False,
-        action="store_true",
-        help="Also create private Services for the Docker Compose Demo"
-    )
-    ARGS = PARSER.parse_args()
-
-    print("INFO: running demo script in \"{:s}\"".format(sys.argv[0]))
-    main(netName=ARGS.network, privateServices=ARGS.private)
+    main()

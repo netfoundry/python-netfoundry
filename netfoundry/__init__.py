@@ -111,9 +111,12 @@ class Session:
                     path=self.credentials
                 ))
 
-            with open(self.credentials) as file:
-                try: account = json.load(file)
-                except: raise Exception("ERROR: failed to load JSON from {file}".format(file=file))
+            try:
+                with open(self.credentials) as file:
+                    try: account = json.load(file)
+                    except: raise Exception("ERROR: failed to load JSON from {file}".format(file=file))
+            except: raise Exception("ERROR: failed to open {file} while working in {dir}".format(
+                file=self.credentials,dir=str(Path.cwd())))
             tokenEndpoint = account['authenticationUrl']
             clientId = account['clientId']
             password = account['password']
@@ -141,7 +144,7 @@ class Session:
                 responseCode = response.status_code
             except:
                 eprint(
-                    'ERROR: failed to contact the authentication endpoint: {}'.format(self.tokenEndpoint)
+                    'ERROR: failed to contact the authentication endpoint: {}'.format(tokenEndpoint)
                 )
                 raise
 
@@ -171,8 +174,9 @@ class Organization:
         self.session = Session
         # always resolve Network Groups so we can specify either name or ID when calling super()
         self.networkGroups = self.getNetworkGroups()
-        self.networkGroupsByName = dict()
-        self.label = self.getOrganization()['label']
+#        self.networkGroupsByName = dict()
+        self.describe = self.getOrganization()
+        self.label = self.describe['label']
 
     def getOrganization(self):
         """return the Organizations object (formerly "tenants")
@@ -206,8 +210,40 @@ class Organization:
         return(organizations[0])
 
 
+    def getNetworkGroup(self,networkGroupId):
+        """describe a Network Group
+        """
+        try:
+            # /network-groups/{id} returns a Network Group object
+            headers = { "authorization": "Bearer " + self.session.token }
+            response = requests.get(
+                self.session.audience+'rest/v1/network-groups/'+networkGroupId,
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers
+            )
+            http_code = response.status_code
+        except:
+            raise
+
+        if http_code == requests.status_codes.codes.OK: # HTTP 200
+            try:
+                networkGroup = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR getting Network Group')
+                raise(e)
+        else:
+            raise Exception(
+                'unexpected response: {} (HTTP {:d})'.format(
+                    requests.status_codes._codes[http_code][0].upper(),
+                    http_code
+                )
+            )
+
+        return(networkGroup)
+
     def getNetworkGroups(self):
-        """return the Network Groups object (formerly "organizations")
+        """list Network Groups
         """
         try:
             # /network-groups returns a list of dicts (Network Group objects)
@@ -240,7 +276,7 @@ class Organization:
 
     def getNetworksByOrganization(self):
         """
-        return all networks in this Network Group
+        return all networks known to this Organization
         """
 
         try:
@@ -342,6 +378,7 @@ class NetworkGroup:
             raise Exception("ERROR: need at least one Network Group in organization")
 
         self.session = Organization.session
+        self.describe = Organization.getNetworkGroup(self.networkGroupId)
         self.id = self.networkGroupId
         self.name = self.networkGroupName
         self.vanity = Organization.label.lower()
@@ -1126,13 +1163,7 @@ class Network:
 
         status = str()
         http_code = int()
-        while (
-            time.time() < now+wait
-        ) and (
-            not status == expect
-        ) and (
-            not http_code == requests.status_codes.codes.NOT_FOUND
-        ):
+        while time.time() < now+wait and not status == expect:
             if progress:
                 sys.stdout.write('.') # print a stop each iteration to imply progress
                 sys.stdout.flush()
@@ -1156,12 +1187,7 @@ class Network:
                 time.sleep(sleep)
         print() # newline terminates progress meter
 
-        if (
-            status == expect
-        ) or (
-            status == 'DELETED' and
-            http_code == requests.status_codes.codes.FORBIDDEN
-        ):
+        if status == expect:
             return(True)
         elif not status:
             raise Exception(
