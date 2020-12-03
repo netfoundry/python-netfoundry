@@ -117,11 +117,11 @@ class Session:
                     except: raise Exception("ERROR: failed to load JSON from {file}".format(file=file))
             except: raise Exception("ERROR: failed to open {file} while working in {dir}".format(
                 file=self.credentials,dir=str(Path.cwd())))
-            tokenEndpoint = account['authenticationUrl']
-            clientId = account['clientId']
+            token_endpoint = account['authenticationUrl']
+            client_id = account['clientId']
             password = account['password']
             # extract the environment name from the authorization URL aka token API endpoint
-            self.environment = re.sub(r'https://netfoundry-([^-]+)-.*', r'\1', tokenEndpoint, re.IGNORECASE)
+            self.environment = re.sub(r'https://netfoundry-([^-]+)-.*', r'\1', token_endpoint, re.IGNORECASE)
             # re: scope: we're not using scopes with Cognito, but a non-empty value is required;
             #  hence "/ignore-scope"
             scope = "https://gateway."+self.environment+".netfoundry.io//ignore-scope"
@@ -136,22 +136,22 @@ class Session:
             # request a token
             try:
                 response = requests.post(
-                    tokenEndpoint,
-                    auth=(clientId, password),
+                    token_endpoint,
+                    auth=(client_id, password),
                     data=assertion,
                     verify=self.verify,
                     proxies=self.proxies)
-                responseCode = response.status_code
+                response_code = response.status_code
             except:
                 eprint(
-                    'ERROR: failed to contact the authentication endpoint: {}'.format(tokenEndpoint)
+                    'ERROR: failed to contact the authentication endpoint: {}'.format(token_endpoint)
                 )
                 raise
 
-            if responseCode == requests.status_codes.codes.OK:
+            if response_code == requests.status_codes.codes.OK:
                 try:
-                    tokenText = json.loads(response.text)
-                    self.token = tokenText['access_token']
+                    token_text = json.loads(response.text)
+                    self.token = token_text['access_token']
                 except:
                     raise Exception(
                         'ERROR: failed to find an access_token in the response and instead got: {}'.format(
@@ -161,8 +161,8 @@ class Session:
             else:
                 raise Exception(
                     'ERROR: got unexpected HTTP response {} ({:d})'.format(
-                        requests.status_codes._codes[responseCode][0].upper(),
-                        responseCode
+                        requests.status_codes._codes[response_code][0].upper(),
+                        response_code
                     )
                 )
 
@@ -173,12 +173,11 @@ class Organization:
     def __init__(self, Session):
         self.session = Session
         # always resolve Network Groups so we can specify either name or ID when calling super()
-        self.networkGroups = self.getNetworkGroups()
-#        self.networkGroupsByName = dict()
-        self.describe = self.getOrganization()
+        self.network_groups = self.get_network_groups()
+        self.describe = self.get_organization()
         self.label = self.describe['label']
 
-    def getOrganization(self):
+    def get_organization(self):
         """return the Organizations object (formerly "tenants")
         """
         try:
@@ -210,14 +209,14 @@ class Organization:
         return(organizations[0])
 
 
-    def getNetworkGroup(self,networkGroupId):
+    def get_network_group(self,network_group_id):
         """describe a Network Group
         """
         try:
             # /network-groups/{id} returns a Network Group object
             headers = { "authorization": "Bearer " + self.session.token }
             response = requests.get(
-                self.session.audience+'rest/v1/network-groups/'+networkGroupId,
+                self.session.audience+'rest/v1/network-groups/'+network_group_id,
                 proxies=self.session.proxies,
                 verify=self.session.verify,
                 headers=headers
@@ -228,7 +227,7 @@ class Organization:
 
         if http_code == requests.status_codes.codes.OK: # HTTP 200
             try:
-                networkGroup = json.loads(response.text)
+                network_group = json.loads(response.text)
             except ValueError as e:
                 eprint('ERROR getting Network Group')
                 raise(e)
@@ -240,9 +239,9 @@ class Organization:
                 )
             )
 
-        return(networkGroup)
+        return(network_group)
 
-    def getNetworkGroups(self):
+    def get_network_groups(self):
         """list Network Groups
         """
         try:
@@ -260,7 +259,7 @@ class Organization:
 
         if http_code == requests.status_codes.codes.OK: # HTTP 200
             try:
-                networkGroups = json.loads(response.text)['_embedded']['organizations']
+                network_groups = json.loads(response.text)['_embedded']['organizations']
             except ValueError as e:
                 eprint('ERROR getting Network Groups')
                 raise(e)
@@ -272,9 +271,9 @@ class Organization:
                 )
             )
 
-        return(networkGroups)
+        return(network_groups)
 
-    def getNetworksByOrganization(self):
+    def get_networks_by_organization(self):
         """
         return all networks known to this Organization
         """
@@ -308,16 +307,16 @@ class Organization:
 
         return(networks)
 
-    def getNetworksByGroup(self,networkGroupId):
+    def get_networks_by_group(self,network_group_id):
         """return list of network objects
-            :param networkGroupId: required network group UUID
+            :param network_group_id: required network group UUID
         """
         try:
             headers = { 
                 "authorization": "Bearer " + self.session.token 
             }
             params = {
-                "findByNetworkGroupId": networkGroupId
+                "findByNetworkGroupId": network_group_id
             }
             response = requests.get(
                 self.session.audience+'/core/v2/networks',
@@ -351,36 +350,36 @@ class Organization:
 class NetworkGroup:
     """use a Network Group by name or ID or the first group in the organization
     """
-    def __init__(self, Organization, networkGroupId=None, networkGroupName=None):
-        if networkGroupId:
-            self.networkGroupId = networkGroupId
-            self.networkGroupName = [ ng['organizationShortName'] for ng in Organization.networkGroups if ng['id'] == networkGroupId ][0]
+    def __init__(self, Organization, network_group_id=None, network_group_name=None):
+        if network_group_id:
+            self.network_group_id = network_group_id
+            self.network_group_name = [ ng['organizationShortName'] for ng in Organization.network_groups if ng['id'] == network_group_id ][0]
         # TODO: review the use of org short name ref https://netfoundry.slack.com/archives/C45UDKR8V/p1603655594135000?thread_ts=1580318187.149400&cid=C45UDKR8V
-        elif networkGroupName:
-            self.networkGroupName = networkGroupName
-            self.networkGroupId = [ ng['id'] for ng in Organization.networkGroups if ng['organizationShortName'] == networkGroupName ][0]
-        elif len(Organization.networkGroups) > 0:
+        elif network_group_name:
+            self.network_group_name = network_group_name
+            self.network_group_id = [ ng['id'] for ng in Organization.network_groups if ng['organizationShortName'] == network_group_name ][0]
+        elif len(Organization.network_groups) > 0:
             # first Network Group is typically the only Network Group
-            self.networkGroupId = Organization.networkGroups[0]['id']
-            self.networkGroupName = Organization.networkGroups[0]['organizationShortName']
+            self.network_group_id = Organization.network_groups[0]['id']
+            self.network_group_name = Organization.network_groups[0]['organizationShortName']
             # warn if there are other groups
-            if len(Organization.networkGroups) > 1:
+            if len(Organization.network_groups) > 1:
                 eprint("WARN: Using first Network Group {:s} and ignoring {:d} other(s) e.g. {:s}, etc...".format(
-                    self.networkGroupName,
-                    len(Organization.networkGroups) - 1,
-                    Organization.networkGroups[1]['organizationShortName']
+                    self.network_group_name,
+                    len(Organization.network_groups) - 1,
+                    Organization.network_groups[1]['organizationShortName']
                 ))
-            elif len(Organization.networkGroups) == 1:
+            elif len(Organization.network_groups) == 1:
                 eprint("WARN: Using the default Network Group: {:s}".format(
-                    self.networkGroupName
+                    self.network_group_name
                 ))
         else:
             raise Exception("ERROR: need at least one Network Group in organization")
 
         self.session = Organization.session
-        self.describe = Organization.getNetworkGroup(self.networkGroupId)
-        self.id = self.networkGroupId
-        self.name = self.networkGroupName
+        self.describe = Organization.get_network_group(self.network_group_id)
+        self.id = self.network_group_id
+        self.name = self.network_group_name
         self.vanity = Organization.label.lower()
 
         # learn about the environment from the token and predict the web console URL
@@ -398,25 +397,25 @@ class NetworkGroup:
         except: raise
 
         # an attribute that is a dict for resolving network UUIDs by name
-        self.networksByName = dict()
-        for net in Organization.getNetworksByGroup(self.networkGroupId):
-            self.networksByName[net['name']] = net['id']
-        self.id = self.networkGroupId
-        self.name = self.networkGroupName
+        self.networks_by_name = dict()
+        for net in Organization.get_networks_by_group(self.network_group_id):
+            self.networks_by_name[net['name']] = net['id']
+        self.id = self.network_group_id
+        self.name = self.network_group_name
 
-        #inventory of infrequently-changing assets: configs, dataCenters
-        self.networkConfigMetadatas = self.getNetworkConfigMetadatas()
-        self.networkConfigMetadatasByName = dict()
-        for config in self.networkConfigMetadatas:
-            self.networkConfigMetadatasByName[config['name']] = config['id']
+        #inventory of infrequently-changing assets: configs, datacenters
+        self.network_config_metadata = self.get_network_config_metadata()
+        self.network_config_metadata_by_name = dict()
+        for config in self.network_config_metadata:
+            self.network_config_metadata_by_name[config['name']] = config['id']
             # e.g. { small: 2616da5c-4441-4c3d-a9a2-ed37262f2ef4 }
-        self.ncDataCenters = self.getControllerDataCenters()
-        self.ncDataCentersByLocationCode = dict()
-        for dc in self.ncDataCenters:
-            self.ncDataCentersByLocationCode[dc['locationCode']] = dc['id']
+        self.nc_datacenters = self.get_controller_datacenters()
+        self.nc_datacenters_by_location = dict()
+        for dc in self.nc_datacenters:
+            self.nc_datacenters_by_location[dc['locationCode']] = dc['id']
             # e.g. { us-east-1: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
 
-    def getNetworkConfigMetadatas(self):
+    def get_network_config_metadata(self):
         """return the list of network config metadata which are required to create a network
         """
         try:
@@ -434,7 +433,7 @@ class NetworkGroup:
 
         if http_code == requests.status_codes.codes.OK: # HTTP 200
             try:
-                networkConfigMetadatas = json.loads(response.text)['_embedded']['networkConfigMetadataList']
+                network_config_metadata = json.loads(response.text)['_embedded']['networkConfigMetadataList']
             except ValueError as e:
                 eprint('ERROR getting network config metadata')
                 raise(e)
@@ -446,13 +445,13 @@ class NetworkGroup:
                 )
             )
 
-        return(networkConfigMetadatas)
+        return(network_config_metadata)
 
-    def getControllerDataCenters(self):
-        """list the dataCenters where a Network Controller may be created
+    def get_controller_datacenters(self):
+        """list the datacenters where a Network Controller may be created
         """
         try:
-            # dataCenters returns a list of dicts (datacenter objects)
+            # datacenters returns a list of dicts (datacenter objects)
             headers = { "authorization": "Bearer " + self.session.token }
             params = {
                 "hostType": "NC",
@@ -471,9 +470,9 @@ class NetworkGroup:
 
         if http_code == requests.status_codes.codes.OK: # HTTP 200
             try:
-                dataCenters = json.loads(response.text)['_embedded']['dataCenters']
+                datacenters = json.loads(response.text)['_embedded']['dataCenters']
             except ValueError as e:
-                eprint('ERROR getting dataCenters')
+                eprint('ERROR getting datacenters')
                 raise(e)
         else:
             raise Exception(
@@ -483,16 +482,16 @@ class NetworkGroup:
                 )
             )
 
-        return(dataCenters)
+        return(datacenters)
 
-    def getDataCenterByLocation(self, locationCode):
-        """return one dataCenter object
-        :param locationCode: required single location to fetch
+    def get_datacenter_by_location(self, location):
+        """return one datacenter object
+        :param location: required single location to fetch
         """
         try:
-            # dataCenters returns a list of dicts (datacenter objects)
+            # datacenters returns a list of dicts (datacenter objects)
             headers = { "authorization": "Bearer " + self.session.token }
-            params = { "locationCode": locationCode }
+            params = { "locationCode": location }
             response = requests.get(
                 self.session.audience+'rest/v1/dataCenters',
                 proxies=self.session.proxies,
@@ -506,9 +505,9 @@ class NetworkGroup:
 
         if http_code == requests.status_codes.codes.OK: # HTTP 200
             try:
-                dataCenter = json.loads(response.text)
+                datacenter = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR getting dataCenter')
+                eprint('ERROR getting datacenter')
                 raise(e)
         else:
             raise Exception(
@@ -518,26 +517,26 @@ class NetworkGroup:
                 )
             )
 
-        return(dataCenter)
+        return(datacenter)
 
-    def createNetwork(self, name, netGroup=None, location="us-east-1", version=None, netConfig="small"):
+    def create_network(self, name, network_group_id=None, location="us-east-1", version=None, network_config="small"):
         """
         create a network with
         :param name: required network name
-        :param netGroup: optional Network Group short name
+        :param network_group: optional Network Group ID
         :param location: optional datacenter region name in which to create
         :param version: optional product version string like 7.2.0-1234567
-        :param netConfig: optional network configuration metadata name e.g. "medium"
+        :param network_config: optional network configuration metadata name e.g. "medium"
         """
         request = {
             "name": name,
             "locationCode": location,
-            "networkConfigMetadataId": self.networkConfigMetadatasByName[netConfig]
+            "networkConfigMetadataId": self.network_config_metadata_by_name[network_config]
         }
-        if netGroup:
-            request["networkGroupId"] = netGroup
+        if network_group_id:
+            request["networkGroupId"] = network_group_id
         else:
-            request["networkGroupId"] = self.networkGroupId
+            request["networkGroupId"] = self.network_group_id
 
         if version:
             request['productVersion'] = version
@@ -567,31 +566,31 @@ class NetworkGroup:
                 )
             )
 
-        netId = json.loads(response.text)['id']
+        network_id = json.loads(response.text)['id']
         # expected value is UUID
-        UUID(netId, version=4) # validate the returned value is a UUID
+        UUID(network_id, version=4) # validate the returned value is a UUID
 
-        return(netId)
+        return(network_id)
 
-    def deleteNetwork(self, networkId=None, networkName=None):
+    def delete_network(self, network_id=None, network_name=None):
         """
         delete a Network
         :param id: optional Network UUID to delete
         :param name: optional Network name to delete
         """
         try:
-            if networkId:
-                networkName = [ net['name'] for net in self.networksByName if net['id'] == networkId ][0]
-            elif networkName and networkName in self.networksByName.keys():
-                networkId = self.networksByName[networkName]
+            if network_id:
+                network_name = [ net['name'] for net in self.networks_by_name if net['id'] == network_id ][0]
+            elif network_name and network_name in self.networks_by_name.keys():
+                network_id = self.networks_by_name[network_name]
         except:
-            raise Exception("ERROR: need one of networkId or networkName for a Network in this Network Group: {:s}".format(self.name))
+            raise Exception("ERROR: need one of network_id or network_name for a Network in this Network Group: {:s}".format(self.name))
 
         try:
             headers = { "authorization": "Bearer " + self.session.token }
-            entityUrl = self.session.audience+'core/v2/networks/'+networkId
+            entity_url = self.session.audience+'core/v2/networks/'+network_id
             response = requests.delete(
-                entityUrl,
+                entity_url,
                 proxies=self.session.proxies,
                 verify=self.session.verify,
                 headers=headers
@@ -612,65 +611,65 @@ class NetworkGroup:
 class Network:
     """describe and use a Network
     """
-    def __init__(self, Session, networkId=None, networkName=None):
+    def __init__(self, Session, network_id=None, network_name=None):
         """
         :param token: required bearer token for this session
-        :param networkName: optional name of the network to describe and use
-        :param networkId: optional UUID of the network to describe and use
+        :param network_name: optional name of the network to describe and use
+        :param network_id: optional UUID of the network to describe and use
         """
         self.session = Session
 
-        if networkId:
-            self.describe = self.getNetworkById(networkId)
-        elif networkName:
-            self.describe = self.getNetworkByName(networkName)
+        if network_id:
+            self.describe = self.get_network_by_id(network_id)
+        elif network_name:
+            self.describe = self.get_network_by_name(network_name)
         else:
-            raise Exception("ERROR: need one of networkId or networkName")
+            raise Exception("ERROR: need one of network_id or network_name")
 
         # populate some attributes
         self.id = self.describe['id']
         self.name = self.describe['name']
-        self.networkGroupId = self.describe['networkGroupId']
+        self.network_group_id = self.describe['networkGroupId']
         self.status = self.describe['status']
-        self.productVersion = self.describe['productVersion']
-        self.ownerIdentityId = self.describe['ownerIdentityId']
-        self.networkConfigMetadataId = self.describe['networkConfigMetadataId']
-        self.o365BreakoutCategory = self.describe['o365BreakoutCategory']
-        self.createdAt = self.describe['createdAt']
-        self.updatedAt = self.describe['updatedAt']
-        self.createdBy = self.describe['createdBy']
+        self.product_version = self.describe['productVersion']
+        self.owner_identity_id = self.describe['ownerIdentityId']
+        self.network_confi_metadata_id = self.describe['networkConfigMetadataId']
+        self.o365_breakout_category = self.describe['o365BreakoutCategory']
+        self.created_at = self.describe['createdAt']
+        self.updated_at = self.describe['updatedAt']
+        self.created_by = self.describe['createdBy']
 
-        self.awsGeoRegions = dict()
+        self.aws_geo_regions = dict()
         for geo in MAJOR_REGIONS['AWS'].keys():
-            self.awsGeoRegions[geo] = [dc for dc in self.getEdgeRouterDataCenters(provider="AWS") if dc['locationName'] in MAJOR_REGIONS['AWS'][geo]]
+            self.aws_geo_regions[geo] = [dc for dc in self.get_edge_router_datacenters(provider="AWS") if dc['locationName'] in MAJOR_REGIONS['AWS'][geo]]
 
     def endpoints(self):
-        return(self.getResources("endpoints"))
+        return(self.get_resources("endpoints"))
 
-    def edgeRouters(self):
-        return(self.getResources("edge-routers"))
+    def edge_routers(self):
+        return(self.get_resources("edge-routers"))
 
     def services(self):
-        return(self.getResources("services"))
+        return(self.get_resources("services"))
 
-    def edgeRouterPolicies(self):
-        return(self.getResources("edge-router-policies"))
+    def edge_router_policies(self):
+        return(self.get_resources("edge-router-policies"))
 
-    def appWans(self):
-        return(self.getResources("app-wans"))
+    def appwans(self):
+        return(self.get_resources("app-wans"))
 
-    def deleteNetwork(self,wait=300,progress=True):
-        self.deleteResource(type="network",wait=wait,progress=progress)
+    def delete_network(self,wait=300,progress=True):
+        self.delete_resource(type="network",wait=wait,progress=progress)
 #        raise Exception("ERROR: failed to delete Network {:s}".format(self.name))
 
-    def getEdgeRouterDataCenters(self,provider=None):
-        """list the dataCenters where an Edge Router may be created
+    def get_edge_router_datacenters(self,provider=None):
+        """list the datacenters where an Edge Router may be created
         """
         try:
-            # dataCenters returns a list of dicts (datacenter objects)
+            # datacenters returns a list of dicts (datacenter objects)
             headers = { "authorization": "Bearer " + self.session.token }
             params = {
-                "productVersion": self.productVersion,
+                "productVersion": self.product_version,
                 "hostType": "ER"
             }
             if provider is not None:
@@ -691,9 +690,9 @@ class Network:
 
         if http_code == requests.status_codes.codes.OK: # HTTP 200
             try:
-                dataCenters = json.loads(response.text)['_embedded']['dataCenters']
+                datacenters = json.loads(response.text)['_embedded']['dataCenters']
             except ValueError as e:
-                eprint('ERROR getting dataCenters')
+                eprint('ERROR getting datacenters')
                 raise(e)
         else:
             raise Exception(
@@ -703,12 +702,12 @@ class Network:
                 )
             )
 
-        return(dataCenters)
+        return(datacenters)
 
-    def shareEndpoint(self,recipient,endpointId):
+    def share_endpoint(self,recipient,endpoint_id):
         """share the new endpoint enrollment token with an email address
             :recipient [required] the email address
-            :endpointId [required] the UUID of the endpoint
+            :endpoint_id [required] the UUID of the endpoint
         """
         try:
             headers = {
@@ -718,7 +717,7 @@ class Network:
                 {
                     "toList": [recipient],
                     "subject": "Your enrollment token for {:s}".format(self.name),
-                    "id": endpointId
+                    "id": endpoint_id
                 }
             ]
             response = requests.post(
@@ -741,7 +740,7 @@ class Network:
                 )
             )
             
-    def getResources(self,type,name=None):
+    def get_resources(self,type,name=None):
         """return the resources object
             :type [required] one of endpoints, edge-routers, services
         """
@@ -825,7 +824,7 @@ class Network:
                     )
             return(all_pages)
 
-    def patchResource(self,patch):
+    def patch_resource(self,patch):
         """return a resources
             :patch: required dictionary with the new properties 
         """
@@ -859,7 +858,7 @@ class Network:
             )
         return(resource)
 
-    def createEndpoint(self, name, attributes=[]):
+    def create_endpoint(self, name, attributes=[]):
         """create an Endpoint
         """
         try:
@@ -901,7 +900,7 @@ class Network:
 
         return(endpoint)
 
-    def createEdgeRouter(self, name, attributes=[], linkListener=False, dataCenterId=None):
+    def create_edge_router(self, name, attributes=[], link_listener=False, datacenter_id=None):
         """create an Edge Router
         """
         try:
@@ -915,10 +914,10 @@ class Network:
                 "networkId": self.id,
                 "name": name,
                 "attributes": attributes,
-                "linkListener": linkListener
+                "linkListener": link_listener
             }
-            if dataCenterId:
-                body['dataCenterId'] = dataCenterId
+            if datacenter_id:
+                body['dataCenterId'] = datacenter_id
                 body['linkListener'] = True
             response = requests.post(
                 self.session.audience+'core/v2/edge-routers',
@@ -948,21 +947,21 @@ class Network:
 
         return(router)
 
-    def createEdgeRouterPolicy(self, name, endpointAttributes=[], edgeRouterAttributes=[]):
+    def create_edge_router_policy(self, name, endpoint_attributes=[], edge_router_attributes=[]):
         """create an Edge Router Policy
         """
         try:
             headers = { 
                 "authorization": "Bearer " + self.session.token 
             }
-            for role in endpointAttributes+edgeRouterAttributes:
+            for role in endpoint_attributes+edge_router_attributes:
                 if not re.match('^[#@]', role):
                     raise Exception("ERROR: role attributes on a policy must begin with # or @")
             body = {
                 "networkId": self.id,
                 "name": name,
-                "endpointAttributes": endpointAttributes,
-                "edgeRouterAttributes": edgeRouterAttributes
+                "endpointAttributes": endpoint_attributes,
+                "edgeRouterAttributes": edge_router_attributes
             }
             response = requests.post(
                 self.session.audience+'core/v2/edge-router-policies',
@@ -990,9 +989,9 @@ class Network:
 
         return(policy)
 
-    def createService(self, name: str, clientHostName: str, clientPortRange: int, serverHostName: str, 
-        serverPortRange: int, serverProtocol: str="TCP", attributes: list=[], edgeRouterAttributes: list=[], 
-        egressRouterId: str=None, endpoints: list=[], encryptionRequired: bool=True):
+    def create_service(self, name: str, client_hostname: str, client_port_range: int, server_hostname: str, 
+        server_port_range: int, server_protocol: str="TCP", attributes: list=[], edge_router_attributes: list=[], 
+        egress_router_id: str=None, endpoints: list=[], encryption_required: bool=True):
         """create a Service
         """
         try:
@@ -1001,30 +1000,30 @@ class Network:
             }
             for role in attributes:
                 if not role[0:1] == '#':
-                    raise Exception("ERROR: hashtag role attributes on an Endpoint must begin with #")
+                    raise Exception('ERROR: invalid role "{:s}". Must begin with "#"'.format(role))
             body = {
                 "networkId": self.id,
                 "name": name,
                 "attributes": attributes,
-                "clientHostName": clientHostName,
-                "clientPortRange": clientPortRange,
-                "serverHostName": serverHostName,
-                "serverPortRange": serverPortRange,
-                "serverProtocol": serverProtocol,
-                "encryptionRequired": encryptionRequired
+                "clientHostName": client_hostname,
+                "clientPortRange": client_port_range,
+                "serverHostName": server_hostname,
+                "serverPortRange": server_port_range,
+                "serverProtocol": server_protocol,
+                "encryptionRequired": encryption_required
             }
             # resolve exit hosting params
-            if egressRouterId and endpoints:
-                raise Exception("ERROR: specify only one of egressRouterId or endpoints to host the exit for this Service")
+            if egress_router_id and endpoints:
+                raise Exception("ERROR: specify only one of egress_router_id or endpoints to host the exit for this Service")
             elif endpoints:
                 body['endpoints'] = endpoints
-            elif egressRouterId:
-                body['egressRouterId'] = egressRouterId
+            elif egress_router_id:
+                body['egressRouterId'] = egress_router_id
 
             # resolve Edge Router param
-            if edgeRouterAttributes:
+            if edge_router_attributes:
                 eprint("WARN: overriding default Service Edge Router Policy #all for new Service {:s}".format(name))
-                body['edgeRouterAttributes'] = edgeRouterAttributes
+                body['edgeRouterAttributes'] = edge_router_attributes
 
             response = requests.post(
                 self.session.audience+'core/v2/services',
@@ -1052,22 +1051,22 @@ class Network:
 
         return(service)
 
-    def createAppWan(self, name: str, endpointAttributes: list=[], serviceAttributes: list=[], postureCheckAttributes: list=[]):
+    def create_appwan(self, name: str, endpoint_attributes: list=[], service_attributes: list=[], posture_check_attributes: list=[]):
         """create an AppWAN
         """
         try:
             headers = { 
                 "authorization": "Bearer " + self.session.token 
             }
-            for role in endpointAttributes+serviceAttributes+postureCheckAttributes:
+            for role in endpoint_attributes+service_attributes+posture_check_attributes:
                 if not re.match('^[#@]', role):
                     raise Exception("ERROR: role attributes on an AppWAN must begin with # or @")
             body = {
                 "networkId": self.id,
                 "name": name,
-                "endpointAttributes": endpointAttributes,
-                "serviceAttributes": serviceAttributes,
-                "postureCheckAttributes": postureCheckAttributes
+                "endpointAttributes": endpoint_attributes,
+                "serviceAttributes": service_attributes,
+                "postureCheckAttributes": posture_check_attributes
             }
 
             response = requests.post(
@@ -1096,7 +1095,7 @@ class Network:
 
         return(appwan)
 
-    def getNetworkByName(self,name):
+    def get_network_by_name(self,name):
         """return exactly one network object
             :name required name of the NF network may contain quoted whitespace
         """
@@ -1138,16 +1137,16 @@ class Network:
         else:
             raise Exception("ERROR: failed to find exactly one match for {}".format(name))
 
-    def getNetworkById(self,networkId):
+    def get_network_by_id(self,network_id):
         """return the network object for a particular UUID
-            :networkId [required] the UUID of the network
+            :network_id [required] the UUID of the network
         """
         try:
             headers = { 
                 "authorization": "Bearer " + self.session.token 
             }
             response = requests.get(
-                self.session.audience+'/core/v2/networks/'+networkId,
+                self.session.audience+'/core/v2/networks/'+network_id,
                 proxies=self.session.proxies,
                 verify=self.session.verify,
                 headers=headers
@@ -1172,7 +1171,7 @@ class Network:
 
         return(network)
 
-    def waitForStatus(self, expect, type="network", wait=300, sleep=20, id=None, progress=False):
+    def wait_for_status(self, expect, type="network", wait=300, sleep=20, id=None, progress=False):
         """continuously poll for the expected status until expiry
         :param expect: the expected status symbol e.g. PROVISIONED
         :param id: the UUID of the entity having a status if entity is not a network
@@ -1207,7 +1206,7 @@ class Network:
                 sys.stdout.flush()
 
             try:
-                entity = self.getResourceStatus(type=type, id=id)
+                entity = self.get_resource_status(type=type, id=id)
             except:
                 raise
 
@@ -1243,7 +1242,7 @@ class Network:
                 )
             )
 
-    def getResourceStatus(self, type, id=None):
+    def get_resource_status(self, type, id=None):
         """return an object describing an entity's API status or the symbolic HTTP code
         :param type: the type of entity e.g. network, endpoint, service, edge-router
         :param id: the UUID of the entity having a status if not a network
@@ -1251,18 +1250,18 @@ class Network:
 
         try:
             headers = { "authorization": "Bearer " + self.session.token }
-            entityUrl = self.session.audience+'core/v2/'
+            entity_url = self.session.audience+'core/v2/'
             if type == 'network':
-                entityUrl += 'networks/'+self.id
+                entity_url += 'networks/'+self.id
             elif id is None:
                 raise Exception("ERROR: entity UUID must be specified if not a network")
             else:
-                entityUrl += type+'s/'+id
+                entity_url += type+'s/'+id
             params = {
                 "networkId": self.id
             }
             response = requests.get(
-                entityUrl,
+                entity_url,
                 proxies=self.session.proxies,
                 verify=self.session.verify,
                 headers=headers,
@@ -1292,7 +1291,7 @@ class Network:
                 'http_code': http_code
             }
 
-    def deleteResource(self, type, id=None, wait=int(0), progress=False):
+    def delete_resource(self, type, id=None, wait=int(0), progress=False):
         """
         delete a resource
         :param type: required entity type to delete i.e. network, endpoint, service, edge-router
@@ -1301,16 +1300,16 @@ class Network:
         """
         try:
             headers = { "authorization": "Bearer " + self.session.token }
-            entityUrl = self.session.audience+'core/v2/networks/'+self.id
+            entity_url = self.session.audience+'core/v2/networks/'+self.id
             expect = requests.status_codes.codes.ACCEPTED
             if not type == 'network':
                 if id is None:
                     raise Exception("ERROR: need entity UUID to delete")
-                entityUrl = self.session.audience+'core/v2/'+type+'s/'+id
+                entity_url = self.session.audience+'core/v2/'+type+'s/'+id
                 expect = requests.status_codes.codes.OK
-            eprint("WARN: deleting {:s}".format(entityUrl))
+            eprint("WARN: deleting {:s}".format(entity_url))
             response = requests.delete(
-                entityUrl,
+                entity_url,
                 proxies=self.session.proxies,
                 verify=self.session.verify,
                 headers=headers
@@ -1329,7 +1328,7 @@ class Network:
 
         if not wait == 0:
             try:
-                self.waitForStatus(
+                self.wait_for_status(
                     expect='DELETED',
                     type=type,
                     id=self.id if type == 'network' else id,
