@@ -655,7 +655,7 @@ class Network:
     def edge_router_policies(self):
         return(self.get_resources("edge-router-policies"))
 
-    def appwans(self):
+    def app_wans(self):
         return(self.get_resources("app-wans"))
 
     def delete_network(self,wait=300,progress=True):
@@ -989,7 +989,7 @@ class Network:
 
         return(policy)
 
-    def create_service(self, name: str, client_hostname: str, client_port_range: int, server_hostname: str, 
+    def create_service(self, name: str, client_host_name: str, client_port_range: int, server_host_name: str, 
         server_port_range: int, server_protocol: str="TCP", attributes: list=[], edge_router_attributes: list=[], 
         egress_router_id: str=None, endpoints: list=[], encryption_required: bool=True):
         """create a Service
@@ -1005,9 +1005,9 @@ class Network:
                 "networkId": self.id,
                 "name": name,
                 "attributes": attributes,
-                "clientHostName": client_hostname,
+                "clientHostName": client_host_name,
                 "clientPortRange": client_port_range,
-                "serverHostName": server_hostname,
+                "serverHostName": server_host_name,
                 "serverPortRange": server_port_range,
                 "serverProtocol": server_protocol,
                 "encryptionRequired": encryption_required
@@ -1051,7 +1051,7 @@ class Network:
 
         return(service)
 
-    def create_appwan(self, name: str, endpoint_attributes: list=[], service_attributes: list=[], posture_check_attributes: list=[]):
+    def create_app_wan(self, name: str, endpoint_attributes: list=[], service_attributes: list=[], posture_check_attributes: list=[]):
         """create an AppWAN
         """
         try:
@@ -1081,7 +1081,7 @@ class Network:
             raise
         if http_code == requests.status_codes.codes[RESOURCES['app-wans']['expect']]:
             try:
-                appwan = json.loads(response.text)
+                app_wan = json.loads(response.text)
             except ValueError as e:
                 eprint('ERROR: failed to load {:s} object from POST response'.format("AppWAN"))
                 raise(e)
@@ -1093,7 +1093,7 @@ class Network:
                 )
             )
 
-        return(appwan)
+        return(app_wan)
 
     def get_network_by_name(self,name):
         """return exactly one network object
