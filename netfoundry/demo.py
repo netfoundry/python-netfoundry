@@ -201,10 +201,10 @@ def main():
             service1 = network.create_service(
                 name=service1_name,
                 attributes=["#welcomeWagon"],
-                client_hostname="hello.netfoundry",
+                client_host_name="hello.netfoundry",
                 client_port_range="80",
                 endpoints=[exit1['id']],
-                server_hostname="hello",
+                server_host_name="hello",
                 server_port_range="3000",
                 server_protocol="TCP"
             )
@@ -219,10 +219,10 @@ def main():
             service2 = network.create_service(
                 name=service2_name,
                 attributes=["#welcomeWagon"],
-                client_hostname="httpbin.netfoundry",
+                client_host_name="httpbin.netfoundry",
                 client_port_range="80",
                 endpoints=[exit1['id']],
-                server_hostname="httpbin",
+                server_host_name="httpbin",
                 server_port_range="80",
                 server_protocol="TCP"
             )
@@ -240,10 +240,10 @@ def main():
         service3 = network.create_service(
             name=service3_name,
             attributes=["#welcomeWagon"],
-            client_hostname="fireworks.netfoundry",
+            client_host_name="fireworks.netfoundry",
             client_port_range="80",
             egress_router_id=hosting_router['id'],
-            server_hostname="34.204.78.203",
+            server_host_name="fireworks-load-balancer-1246256380.us-east-1.elb.amazonaws.com",
             server_port_range="80",
             server_protocol="TCP"
         )
@@ -258,10 +258,10 @@ def main():
         service4 = network.create_service(
             name=service4_name,
             attributes=["#welcomeWagon"],
-            client_hostname="weather.netfoundry",
+            client_host_name="weather.netfoundry",
             client_port_range="80",
             egress_router_id=hosting_router['id'],
-            server_hostname="wttr.in",
+            server_host_name="wttr.in",
             server_port_range="80",
             server_protocol="TCP"
         )
@@ -279,10 +279,10 @@ def main():
         service5 = network.create_service(
             name=service5_name,
             attributes=["#welcomeWagon"],
-            client_hostname="echo.netfoundry",
+            client_host_name="echo.netfoundry",
             client_port_range="80",
             egress_router_id=hosting_router['id'],
-            server_hostname="eth0.me",
+            server_host_name="eth0.me",
             server_port_range="80",
             server_protocol="TCP"
         )
@@ -292,15 +292,15 @@ def main():
         print("INFO: found Service \"{:s}\"".format(service5['name']))
 
     # create unless exists
-    appwan1_name = "Welcome"
-    appwans = network.appwans()
-    if not appwan1_name in [aw['name'] for aw in appwans]:
+    app_wan1_name = "Welcome"
+    app_wans = network.app_wans()
+    if not app_wan1_name in [aw['name'] for aw in app_wans]:
         # workFromAnywhere may connect to welcomeWagon
-        appwan1 = network.create_appwan(name=appwan1_name,endpoint_attributes=["#workFromAnywhere"],service_attributes=["#welcomeWagon"])
-        print("INFO: created AppWAN \"{:s}\"".format(appwan1['name']))
+        app_wan1 = network.create_app_wan(name=app_wan1_name,endpoint_attributes=["#workFromAnywhere"],service_attributes=["#welcomeWagon"])
+        print("INFO: created AppWAN \"{:s}\"".format(app_wan1['name']))
     else:
-        appwan1 = [aw for aw in appwans if aw['name'] == appwan1_name][0]
-        print("INFO: found AppWAN \"{:s}\"".format(appwan1['name']))
+        app_wan1 = [aw for aw in app_wans if aw['name'] == app_wan1_name][0]
+        print("INFO: found AppWAN \"{:s}\"".format(app_wan1['name']))
 
     print("SUCCESS! The next step is to enroll one or more of your dialer Endpoints on some device(s) and visit one of the demo Service URLs described in the demo document ({doc})."
             "You may also log in to the web console ({nfconsole}) to play with your Network".format(doc="https://developer.netfoundry.io/v2/tools/#demos",nfconsole=network_group.nfconsole))
