@@ -243,7 +243,7 @@ def main():
             client_host_name="fireworks.netfoundry",
             client_port_range="80",
             egress_router_id=hosting_router['id'],
-            server_host_name="34.204.78.203",
+            server_host_name="fireworks-load-balancer-1246256380.us-east-1.elb.amazonaws.com",
             server_port_range="80",
             server_protocol="TCP"
         )
