@@ -658,6 +658,9 @@ class Network:
     def app_wans(self):
         return(self.get_resources("app-wans"))
 
+    def posture_checks(self):
+        return(self.get_resources("posture-checks"))
+
     def delete_network(self,wait=300,progress=True):
         self.delete_resource(type="network",wait=wait,progress=progress)
 #        raise Exception("ERROR: failed to delete Network {:s}".format(self.name))
@@ -742,7 +745,7 @@ class Network:
             
     def get_resources(self,type,name=None):
         """return the resources object
-            :type [required] one of endpoints, edge-routers, services
+            :type [required]
         """
         try:
             headers = {
