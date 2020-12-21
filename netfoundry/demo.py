@@ -90,11 +90,11 @@ def main():
     fabric_placements = list()
     fabric_placement_count = 1
     for region in geo_regions:
-        datacenter_ids = [dc['id'] for dc in network.aws_geo_regions[region]]
-        existing_count = len([er for er in edge_routers if er['dataCenterId'] in datacenter_ids])
+        data_center_ids = [dc['id'] for dc in network.aws_geo_regions[region]]
+        existing_count = len([er for er in edge_routers if er['dataCenterId'] in data_center_ids])
         if existing_count < fabric_placement_count:
             choice = random.choice(network.aws_geo_regions[region])
-            # append the current major region to the randomly-chosen datacenter object
+            # append the current major region to the randomly-chosen data center object
             #   so we can use it as a role attribute when we create the hosted Edge Router
             choice['geoRegion'] = region
             fabric_placements += [choice]
@@ -109,7 +109,7 @@ def main():
                 "#"+location['locationCode'],
                 "#"+location['geoRegion']
             ],
-            datacenter_id=location['id']
+            data_center_id=location['id']
         )
         print("INFO: Placed Edge Router in {major} ({location_name})".format(
             major=location['geoRegion'],
