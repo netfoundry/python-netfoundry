@@ -11,6 +11,7 @@ from uuid import UUID       # validate UUIDv4 strings
 import jwt                  # decode the JWT claimset
 from pathlib import Path    #
 import os
+from re import sub
 
 class Session:
     """ Use an API account from a credentials file as described in https://developer.netfoundry.io/v2/guides/authentication/
@@ -63,14 +64,14 @@ class Session:
             # TODO: [MOP-13438] auto-renew token when near expiry (now+1hour in epoch seconds)
             expiry = claim['exp']
             epoch = time.time()
-            print("DEBUG: found API token in env NETFOUNDRY_API_TOKEN")
+#            print("DEBUG: found API token in env NETFOUNDRY_API_TOKEN")
 
         # if no token or near expiry then use credentials to obtain a token
         if epoch is not None and epoch < (expiry - 600):
             # extract the API URL from the claim
             self.audience = claim['scope'].replace('/ignore-scope','')
             # e.g. https://gateway.production.netfoundry.io/
-            print("DEBUG: using API token from env NETFOUNDRY_API_TOKEN")
+#            print("DEBUG: using API token from env NETFOUNDRY_API_TOKEN")
         else:
             # persist the credentials filename in instances so that it may be used to refresh the token
             if credentials is not None:
@@ -160,9 +161,10 @@ class Session:
                     )
             else:
                 raise Exception(
-                    'ERROR: got unexpected HTTP response {} ({:d})'.format(
+                    'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
                         requests.status_codes._codes[response_code][0].upper(),
-                        response_code
+                        response_code,
+                        response.text
                     )
                 )
 
@@ -173,7 +175,7 @@ class Organization:
     def __init__(self, Session):
         self.session = Session
         # always resolve Network Groups so we can specify either name or ID when calling super()
-        self.network_groups = self.get_network_groups()
+        self.network_groups = self.get_network_groups_by_organization()
         self.describe = self.get_organization()
         self.label = self.describe['label']
 
@@ -188,11 +190,11 @@ class Organization:
                 verify=self.session.verify,
                 headers=headers
             )
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
 
-        if http_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == requests.status_codes.codes.OK: # HTTP 200
             try:
                 organizations = json.loads(response.text)
             except ValueError as e:
@@ -200,9 +202,10 @@ class Organization:
                 raise(e)
         else:
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
                 )
             )
 
@@ -221,11 +224,11 @@ class Organization:
                 verify=self.session.verify,
                 headers=headers
             )
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
 
-        if http_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == requests.status_codes.codes.OK: # HTTP 200
             try:
                 network_group = json.loads(response.text)
             except ValueError as e:
@@ -233,15 +236,49 @@ class Organization:
                 raise(e)
         else:
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
                 )
             )
 
         return(network_group)
 
-    def get_network_groups(self):
+    def get_network(self,network_id):
+        """describe a Network by ID
+        """
+        try:
+            # /networks/{id} returns a Network object
+            headers = { "authorization": "Bearer " + self.session.token }
+            response = requests.get(
+                self.session.audience+'rest/v1/networks/'+network_id,
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers
+            )
+            response_code = response.status_code
+        except:
+            raise
+
+        if response_code == requests.status_codes.codes.OK: # HTTP 200
+            try:
+                network = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR getting Network Group')
+                raise(e)
+        else:
+            raise Exception(
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
+                )
+            )
+
+        return(network)
+
+    def get_network_groups_by_organization(self):
         """list Network Groups
         """
         try:
@@ -253,11 +290,11 @@ class Organization:
                 verify=self.session.verify,
                 headers=headers
             )
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
 
-        if http_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == requests.status_codes.codes.OK: # HTTP 200
             try:
                 network_groups = json.loads(response.text)['_embedded']['organizations']
             except ValueError as e:
@@ -265,9 +302,10 @@ class Organization:
                 raise(e)
         else:
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
                 )
             )
 
@@ -287,11 +325,11 @@ class Organization:
                 verify=self.session.verify,
                 headers=headers
             )
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
 
-        if http_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == requests.status_codes.codes.OK: # HTTP 200
             try:
                 networks = json.loads(response.text)['_embedded'][RESOURCES['networks']['embedded']]
             except KeyError:
@@ -299,9 +337,10 @@ class Organization:
                 pass
         else:
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
                 )
             )
 
@@ -325,11 +364,11 @@ class Organization:
                 headers=headers,
                 params=params
             )
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
 
-        if http_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == requests.status_codes.codes.OK: # HTTP 200
             try:
                 embedded = json.loads(response.text)
                 networks = embedded['_embedded'][RESOURCES['networks']['embedded']]
@@ -338,9 +377,10 @@ class Organization:
                 pass
         else:
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
                 )
             )
 
@@ -403,16 +443,16 @@ class NetworkGroup:
         self.id = self.network_group_id
         self.name = self.network_group_name
 
-        #inventory of infrequently-changing assets: configs, datacenters
+        #inventory of infrequently-changing assets: configs, data centers
         self.network_config_metadata = self.get_network_config_metadata()
         self.network_config_metadata_by_name = dict()
         for config in self.network_config_metadata:
             self.network_config_metadata_by_name[config['name']] = config['id']
             # e.g. { small: 2616da5c-4441-4c3d-a9a2-ed37262f2ef4 }
-        self.nc_datacenters = self.get_controller_datacenters()
-        self.nc_datacenters_by_location = dict()
-        for dc in self.nc_datacenters:
-            self.nc_datacenters_by_location[dc['locationCode']] = dc['id']
+        self.nc_data_centers = self.get_controller_data_centers()
+        self.nc_data_centers_by_location = dict()
+        for dc in self.nc_data_centers:
+            self.nc_data_centers_by_location[dc['locationCode']] = dc['id']
             # e.g. { us-east-1: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
 
     def get_network_config_metadata(self):
@@ -427,11 +467,11 @@ class NetworkGroup:
                 headers=headers
             )
 
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
 
-        if http_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == requests.status_codes.codes.OK: # HTTP 200
             try:
                 network_config_metadata = json.loads(response.text)['_embedded']['networkConfigMetadataList']
             except ValueError as e:
@@ -439,19 +479,20 @@ class NetworkGroup:
                 raise(e)
         else:
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
                 )
             )
 
         return(network_config_metadata)
 
-    def get_controller_datacenters(self):
-        """list the datacenters where a Network Controller may be created
+    def get_controller_data_centers(self):
+        """list the data centers where a Network Controller may be created
         """
         try:
-            # datacenters returns a list of dicts (datacenter objects)
+            # data centers returns a list of dicts (data center objects)
             headers = { "authorization": "Bearer " + self.session.token }
             params = {
                 "hostType": "NC",
@@ -464,32 +505,33 @@ class NetworkGroup:
                 headers=headers,
                 params=params
             )
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
 
-        if http_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == requests.status_codes.codes.OK: # HTTP 200
             try:
-                datacenters = json.loads(response.text)['_embedded']['dataCenters']
+                data_centers = json.loads(response.text)['_embedded']['dataCenters']
             except ValueError as e:
-                eprint('ERROR getting datacenters')
+                eprint('ERROR getting data centers')
                 raise(e)
         else:
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
                 )
             )
 
-        return(datacenters)
+        return(data_centers)
 
-    def get_datacenter_by_location(self, location):
-        """return one datacenter object
+    def get_data_center_by_location(self, location):
+        """return one data center object
         :param location: required single location to fetch
         """
         try:
-            # datacenters returns a list of dicts (datacenter objects)
+            # data centers returns a list of dicts (data center objects)
             headers = { "authorization": "Bearer " + self.session.token }
             params = { "locationCode": location }
             response = requests.get(
@@ -499,32 +541,33 @@ class NetworkGroup:
                 headers=headers,
                 params=params
             )
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
 
-        if http_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == requests.status_codes.codes.OK: # HTTP 200
             try:
-                datacenter = json.loads(response.text)
+                data_center = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR getting datacenter')
+                eprint('ERROR getting data center')
                 raise(e)
         else:
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
                 )
             )
 
-        return(datacenter)
+        return(data_center)
 
     def create_network(self, name, network_group_id=None, location="us-east-1", version=None, network_config="small"):
         """
         create a network with
         :param name: required network name
         :param network_group: optional Network Group ID
-        :param location: optional datacenter region name in which to create
+        :param location: optional data center region name in which to create
         :param version: optional product version string like 7.2.0-1234567
         :param network_config: optional network configuration metadata name e.g. "medium"
         """
@@ -554,15 +597,16 @@ class NetworkGroup:
                 json=request,
                 headers=headers
             )
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
 
-        if not http_code == requests.status_codes.codes[RESOURCES['networks']['expect']]:
+        if not response_code == requests.status_codes.codes[RESOURCES['networks']['expect']]:
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
                 )
             )
 
@@ -595,15 +639,16 @@ class NetworkGroup:
                 verify=self.session.verify,
                 headers=headers
             )
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
 
-        if not http_code == requests.status_codes.codes.ACCEPTED:
+        if not response_code == requests.status_codes.codes.ACCEPTED:
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
                 )
             )
 
@@ -640,14 +685,24 @@ class Network:
         self.created_by = self.describe['createdBy']
 
         self.aws_geo_regions = dict()
-        for geo in MAJOR_REGIONS['AWS'].keys():
-            self.aws_geo_regions[geo] = [dc for dc in self.get_edge_router_datacenters(provider="AWS") if dc['locationName'] in MAJOR_REGIONS['AWS'][geo]]
+        for geo in major_regions['AWS'].keys():
+            self.aws_geo_regions[geo] = [dc for dc in self.get_edge_router_data_centers(provider="AWS") if dc['locationName'] in major_regions['AWS'][geo]]
 
     def endpoints(self):
         return(self.get_resources("endpoints"))
 
-    def edge_routers(self):
-        return(self.get_resources("edge-routers"))
+    def edge_routers(self, only_hosted: bool=False, only_customer: bool=False):
+        all_edge_routers = self.get_resources("edge-routers")
+        if only_hosted and only_customer:
+            raise Exception("ERROR: specify only one of only_hosted or only_customer")
+        elif only_hosted:
+            hosted_edge_routers = [er for er in all_edge_routers if er['dataCenterId']]
+            return(hosted_edge_routers)
+        elif only_customer:
+            customer_edge_routers = [er for er in all_edge_routers if not er['dataCenterId']]
+            return(customer_edge_routers)
+        else:
+            return(all_edge_routers)
 
     def services(self):
         return(self.get_resources("services"))
@@ -658,25 +713,28 @@ class Network:
     def app_wans(self):
         return(self.get_resources("app-wans"))
 
+    def posture_checks(self):
+        return(self.get_resources("posture-checks"))
+
     def delete_network(self,wait=300,progress=True):
         self.delete_resource(type="network",wait=wait,progress=progress)
 #        raise Exception("ERROR: failed to delete Network {:s}".format(self.name))
 
-    def get_edge_router_datacenters(self,provider=None):
-        """list the datacenters where an Edge Router may be created
+    def get_edge_router_data_centers(self,provider: str=None,location_code: str=None):
+        """list the data centers where an Edge Router may be created
         """
         try:
-            # datacenters returns a list of dicts (datacenter objects)
+            # data centers returns a list of dicts (data centers)
             headers = { "authorization": "Bearer " + self.session.token }
             params = {
                 "productVersion": self.product_version,
                 "hostType": "ER"
             }
             if provider is not None:
-                if provider in ["AWS", "AZURE", "GCP", "ALICLOUD", "NetFoundry"]:
+                if provider in ["AWS", "AZURE", "GCP", "ALICLOUD", "NetFoundry", "OCP"]:
                     params['provider'] = provider
                 else:
-                    raise Exception("ERROR: illegal cloud provider {:s}".format(provider))
+                    raise Exception("ERROR: unexpected cloud provider {:s}".format(provider))
             response = requests.get(
                 self.session.audience+'core/v2/data-centers',
                 proxies=self.session.proxies,
@@ -684,25 +742,28 @@ class Network:
                 headers=headers,
                 params=params
             )
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
 
-        if http_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == requests.status_codes.codes.OK: # HTTP 200
             try:
-                datacenters = json.loads(response.text)['_embedded']['dataCenters']
+                data_centers = json.loads(response.text)['_embedded']['dataCenters']
             except ValueError as e:
-                eprint('ERROR getting datacenters')
+                eprint('ERROR getting data centers')
                 raise(e)
         else:
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
                 )
             )
-
-        return(datacenters)
+        if location_code:
+            return([dc for dc in data_centers if dc['locationCode'] == location_code])
+        else:
+            return(data_centers)
 
     def share_endpoint(self,recipient,endpoint_id):
         """share the new endpoint enrollment token with an email address
@@ -727,22 +788,22 @@ class Network:
                 headers=headers,
                 json=body
             )
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
 
-        if not http_code == requests.status_codes.codes['ACCEPTED']:
+        if not response_code == requests.status_codes.codes['ACCEPTED']:
             raise Exception(
-                'unexpected response: {} (HTTP {:d}\n{})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code,
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
                     response.text
                 )
             )
             
     def get_resources(self,type,name=None):
         """return the resources object
-            :type [required] one of endpoints, edge-routers, services
+            :type [required]
         """
         try:
             headers = {
@@ -763,11 +824,11 @@ class Network:
                 headers=headers,
                 params=params
             )
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
 
-        if http_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == requests.status_codes.codes.OK: # HTTP 200
             try:
                 resources = json.loads(response.text)
             except ValueError as e:
@@ -775,9 +836,10 @@ class Network:
                 raise(e)
         else:
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
                 )
             )
 
@@ -804,11 +866,11 @@ class Network:
                         headers=headers,
                         params=params
                     )
-                    http_code = response.status_code
+                    response_code = response.status_code
                 except:
                     raise
 
-                if http_code == requests.status_codes.codes.OK: # HTTP 200
+                if response_code == requests.status_codes.codes.OK: # HTTP 200
                     try:
                         resources = json.loads(response.text)
                         all_pages += resources['_embedded'][RESOURCES[type]['embedded']]
@@ -817,9 +879,10 @@ class Network:
                         raise(e)
                 else:
                     raise Exception(
-                        'unexpected response: {} (HTTP {:d})'.format(
-                            requests.status_codes._codes[http_code][0].upper(),
-                            http_code
+                        'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                            requests.status_codes._codes[response_code][0].upper(),
+                            response_code,
+                            response.text
                         )
                     )
             return(all_pages)
@@ -839,21 +902,24 @@ class Network:
                 headers=headers,
                 json=patch
             )
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
 
-        if http_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code in [requests.status_codes.codes.OK, requests.status_codes.codes.ACCEPTED]: # HTTP 200
             try:
                 resource = json.loads(response.text)
             except ValueError as e:
                 eprint('ERROR: failed to load {r} object from PATCH response'.format(r = type))
                 raise(e)
         else:
+            json_formatted = json.dumps(patch, indent=2)
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s} for patch {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text,
+                    json_formatted
                 )
             )
         return(resource)
@@ -881,10 +947,10 @@ class Network:
                 headers=headers,
                 json=body
             )
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
-        if http_code == requests.status_codes.codes.OK: # HTTP 200 (synchronous fulfillment)
+        if response_code == requests.status_codes.codes.OK: # HTTP 200 (synchronous fulfillment)
             try:
                 endpoint = json.loads(response.text)
             except ValueError as e:
@@ -892,15 +958,16 @@ class Network:
                 raise(e)
         else:
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
                 )
             )
 
         return(endpoint)
 
-    def create_edge_router(self, name, attributes=[], link_listener=False, datacenter_id=None):
+    def create_edge_router(self, name, attributes=[], link_listener=False, data_center_id=None):
         """create an Edge Router
         """
         try:
@@ -916,8 +983,8 @@ class Network:
                 "attributes": attributes,
                 "linkListener": link_listener
             }
-            if datacenter_id:
-                body['dataCenterId'] = datacenter_id
+            if data_center_id:
+                body['dataCenterId'] = data_center_id
                 body['linkListener'] = True
             response = requests.post(
                 self.session.audience+'core/v2/edge-routers',
@@ -926,22 +993,24 @@ class Network:
                 headers=headers,
                 json=body
             )
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
-        if http_code == requests.status_codes.codes[RESOURCES['edge-routers']['expect']]:
+        if response_code == requests.status_codes.codes[RESOURCES['edge-routers']['expect']]:
             try:
                 router = json.loads(response.text)
             except ValueError as e:
                 eprint('ERROR: failed to load {:s} object from POST response'.format("Edge Router"))
                 raise(e)
             else:
-                print('DEBUG: created Edge Router trace ID {:s}'.format(response.headers._store['x-b3-traceid'][1]))
+#                print('DEBUG: created Edge Router trace ID {:s}'.format(response.headers._store['x-b3-traceid'][1]))
+                pass
         else:
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
                 )
             )
 
@@ -970,10 +1039,10 @@ class Network:
                 headers=headers,
                 json=body
             )
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
-        if http_code == requests.status_codes.codes[RESOURCES['edge-router-policies']['expect']]:
+        if response_code == requests.status_codes.codes[RESOURCES['edge-router-policies']['expect']]:
             try:
                 policy = json.loads(response.text)
             except ValueError as e:
@@ -981,9 +1050,10 @@ class Network:
                 raise(e)
         else:
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
                 )
             )
 
@@ -1032,10 +1102,10 @@ class Network:
                 headers=headers,
                 json=body
             )
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
-        if http_code == requests.status_codes.codes[RESOURCES['services']['expect']]:
+        if response_code == requests.status_codes.codes[RESOURCES['services']['expect']]:
             try:
                 service = json.loads(response.text)
             except ValueError as e:
@@ -1043,9 +1113,10 @@ class Network:
                 raise(e)
         else:
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
                 )
             )
 
@@ -1076,10 +1147,10 @@ class Network:
                 headers=headers,
                 json=body
             )
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
-        if http_code == requests.status_codes.codes[RESOURCES['app-wans']['expect']]:
+        if response_code == requests.status_codes.codes[RESOURCES['app-wans']['expect']]:
             try:
                 app_wan = json.loads(response.text)
             except ValueError as e:
@@ -1087,9 +1158,10 @@ class Network:
                 raise(e)
         else:
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
                 )
             )
 
@@ -1113,11 +1185,11 @@ class Network:
                 headers=headers,
                 params=params
             )
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
 
-        if http_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == requests.status_codes.codes.OK: # HTTP 200
             try:
                 networks = json.loads(response.text)
             except ValueError as e:
@@ -1125,9 +1197,10 @@ class Network:
                 raise(e)
         else:
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
                 )
             )
         hits = networks['page']['totalElements']
@@ -1151,11 +1224,11 @@ class Network:
                 verify=self.session.verify,
                 headers=headers
             )
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
 
-        if http_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == requests.status_codes.codes.OK: # HTTP 200
             try:
                 network = json.loads(response.text)
             except ValueError as e:
@@ -1163,9 +1236,10 @@ class Network:
                 raise(e)
         else:
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
                 )
             )
 
@@ -1199,7 +1273,7 @@ class Network:
             )
 
         status = str()
-        http_code = int()
+        response_code = int()
         while time.time() < now+wait and not status == expect:
             if progress:
                 sys.stdout.write('.') # print a stop each iteration to imply progress
@@ -1218,7 +1292,7 @@ class Network:
                         sys.stdout.write('\n{:^19s}:{:^19s}:'.format(entity['name'],entity['status']))
                 status = entity['status']
             else:
-                http_code = entity['http_code']
+                response_code = entity['response_code']
 
             if not expect == status:
                 time.sleep(sleep)
@@ -1231,7 +1305,7 @@ class Network:
                 'failed to read status while waiting for {:s}; got {} ({:d})'.format(
                     expect,
                     entity['http_status'],
-                    entity['http_code']
+                    entity['response_code']
                 )
             )
         else:
@@ -1267,11 +1341,11 @@ class Network:
                 headers=headers,
                 params=params
             )
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
 
-        if http_code == requests.status_codes.codes.OK:
+        if response_code == requests.status_codes.codes.OK:
             try:
                 status = json.loads(response.text)['status']
                 name = json.loads(response.text)['name']
@@ -1280,15 +1354,15 @@ class Network:
                 raise
             else:
                 return {
-                    'http_status': requests.status_codes._codes[http_code][0].upper(),
-                    'http_code': http_code,
+                    'http_status': requests.status_codes._codes[response_code][0].upper(),
+                    'response_code': response_code,
                     'status': status,
                     'name': name
                 }
         else:
             return {
-                'http_status': requests.status_codes._codes[http_code][0].upper(),
-                'http_code': http_code
+                'http_status': requests.status_codes._codes[response_code][0].upper(),
+                'response_code': response_code
             }
 
     def delete_resource(self, type, id=None, wait=int(0), progress=False):
@@ -1314,15 +1388,16 @@ class Network:
                 verify=self.session.verify,
                 headers=headers
             )
-            http_code = response.status_code
+            response_code = response.status_code
         except:
             raise
 
-        if not http_code == expect:
+        if not response_code == expect:
             raise Exception(
-                'unexpected response: {} (HTTP {:d})'.format(
-                    requests.status_codes._codes[http_code][0].upper(),
-                    http_code
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
                 )
             )
 
@@ -1360,6 +1435,17 @@ class LookupDict(dict):
 
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
+
+class Utility:
+    def __init__(self):
+        pass
+
+    def camel(self, snake_str):
+        first, *others = snake_str.split('_')
+        return ''.join([first.lower(), *map(str.title, others)])
+
+    def snake(self, camel_str):
+        return sub(r'(?<!^)(?=[A-Z])', '_', camel_str).lower()
 
 STATUSES_BY_CODE = {
     100: ('new', 'created'),
@@ -1405,7 +1491,7 @@ RESOURCES = {
 }
 
 # TODO: [MOP-13441] associate locations with a short list of major geographic regions / continents
-MAJOR_REGIONS = {
+major_regions = {
     "AWS" : {
         "Americas": ("Canada Central","N. California","N. Virginia","Ohio","Oregon","Sao Paulo"),
         "EuropeMiddleEastAfrica": ("Bahrain","Cape Town South Africa","Frankfurt","Ireland","London","Milan","Paris","Stockholm"),
