@@ -1245,7 +1245,7 @@ class Network:
 
         return(network)
 
-    def wait_for_status(self, expect, type="network", wait=300, sleep=20, id=None, progress=False):
+    def wait_for_status(self, expect: str="PROVISIONED", type: str="network", wait: int=300, sleep: int=20, id: str=None, progress: bool=False):
         """continuously poll for the expected status until expiry
         :param expect: the expected status symbol e.g. PROVISIONED
         :param id: the UUID of the entity having a status if entity is not a network
@@ -1316,9 +1316,80 @@ class Network:
                 )
             )
 
-    def get_resource_status(self, type, id=None):
+    def wait_for_statuses(self, expected_statuses: list, type: str="network", wait: int=300, sleep: int=20, id: str=None, progress: bool=False):
+        """continuously poll for the expected statuses until expiry
+        :param expected_statuses: list of strings as expected status symbol(s) e.g. ["PROVISIONING","PROVISIONED"]
+        :param id: the UUID of the entity having a status if entity is not a network
+        :param type: optional type of entity e.g. network (default), endpoint, service, edge-router
+        :param wait: optional SECONDS after which to raise an exception defaults to five minutes (300)
+        :param sleep: SECONDS polling interval
+        """
+
+        now = time.time()
+
+        if not wait >= sleep:
+            raise Exception(
+                "ERROR: wait duration ({:d}) must be greater than or equal to polling interval ({:d})".format(
+                    wait, sleep
+                )
+            )
+
+        # poll for status until expiry
+        if progress:
+            sys.stdout.write(
+                '\twaiting for any status in {} or until {:s}.'.format(
+                    expected_statuses,
+                    time.ctime(now+wait)
+                )
+            )
+
+        status = str()
+        response_code = int()
+        while time.time() < now+wait and not status in expected_statuses:
+            if progress:
+                sys.stdout.write('.') # print a stop each iteration to imply progress
+                sys.stdout.flush()
+
+            try:
+                entity = self.get_resource_status(type=type, id=id)
+            except:
+                raise
+
+            if entity['status']: # attribute is not None if HTTP OK
+                if not status or ( # print the starting status
+                    status and not entity['status'] == status # print on subsequent changes
+                ):
+                    if progress:
+                        sys.stdout.write('\n{:^19s}:{:^19s}:'.format(entity['name'],entity['status']))
+                status = entity['status']
+            else:
+                response_code = entity['response_code']
+
+            if not status in expected_statuses:
+                time.sleep(sleep)
+        print() # newline terminates progress meter
+
+        if status in expected_statuses:
+            return(True)
+        elif not status:
+            raise Exception(
+                'failed to read status while waiting for any status in {}; got {} ({:d})'.format(
+                    expected_statuses,
+                    entity['http_status'],
+                    entity['response_code']
+                )
+            )
+        else:
+            raise Exception(
+                'timed out with status {} while waiting for any status in {}'.format(
+                    status,
+                    expected_statuses
+                )
+            )
+
+    def get_resource_status(self, type: str, id: str):
         """return an object describing an entity's API status or the symbolic HTTP code
-        :param type: the type of entity e.g. network, endpoint, service, edge-router
+        :param type: the type of entity e.g. network, endpoint, service, edge-router, edge-router-policy, posture-check
         :param id: the UUID of the entity having a status if not a network
         """
 
@@ -1364,6 +1435,37 @@ class Network:
                 'http_status': requests.status_codes._codes[response_code][0].upper(),
                 'response_code': response_code
             }
+
+    def get_resource(self, type: str, id: str):
+        """return an object describing an entity
+        :param type: the type of entity e.g. network, endpoint, service, edge-router, edge-router-policy, posture-check
+        :param id: the UUID of the entity if not a network
+        """
+
+        try:
+            headers = { "authorization": "Bearer " + self.session.token }
+            entity_url = self.session.audience+'core/v2/'+type+'s/'+id
+            params = {
+                "networkId": self.id
+            }
+            response = requests.get(
+                entity_url,
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                params=params
+            )
+            response_code = response.status_code
+        except:
+            raise
+
+        if response_code == requests.status_codes.codes.OK:
+            try:
+                entity = json.loads(response.text)
+            except:
+                raise Exception('ERROR parsing response as object, got:\n{}'.format(response.text))
+            else:
+                return(entity)
 
     def delete_resource(self, type, id=None, wait=int(0), progress=False):
         """
