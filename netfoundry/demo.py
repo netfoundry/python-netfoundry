@@ -82,8 +82,8 @@ def main():
 
     #print('{} is {}\n'.format(network.name, network.status))
 
-    # existing ERs
-    edge_routers = network.edge_routers()
+    # existing hosted ERs
+    hosted_edge_routers = network.edge_routers(only_hosted=True)
     # a list of places where Endpoints are dialing from
     geo_regions = args.regions
     # a list of locations to place one hosted ER
@@ -91,7 +91,7 @@ def main():
     fabric_placement_count = 1
     for region in geo_regions:
         data_center_ids = [dc['id'] for dc in network.aws_geo_regions[region]]
-        existing_count = len([er for er in edge_routers if er['dataCenterId'] in data_center_ids])
+        existing_count = len([er for er in hosted_edge_routers if er['dataCenterId'] in data_center_ids])
         if existing_count < fabric_placement_count:
             choice = random.choice(network.aws_geo_regions[region])
             # append the current major region to the randomly-chosen data center object
@@ -99,7 +99,7 @@ def main():
             choice['geoRegion'] = region
             fabric_placements += [choice]
         else:
-            print("INFO: found at least {count} Edge Router(s) in {major}".format(count=fabric_placement_count, major=region))
+            print("INFO: found at least {count} hosted Edge Router(s) in {major}".format(count=fabric_placement_count, major=region))
 
     for location in fabric_placements:
         er = network.create_edge_router(
@@ -111,12 +111,12 @@ def main():
             ],
             data_center_id=location['id']
         )
+        hosted_edge_routers += [er]
         print("INFO: Placed Edge Router in {major} ({location_name})".format(
             major=location['geoRegion'],
             location_name=location['locationName']
         ))
 
-    hosted_edge_routers = [er for er in network.edge_routers() if er['dataCenterId']]
     for router_id in [r['id'] for r in hosted_edge_routers]:
         try:
             network.wait_for_status("PROVISIONED",id=router_id,type="edge-router",wait=999,progress=True)
@@ -291,6 +291,29 @@ def main():
         service5 = [svc for svc in services if svc['name'] == service5_name][0]
         print("INFO: found Service \"{:s}\"".format(service5['name']))
 
+    # create a customer-hosted ER unless exists
+    customer_routers = network.edge_routers(only_customer=True)
+    customer_router_name="Branch Exit Router 1"
+    if not customer_router_name in [er['name'] for er in customer_routers]:
+        customer_router = network.create_edge_router(
+            name=customer_router_name,
+            attributes=["#vmWareExitRouters"],
+        )
+    else:
+        customer_router = [er for er in customer_routers if er['name'] == customer_router_name][0]
+    # wait for customer router to be PROVISIONED so that registration will be available 
+    try:
+        network.wait_for_status("NEW",id=customer_router['id'],type="edge-router",wait=999,progress=True)
+    except:
+        raise
+    customer_router_registration = network.get_edge_router_registration(id=customer_router['id'])
+    print("INFO: Ready to register branch exit Edge Router {name} with key {key} (expires {expiry})".format(
+        name=customer_router_name,
+        key=customer_router_registration['registrationKey'],
+        expiry=customer_router_registration['expiresAt'],
+    ))
+
+
     # create unless exists
     app_wan1_name = "Welcome"
     app_wans = network.app_wans()
@@ -306,7 +329,6 @@ def main():
             "You may also log in to the web console ({nfconsole}) to play with your Network".format(doc="https://developer.netfoundry.io/v2/tools/#demos",nfconsole=network_group.nfconsole))
     for svc in network.services():
         print("* {name}:\thttp://{url}/".format(name=svc['name'],url=svc['clientHostName']))
-
 
 if __name__ == '__main__':
     main()

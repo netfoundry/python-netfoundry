@@ -1467,6 +1467,32 @@ class Network:
             else:
                 return(entity)
 
+    def get_edge_router_registration(self, id: str):
+        """return the registration key and expiration as a dict
+        :param id: the UUID of the edge router
+        """
+
+        try:
+            headers = { "authorization": "Bearer " + self.session.token }
+            entity_url = self.session.audience+'core/v2/edge-routers/'+id+'/registration-key'
+            response = requests.post(
+                entity_url,
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+            )
+            response_code = response.status_code
+        except:
+            raise
+
+        if response_code == requests.status_codes.codes.OK:
+            try:
+                registration_object = json.loads(response.text)
+            except:
+                raise Exception('ERROR parsing response as object, got:\n{}'.format(response.text))
+            else:
+                return(registration_object)
+
     def delete_resource(self, type, id=None, wait=int(0), progress=False):
         """
         delete a resource
