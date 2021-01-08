@@ -60,7 +60,7 @@ class Session:
         try: self.token
         except AttributeError: epoch = None
         else:
-            claim = jwt.decode(self.token, verify=False, algorithms=["RS256"])
+            claim = jwt.decode(jwt=self.token, algorithms=["RS256"], options={"verify_signature": False})
             # TODO: [MOP-13438] auto-renew token when near expiry (now+1hour in epoch seconds)
             expiry = claim['exp']
             epoch = time.time()
@@ -424,7 +424,7 @@ class NetworkGroup:
 
         # learn about the environment from the token and predict the web console URL
         try:
-            claim = jwt.decode(jwt=self.session.token, verify=False, algorithms=["RS256"])
+            claim = jwt.decode(jwt=self.session.token, algorithms=["RS256"], options={"verify_signature": False})
             iss = claim['iss']
             if re.match('.*cognito.*', iss):
                 self.environment = re.sub(r'https://gateway\.([^.]+)\.netfoundry\.io.*',r'\1',claim['scope'])
@@ -1466,6 +1466,32 @@ class Network:
                 raise Exception('ERROR parsing response as object, got:\n{}'.format(response.text))
             else:
                 return(entity)
+
+    def get_edge_router_registration(self, id: str):
+        """return the registration key and expiration as a dict
+        :param id: the UUID of the edge router
+        """
+
+        try:
+            headers = { "authorization": "Bearer " + self.session.token }
+            entity_url = self.session.audience+'core/v2/edge-routers/'+id+'/registration-key'
+            response = requests.post(
+                entity_url,
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+            )
+            response_code = response.status_code
+        except:
+            raise
+
+        if response_code == requests.status_codes.codes.OK:
+            try:
+                registration_object = json.loads(response.text)
+            except:
+                raise Exception('ERROR parsing response as object, got:\n{}'.format(response.text))
+            else:
+                return(registration_object)
 
     def delete_resource(self, type, id=None, wait=int(0), progress=False):
         """
