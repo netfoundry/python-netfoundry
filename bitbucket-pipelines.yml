@@ -21,3 +21,23 @@ pipelines:
 #        - cat ~/.pypirc
         - python setup.py sdist bdist_wheel
         - twine upload --repository testpypi dist/*
+    bugfix/*:
+    - step:
+        script:
+        - pip install --upgrade twine
+        - echo "[testpypi]" >| ~/.pypirc
+        - "echo \"username: $TEST_PYPI_USER\" >> ~/.pypirc"
+        - "echo \"password: $TEST_PYPI_PASSWORD\" >> ~/.pypirc"
+#        - cat ~/.pypirc
+        - python setup.py sdist bdist_wheel
+        - twine upload --repository testpypi dist/*
+    hotfix/*:
+    - step:
+        script:
+        - pip install --upgrade twine
+        - echo "[testpypi]" >| ~/.pypirc
+        - "echo \"username: $TEST_PYPI_USER\" >> ~/.pypirc"
+        - "echo \"password: $TEST_PYPI_PASSWORD\" >> ~/.pypirc"
+#        - cat ~/.pypirc
+        - python setup.py sdist bdist_wheel
+        - twine upload --repository testpypi dist/*
