@@ -72,7 +72,7 @@ def main():
         network = netfoundry.Network(session, network_name=network_name)
         network.wait_for_status("PROVISIONED",wait=999,progress=True)
     else:
-        network_id = network_group.create_network(network_name)
+        network_id = network_group.create_network(name=network_name,size="small") # use "medium" unless demo
         network = netfoundry.Network(session, network_id=network_id)
         network.wait_for_status("PROVISIONED",wait=999,progress=True)
         network = netfoundry.Network(session, network_id=network_id)
@@ -303,7 +303,7 @@ def main():
         customer_router = [er for er in customer_routers if er['name'] == customer_router_name][0]
     # wait for customer router to be PROVISIONED so that registration will be available 
     try:
-        network.wait_for_status("NEW",id=customer_router['id'],type="edge-router",wait=999,progress=True)
+        network.wait_for_status("PROVISIONED",id=customer_router['id'],type="edge-router",wait=999,progress=True)
     except:
         raise
     customer_router_registration = network.get_edge_router_registration(id=customer_router['id'])

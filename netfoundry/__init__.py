@@ -562,19 +562,26 @@ class NetworkGroup:
 
         return(data_center)
 
-    def create_network(self, name, network_group_id=None, location="us-east-1", version=None, network_config="small"):
+    def create_network(self, name: str, network_group_id: str=None, location: str="us-east-1", version: str=None, size: str="small"):
         """
         create a network with
         :param name: required network name
         :param network_group: optional Network Group ID
         :param location: optional data center region name in which to create
         :param version: optional product version string like 7.2.0-1234567
-        :param network_config: optional network configuration metadata name e.g. "medium"
+        :param size: optional network configuration metadata name from /core/v2/network-configs e.g. "medium"
         """
+        
+        if not size in self.network_config_metadata_by_name.keys():
+            raise Exception("ERROR: unexpected Network size '{:s}'. Valid sizes include: {}.".format(size, str(self.network_config_metadata_by_name.keys())))
+
+        if not location in self.nc_data_centers_by_location.keys():
+            raise Exception("ERROR: unexpected Network location '{:s}'. Valid locations include: {}.".format(location, self.nc_data_centers_by_location.keys()))
+
         request = {
             "name": name,
             "locationCode": location,
-            "networkConfigMetadataId": self.network_config_metadata_by_name[network_config]
+            "size": size,
         }
         if network_group_id:
             request["networkGroupId"] = network_group_id
@@ -678,7 +685,7 @@ class Network:
         self.status = self.describe['status']
         self.product_version = self.describe['productVersion']
         self.owner_identity_id = self.describe['ownerIdentityId']
-        self.network_confi_metadata_id = self.describe['networkConfigMetadataId']
+        self.size = self.describe['size']
         self.o365_breakout_category = self.describe['o365BreakoutCategory']
         self.created_at = self.describe['createdAt']
         self.updated_at = self.describe['updatedAt']
