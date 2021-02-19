@@ -1186,25 +1186,34 @@ class Network:
                     body['modelType'] = "TunnelerToEndpoint"
                     # parse out the elements in the list of endpoints as one of #attribute, UUID, or resolvable Endoint name
                     bind_endpoints = list()
-                    bind_endpoint_attributes = list()
                     for endpoint in endpoints:
                         if endpoint[0:1] == '#':
-                            bind_endpoint_attributes += [endpoint]
+                            bind_endpoints += [endpoint]
                         else:
-                            # check if UUIDv4
-                            try: UUID(endpoint, version=4) # assigned below under "else" if already a UUID
+                            # strip leading @ if present and re-add later after verifying the named Endpoint exists
+                            if endpoint[0:1] == '@':
+                                endpoint = endpoint[1:]
+
+                            # if UUIDv4 then resolve to name, else verify the named Endpoint exists 
+                            try:
+                                UUID(endpoint, version=4) # assigned below under "else" if already a UUID
                             except ValueError:
                                 # else assume is a name and resolve to ID
                                 try: 
                                     name_lookup = self.get_resources(type="endpoints",name=endpoint)[0]
-                                    endpoint_id = name_lookup['id']
+                                    endpoint_name = name_lookup['name']
                                 except Exception as e:
                                     raise Exception('ERROR: Failed to find exactly one hosting Endpoint named "{}". Caught exception: {}'.format(endpoint, e))
                                 # append to list after successfully resolving name to ID
-                                else: bind_endpoints += [endpoint_id] 
-                            else: bind_endpoints += [endpoint] # "endpoint" is already a UUID
-                    body['model']['bindEndpoints'] = bind_endpoints
-                    body['model']['bindEndpointAttributes'] = bind_endpoint_attributes
+                                else: bind_endpoints += ['@'+endpoint_name] 
+                            else:
+                                try:
+                                    name_lookup = self.get_resources(type="endpoints",id=endpoint)
+                                    endpoint_name = name_lookup['name']
+                                except Exception as e:
+                                    raise Exception('ERROR: Failed to find exactly one hosting Endpoint with ID "{}". Caught exception: {}'.format(endpoint, e))
+                                else: bind_endpoints += ['@'+endpoint_name] 
+                    body['model']['bindEndpointAttributes'] = bind_endpoints
                     body['model']['serverEgress'] = server_egress
 
                 elif egress_router_id and not endpoints:
