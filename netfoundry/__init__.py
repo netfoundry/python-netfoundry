@@ -979,25 +979,26 @@ class Network:
                 "authorization": "Bearer " + self.session.token 
             }
             response = requests.put(
+                put['_links']['self']['href'],
                 proxies=self.session.proxies,
                 verify=self.session.verify,
                 headers=headers,
-                json=patch
+                json=put
             )
             response_code = response.status_code
         except:
             raise
 
-        if response_code in [requests.status_codes.codes.OK, requests.status_codes.codes.ACCEPTED]: # HTTP 200
+        if response_code in [requests.status_codes.codes.OK, requests.status_codes.codes.ACCEPTED]: # HTTP 202
             try:
                 resource = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR: failed to load {r} object from PATCH response'.format(r = type))
+                eprint('ERROR: failed to load {r} object from PUT response'.format(r = type))
                 raise(e)
         else:
-            json_formatted = json.dumps(patch, indent=2)
+            json_formatted = json.dumps(put, indent=2)
             raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s} for patch {:s}'.format(
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s} for PUT update {:s}'.format(
                     requests.status_codes._codes[response_code][0].upper(),
                     response_code,
                     response.text,
