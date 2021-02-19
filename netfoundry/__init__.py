@@ -820,7 +820,8 @@ class Network:
                 "networkId": self.id,
                 "page": 0,
                 "size": 10,
-                "sort": "name,asc"
+                "sort": "name,asc",
+                "beta": ''
             }
             if name is not None:
                 params['name'] = name
@@ -1066,10 +1067,14 @@ class Network:
 
         return(policy)
 
-    def create_service(self, name: str, client_host_name: str, client_port_range: int, server_host_name: str, 
-        server_port_range: int, server_protocol: str="TCP", attributes: list=[], edge_router_attributes: list=[], 
+    def create_service(self, name: str, client_host_name: str, client_port_range: int, server_host_name: str=None, 
+        server_port_range: int=None, server_protocol: str="tcp", attributes: list=[], edge_router_attributes: list=[], 
         egress_router_id: str=None, endpoints: list=[], encryption_required: bool=True):
-        """create a Service
+        """create a Service to be accessed by Tunneler Endpoints
+        There are three types of servers that may be published with this method: SDK, Tunneler, or Router. 
+        If server details are absent then the type is inferred to be SDK (Service is hosted by a Ziti SDK,
+        not a Tunneler or Router). If server details are present then the Service is either hosted by a
+        Tunneler or Router, depending on which value is present i.e. Tunneler Endpoint or Edge Router. 
         """
         try:
             headers = { 
@@ -1081,33 +1086,87 @@ class Network:
             body = {
                 "networkId": self.id,
                 "name": name,
-                "attributes": attributes,
-                "clientHostName": client_host_name,
-                "clientPortRange": client_port_range,
-                "serverHostName": server_host_name,
-                "serverPortRange": server_port_range,
-                "serverProtocol": server_protocol,
-                "encryptionRequired": encryption_required
+                "encryptionRequired": encryption_required,
+                "model": {
+                    "clientIngress" : {
+                        "host": client_host_name, 
+                        "port": client_port_range,
+                    },
+                    "edgeRouterAttributes" : edge_router_attributes
+                },
+                "attributes" : attributes,
             }
             # resolve exit hosting params
-            if egress_router_id and endpoints:
-                raise Exception("ERROR: specify only one of egress_router_id or endpoints to host the exit for this Service")
-            elif endpoints:
-                body['endpoints'] = endpoints
-            elif egress_router_id:
-                body['egressRouterId'] = egress_router_id
+            if not server_host_name:
+                body['modelType'] = "TunnelerToSdk"
+                if server_port_range:
+                    eprint("WARN: ignoring unexpected server details for SDK-hosted Service")
+            else:
+                server_egress = {
+                    "protocol": server_protocol.lower(),
+                    "host": server_host_name,
+                    "port": server_port_range
+                }            
+                if endpoints and not egress_router_id:
+                    body['modelType'] = "TunnelerToEndpoint"
+                    # parse out the elements in the list of endpoints as one of #attribute, UUID, or resolvable Endoint name
+                    bind_endpoints = list()
+                    bind_endpoint_attributes = list()
+                    for endpoint in endpoints:
+                        if endpoint[0:1] == '#':
+                            bind_endpoint_attributes += [endpoint]
+                        else:
+                            # check if UUIDv4
+                            try: UUID(endpoint, version=4) # assigned below under "else" if already a UUID
+                            except ValueError:
+                                # else assume is a name and resolve to ID
+                                try: 
+                                    name_lookup = self.get_resources(type="endpoints",name=endpoint)[0]
+                                    endpoint_id = name_lookup['id']
+                                except Exception as e:
+                                    raise Exception('ERROR: Failed to find exactly one hosting Endpoint named "{}". Caught exception: {}'.format(endpoint, e))
+                                # append to list after successfully resolving name to ID
+                                else: bind_endpoints += [endpoint_id] 
+                            else: bind_endpoints += [endpoint] # "endpoint" is already a UUID
+                    body['model']['bindEndpoints'] = bind_endpoints
+                    body['model']['bindEndpointAttributes'] = bind_endpoint_attributes
+                    body['model']['serverEgress'] = server_egress
 
+                elif egress_router_id and not endpoints:
+                    body['modelType'] = "TunnelerToEdgeRouter"
+                    # check if UUIDv4
+                    try: UUID(egress_router_id, version=4)
+                    except ValueError:
+                        # else assume is a name and resolve to ID
+                        try: 
+                            name_lookup = self.get_resources(type="edge-routers",name=egress_router_id)[0]
+                            egress_router_id = name_lookup['id'] # clobber the name value with the looked-up UUID
+                        except Exception as e:
+                            raise Exception('ERROR: Failed to find exactly one egress Router "{}". Caught exception: {}'.format(egress_router_id, e))
+                    body['model']['edgeRouterHosts'] = [{
+                            "edgeRouterId": egress_router_id,
+                            "serverEgress": server_egress,
+                        }]
+                else:
+                    raise Exception('ERROR: invalid Service model: need only one of binding "endpoints" or hosting "egress_router_id" if "server_host_name" is specified')
+                
             # resolve Edge Router param
             if edge_router_attributes:
                 eprint("WARN: overriding default Service Edge Router Policy #all for new Service {:s}".format(name))
                 body['edgeRouterAttributes'] = edge_router_attributes
+            # TODO: remove when legacy Services API is decommissioned in favor of Platform Services API
+            # results in HTMLv5-compliant URL param singleton with empty string value like ?beta= to invoke the Platform Services API
+            params = {
+                "beta": ''
+            }
 
             response = requests.post(
                 self.session.audience+'core/v2/services',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
                 headers=headers,
-                json=body
+                json=body,
+                params=params
             )
             response_code = response.status_code
         except:
@@ -1409,8 +1468,11 @@ class Network:
                 raise Exception("ERROR: entity UUID must be specified if not a network")
             else:
                 entity_url += type+'s/'+id
+            # TODO: remove "beta" when legacy Services API is decommissioned in favor of Platform Services API
+            # results in HTMLv5-compliant URL param singleton with empty string value like ?beta= to invoke the Platform Services API
             params = {
-                "networkId": self.id
+                "networkId": self.id,
+                "beta": ''
             }
             response = requests.get(
                 entity_url,
@@ -1452,8 +1514,11 @@ class Network:
         try:
             headers = { "authorization": "Bearer " + self.session.token }
             entity_url = self.session.audience+'core/v2/'+type+'s/'+id
+            # TODO: remove "beta" when legacy Services API is decommissioned in favor of Platform Services API
+            # results in HTMLv5-compliant URL param singleton with empty string value like ?beta= to invoke the Platform Services API
             params = {
-                "networkId": self.id
+                "networkId": self.id,
+                "beta": ''
             }
             response = requests.get(
                 entity_url,
@@ -1517,11 +1582,17 @@ class Network:
                 entity_url = self.session.audience+'core/v2/'+type+'s/'+id
                 expect = requests.status_codes.codes.OK
             eprint("WARN: deleting {:s}".format(entity_url))
+            # TODO: remove "beta" when legacy Services API is decommissioned in favor of Platform Services API
+            # results in HTMLv5-compliant URL param singleton with empty string value like ?beta= to invoke the Platform Services API
+            params = {
+                "beta": ''
+            }
             response = requests.delete(
                 entity_url,
                 proxies=self.session.proxies,
                 verify=self.session.verify,
-                headers=headers
+                headers=headers,
+                params=params
             )
             response_code = response.status_code
         except:
@@ -1621,7 +1692,7 @@ RESOURCES = {
     },
     'services': {
         'embedded': "serviceList",
-        'expect': "OK"
+        'expect': "ACCEPTED"
     }
 }
 
