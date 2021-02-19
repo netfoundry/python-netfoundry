@@ -896,15 +896,89 @@ class Network:
             return(all_pages)
 
     def patch_resource(self,patch):
-        """return a resources
-            :patch: required dictionary with the new properties 
+        """returns a resource
+            :patch: required dictionary with changed properties 
+        """
+
+        headers = {
+            "authorization": "Bearer " + self.session.token 
+        }
+
+        try:
+            before_response = requests.get(
+                patch['_links']['self']['href'],
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers
+            )
+            before_response_code = before_response.status_code
+        except:
+            raise
+
+        if before_response_code in [requests.status_codes.codes.OK]: # HTTP 200
+            try:
+                before_resource = json.loads(before_response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load {r} object from GET response'.format(r = type))
+                raise(e)
+        else:
+            json_formatted = json.dumps(patch, indent=2)
+            raise Exception(
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s} for GET {:s}'.format(
+                    requests.status_codes._codes[before_response_code][0].upper(),
+                    before_response_code,
+                    before_response.text,
+                    json_formatted
+                )
+            )
+        # compare the patch to the discovered, current state, adding new or updated keys to pruned_patch
+        pruned_patch = dict()
+        for k in patch.keys():
+            if k in before_resource.keys() and not before_resource[k] == patch[k]:
+                pruned_patch[k] = patch[k]
+
+        # attempt to update if there's at least one difference between the current resource and the submitted patch
+        if len(pruned_patch.keys()) > 0:
+            try:
+                after_response = requests.patch(
+                    patch['_links']['self']['href'],
+                    proxies=self.session.proxies,
+                    verify=self.session.verify,
+                    headers=headers,
+                    json=pruned_patch
+                )
+                after_response_code = after_response.status_code
+            except:
+                raise
+            if after_response_code in [requests.status_codes.codes.OK, requests.status_codes.codes.ACCEPTED]: # HTTP 202
+                try:
+                    after_resource = json.loads(after_response.text)
+                except ValueError as e:
+                    eprint('ERROR: failed to load {r} object from PATCH response'.format(r = type))
+                    raise(e)
+            else:
+                json_formatted = json.dumps(patch, indent=2)
+                raise Exception(
+                    'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s} for PATCH update {:s}'.format(
+                        requests.status_codes._codes[after_response_code][0].upper(),
+                        after_response_code,
+                        after_response.text,
+                        json_formatted
+                    )
+                )
+            return(after_resource)
+        else:
+            return(before_resource)
+
+    def put_resource(self,put):
+        """returns a resource
+            :put: required dictionary with all properties required by the particular resource's model 
         """
         try:
             headers = {
                 "authorization": "Bearer " + self.session.token 
             }
-            response = requests.patch(
-                patch['_links']['self']['href'],
+            response = requests.put(
                 proxies=self.session.proxies,
                 verify=self.session.verify,
                 headers=headers,
