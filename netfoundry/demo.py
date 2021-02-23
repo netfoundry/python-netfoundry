@@ -328,7 +328,7 @@ def main():
     print("SUCCESS! The next step is to enroll one or more of your dialer Endpoints on some device(s) and visit one of the demo Service URLs described in the demo document ({doc})."
             "You may also log in to the web console ({nfconsole}) to play with your Network".format(doc="https://developer.netfoundry.io/v2/tools/#demos",nfconsole=network_group.nfconsole))
     for svc in network.services():
-        print("* {name}:\thttp://{url}/".format(name=svc['name'],url=svc['clientHostName']))
+        print("* {name}:\thttp://{url}/".format(name=svc['name'],url=svc['model']['clientIngress']['host']))
 
 if __name__ == '__main__':
     main()

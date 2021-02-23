@@ -820,7 +820,8 @@ class Network:
                 "networkId": self.id,
                 "page": 0,
                 "size": 10,
-                "sort": "name,asc"
+                "sort": "name,asc",
+                "beta": ''
             }
             if name is not None:
                 params['name'] = name
@@ -895,34 +896,109 @@ class Network:
             return(all_pages)
 
     def patch_resource(self,patch):
-        """return a resources
-            :patch: required dictionary with the new properties 
+        """returns a resource
+            :patch: required dictionary with changed properties 
+        """
+
+        headers = {
+            "authorization": "Bearer " + self.session.token 
+        }
+
+        try:
+            before_response = requests.get(
+                patch['_links']['self']['href'],
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers
+            )
+            before_response_code = before_response.status_code
+        except:
+            raise
+
+        if before_response_code in [requests.status_codes.codes.OK]: # HTTP 200
+            try:
+                before_resource = json.loads(before_response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load {r} object from GET response'.format(r = type))
+                raise(e)
+        else:
+            json_formatted = json.dumps(patch, indent=2)
+            raise Exception(
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s} for GET {:s}'.format(
+                    requests.status_codes._codes[before_response_code][0].upper(),
+                    before_response_code,
+                    before_response.text,
+                    json_formatted
+                )
+            )
+        # compare the patch to the discovered, current state, adding new or updated keys to pruned_patch
+        pruned_patch = dict()
+        for k in patch.keys():
+            if k in before_resource.keys() and not before_resource[k] == patch[k]:
+                pruned_patch[k] = patch[k]
+
+        # attempt to update if there's at least one difference between the current resource and the submitted patch
+        if len(pruned_patch.keys()) > 0:
+            try:
+                after_response = requests.patch(
+                    patch['_links']['self']['href'],
+                    proxies=self.session.proxies,
+                    verify=self.session.verify,
+                    headers=headers,
+                    json=pruned_patch
+                )
+                after_response_code = after_response.status_code
+            except:
+                raise
+            if after_response_code in [requests.status_codes.codes.OK, requests.status_codes.codes.ACCEPTED]: # HTTP 202
+                try:
+                    after_resource = json.loads(after_response.text)
+                except ValueError as e:
+                    eprint('ERROR: failed to load {r} object from PATCH response'.format(r = type))
+                    raise(e)
+            else:
+                json_formatted = json.dumps(patch, indent=2)
+                raise Exception(
+                    'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s} for PATCH update {:s}'.format(
+                        requests.status_codes._codes[after_response_code][0].upper(),
+                        after_response_code,
+                        after_response.text,
+                        json_formatted
+                    )
+                )
+            return(after_resource)
+        else:
+            return(before_resource)
+
+    def put_resource(self,put):
+        """returns a resource
+            :put: required dictionary with all properties required by the particular resource's model 
         """
         try:
             headers = {
                 "authorization": "Bearer " + self.session.token 
             }
-            response = requests.patch(
-                patch['_links']['self']['href'],
+            response = requests.put(
+                put['_links']['self']['href'],
                 proxies=self.session.proxies,
                 verify=self.session.verify,
                 headers=headers,
-                json=patch
+                json=put
             )
             response_code = response.status_code
         except:
             raise
 
-        if response_code in [requests.status_codes.codes.OK, requests.status_codes.codes.ACCEPTED]: # HTTP 200
+        if response_code in [requests.status_codes.codes.OK, requests.status_codes.codes.ACCEPTED]: # HTTP 202
             try:
                 resource = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR: failed to load {r} object from PATCH response'.format(r = type))
+                eprint('ERROR: failed to load {r} object from PUT response'.format(r = type))
                 raise(e)
         else:
-            json_formatted = json.dumps(patch, indent=2)
+            json_formatted = json.dumps(put, indent=2)
             raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s} for patch {:s}'.format(
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s} for PUT update {:s}'.format(
                     requests.status_codes._codes[response_code][0].upper(),
                     response_code,
                     response.text,
@@ -1066,10 +1142,14 @@ class Network:
 
         return(policy)
 
-    def create_service(self, name: str, client_host_name: str, client_port_range: int, server_host_name: str, 
-        server_port_range: int, server_protocol: str="TCP", attributes: list=[], edge_router_attributes: list=[], 
+    def create_service(self, name: str, client_host_name: str, client_port_range: int, server_host_name: str=None, 
+        server_port_range: int=None, server_protocol: str="tcp", attributes: list=[], edge_router_attributes: list=[], 
         egress_router_id: str=None, endpoints: list=[], encryption_required: bool=True):
-        """create a Service
+        """create a Service to be accessed by Tunneler Endpoints
+        There are three types of servers that may be published with this method: SDK, Tunneler, or Router. 
+        If server details are absent then the type is inferred to be SDK (Service is hosted by a Ziti SDK,
+        not a Tunneler or Router). If server details are present then the Service is either hosted by a
+        Tunneler or Router, depending on which value is present i.e. Tunneler Endpoint or Edge Router. 
         """
         try:
             headers = { 
@@ -1081,33 +1161,96 @@ class Network:
             body = {
                 "networkId": self.id,
                 "name": name,
-                "attributes": attributes,
-                "clientHostName": client_host_name,
-                "clientPortRange": client_port_range,
-                "serverHostName": server_host_name,
-                "serverPortRange": server_port_range,
-                "serverProtocol": server_protocol,
-                "encryptionRequired": encryption_required
+                "encryptionRequired": encryption_required,
+                "model": {
+                    "clientIngress" : {
+                        "host": client_host_name, 
+                        "port": client_port_range,
+                    },
+                    "edgeRouterAttributes" : edge_router_attributes
+                },
+                "attributes" : attributes,
             }
             # resolve exit hosting params
-            if egress_router_id and endpoints:
-                raise Exception("ERROR: specify only one of egress_router_id or endpoints to host the exit for this Service")
-            elif endpoints:
-                body['endpoints'] = endpoints
-            elif egress_router_id:
-                body['egressRouterId'] = egress_router_id
+            if not server_host_name:
+                body['modelType'] = "TunnelerToSdk"
+                if server_port_range:
+                    eprint("WARN: ignoring unexpected server details for SDK-hosted Service")
+            else:
+                server_egress = {
+                    "protocol": server_protocol.lower(),
+                    "host": server_host_name,
+                    "port": server_port_range
+                }            
+                if endpoints and not egress_router_id:
+                    body['modelType'] = "TunnelerToEndpoint"
+                    # parse out the elements in the list of endpoints as one of #attribute, UUID, or resolvable Endoint name
+                    bind_endpoints = list()
+                    for endpoint in endpoints:
+                        if endpoint[0:1] == '#':
+                            bind_endpoints += [endpoint]
+                        else:
+                            # strip leading @ if present and re-add later after verifying the named Endpoint exists
+                            if endpoint[0:1] == '@':
+                                endpoint = endpoint[1:]
 
+                            # if UUIDv4 then resolve to name, else verify the named Endpoint exists 
+                            try:
+                                UUID(endpoint, version=4) # assigned below under "else" if already a UUID
+                            except ValueError:
+                                # else assume is a name and resolve to ID
+                                try: 
+                                    name_lookup = self.get_resources(type="endpoints",name=endpoint)[0]
+                                    endpoint_name = name_lookup['name']
+                                except Exception as e:
+                                    raise Exception('ERROR: Failed to find exactly one hosting Endpoint named "{}". Caught exception: {}'.format(endpoint, e))
+                                # append to list after successfully resolving name to ID
+                                else: bind_endpoints += ['@'+endpoint_name] 
+                            else:
+                                try:
+                                    name_lookup = self.get_resources(type="endpoints",id=endpoint)
+                                    endpoint_name = name_lookup['name']
+                                except Exception as e:
+                                    raise Exception('ERROR: Failed to find exactly one hosting Endpoint with ID "{}". Caught exception: {}'.format(endpoint, e))
+                                else: bind_endpoints += ['@'+endpoint_name] 
+                    body['model']['bindEndpointAttributes'] = bind_endpoints
+                    body['model']['serverEgress'] = server_egress
+
+                elif egress_router_id and not endpoints:
+                    body['modelType'] = "TunnelerToEdgeRouter"
+                    # check if UUIDv4
+                    try: UUID(egress_router_id, version=4)
+                    except ValueError:
+                        # else assume is a name and resolve to ID
+                        try: 
+                            name_lookup = self.get_resources(type="edge-routers",name=egress_router_id)[0]
+                            egress_router_id = name_lookup['id'] # clobber the name value with the looked-up UUID
+                        except Exception as e:
+                            raise Exception('ERROR: Failed to find exactly one egress Router "{}". Caught exception: {}'.format(egress_router_id, e))
+                    body['model']['edgeRouterHosts'] = [{
+                            "edgeRouterId": egress_router_id,
+                            "serverEgress": server_egress,
+                        }]
+                else:
+                    raise Exception('ERROR: invalid Service model: need only one of binding "endpoints" or hosting "egress_router_id" if "server_host_name" is specified')
+                
             # resolve Edge Router param
             if edge_router_attributes:
                 eprint("WARN: overriding default Service Edge Router Policy #all for new Service {:s}".format(name))
                 body['edgeRouterAttributes'] = edge_router_attributes
+            # TODO: remove when legacy Services API is decommissioned in favor of Platform Services API
+            # results in HTMLv5-compliant URL param singleton with empty string value like ?beta= to invoke the Platform Services API
+            params = {
+                "beta": ''
+            }
 
             response = requests.post(
                 self.session.audience+'core/v2/services',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
                 headers=headers,
-                json=body
+                json=body,
+                params=params
             )
             response_code = response.status_code
         except:
@@ -1409,8 +1552,11 @@ class Network:
                 raise Exception("ERROR: entity UUID must be specified if not a network")
             else:
                 entity_url += type+'s/'+id
+            # TODO: remove "beta" when legacy Services API is decommissioned in favor of Platform Services API
+            # results in HTMLv5-compliant URL param singleton with empty string value like ?beta= to invoke the Platform Services API
             params = {
-                "networkId": self.id
+                "networkId": self.id,
+                "beta": ''
             }
             response = requests.get(
                 entity_url,
@@ -1452,8 +1598,11 @@ class Network:
         try:
             headers = { "authorization": "Bearer " + self.session.token }
             entity_url = self.session.audience+'core/v2/'+type+'s/'+id
+            # TODO: remove "beta" when legacy Services API is decommissioned in favor of Platform Services API
+            # results in HTMLv5-compliant URL param singleton with empty string value like ?beta= to invoke the Platform Services API
             params = {
-                "networkId": self.id
+                "networkId": self.id,
+                "beta": ''
             }
             response = requests.get(
                 entity_url,
@@ -1517,11 +1666,17 @@ class Network:
                 entity_url = self.session.audience+'core/v2/'+type+'s/'+id
                 expect = requests.status_codes.codes.OK
             eprint("WARN: deleting {:s}".format(entity_url))
+            # TODO: remove "beta" when legacy Services API is decommissioned in favor of Platform Services API
+            # results in HTMLv5-compliant URL param singleton with empty string value like ?beta= to invoke the Platform Services API
+            params = {
+                "beta": ''
+            }
             response = requests.delete(
                 entity_url,
                 proxies=self.session.proxies,
                 verify=self.session.verify,
-                headers=headers
+                headers=headers,
+                params=params
             )
             response_code = response.status_code
         except:
@@ -1621,7 +1776,7 @@ RESOURCES = {
     },
     'services': {
         'embedded': "serviceList",
-        'expect': "OK"
+        'expect': "ACCEPTED"
     }
 }
 
