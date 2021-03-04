@@ -1114,7 +1114,7 @@ class Network:
         return(policy)
 
     def create_service(self, name: str, client_host_name: str, client_port_range: int, server_host_name: str=None, 
-        server_port_range: int=None, server_protocol: str="tcp", attributes: list=[], edge_router_attributes: list=[], 
+        server_port_range: int=None, server_protocol: str="tcp", attributes: list=[], edge_router_attributes: list=["#all"], 
         egress_router_id: str=None, endpoints: list=[], encryption_required: bool=True):
         """create a Service to be accessed by Tunneler Endpoints
         There are three types of servers that may be published with this method: SDK, Tunneler, or Router. 
