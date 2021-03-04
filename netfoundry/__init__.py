@@ -37,7 +37,7 @@ class Session:
         """
 
         # verify auth endpoint's server certificate if proxy is type SOCKS or None
-        if proxy == None:
+        if proxy is None:
             self.proxies = dict()
             self.verify = True
         else:
@@ -358,7 +358,7 @@ class Organization:
                 "findByNetworkGroupId": network_group_id
             }
             response = requests.get(
-                self.session.audience+'/core/v2/networks',
+                self.session.audience+'core/v2/networks',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
                 headers=headers,
@@ -495,8 +495,9 @@ class NetworkGroup:
             # data centers returns a list of dicts (data center objects)
             headers = { "authorization": "Bearer " + self.session.token }
             params = {
-                "hostType": "NC",
-                "provider": "AWS"
+                # "productVersion": self.product_version,
+                # "hostType": "NC",
+                # "provider": "AWS"
             }
             response = requests.get(
                 self.session.audience+'core/v2/data-centers',
@@ -511,7 +512,8 @@ class NetworkGroup:
 
         if response_code == requests.status_codes.codes.OK: # HTTP 200
             try:
-                data_centers = json.loads(response.text)['_embedded']['dataCenters']
+                all_data_centers = json.loads(response.text)['_embedded']['dataCenters']
+                aws_data_centers = [dc for dc in all_data_centers if dc['provider'] == "AWS"]
             except ValueError as e:
                 eprint('ERROR getting data centers')
                 raise(e)
@@ -524,43 +526,7 @@ class NetworkGroup:
                 )
             )
 
-        return(data_centers)
-
-    def get_data_center_by_location(self, location):
-        """return one data center object
-        :param location: required single location to fetch
-        """
-        try:
-            # data centers returns a list of dicts (data center objects)
-            headers = { "authorization": "Bearer " + self.session.token }
-            params = { "locationCode": location }
-            response = requests.get(
-                self.session.audience+'rest/v1/dataCenters',
-                proxies=self.session.proxies,
-                verify=self.session.verify,
-                headers=headers,
-                params=params
-            )
-            response_code = response.status_code
-        except:
-            raise
-
-        if response_code == requests.status_codes.codes.OK: # HTTP 200
-            try:
-                data_center = json.loads(response.text)
-            except ValueError as e:
-                eprint('ERROR getting data center')
-                raise(e)
-        else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
-
-        return(data_center)
+        return(aws_data_centers)
 
     def create_network(self, name: str, network_group_id: str=None, location: str="us-east-1", version: str=None, size: str="small"):
         """
