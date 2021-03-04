@@ -534,7 +534,7 @@ class NetworkGroup:
         :param name: required network name
         :param network_group: optional Network Group ID
         :param location: optional data center region name in which to create
-        :param version: optional product version string like 7.2.0-1234567
+        :param version: optional product version string like 7.3.17
         :param size: optional network configuration metadata name from /core/v2/network-configs e.g. "medium"
         """
         
@@ -583,11 +583,8 @@ class NetworkGroup:
                 )
             )
 
-        network_id = json.loads(response.text)['id']
-        # expected value is UUID
-        UUID(network_id, version=4) # validate the returned value is a UUID
-
-        return(network_id)
+        network = json.loads(response.text)
+        return(network)
 
     def delete_network(self, network_id=None, network_name=None):
         """
@@ -597,7 +594,8 @@ class NetworkGroup:
         """
         try:
             if network_id:
-                network_name = [ net['name'] for net in self.networks_by_name if net['id'] == network_id ][0]
+#                import epdb; epdb.serve()
+                network_name = next(name for name, uuid in self.networks_by_name.items() if uuid == network_id)
             elif network_name and network_name in self.networks_by_name.keys():
                 network_id = self.networks_by_name[network_name]
         except:
@@ -625,7 +623,9 @@ class NetworkGroup:
                 )
             )
 
-        return(True)
+        network = json.loads(response.text)
+        return(network)
+
 class Network:
     """describe and use a Network
     """
