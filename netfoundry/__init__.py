@@ -790,7 +790,7 @@ class Network:
                 "size": 10,
                 "sort": "name,asc"
             }
-            if type == "service": 
+            if type == "services": 
                 params["beta"] = ''
 
             if name is not None:
@@ -1206,7 +1206,7 @@ class Network:
                     raise Exception('ERROR: invalid Service model: need only one of binding "endpoints" or hosting "egress_router_id" if "server_host_name" is specified')
                 
             # resolve Edge Router param
-            if edge_router_attributes:
+            if edge_router_attributes and not edge_router_attributes == ['#all']:
                 eprint("WARN: overriding default Service Edge Router Policy #all for new Service {:s}".format(name))
                 body['edgeRouterAttributes'] = edge_router_attributes
             # TODO: remove when legacy Services API is decommissioned in favor of Platform Services API
