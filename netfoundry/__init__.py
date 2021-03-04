@@ -704,7 +704,7 @@ class Network:
                 "hostType": "ER"
             }
             if provider is not None:
-                if provider in ["AWS", "AZURE", "GCP", "ALICLOUD", "NetFoundry", "OCP"]:
+                if provider in ["AWS", "AZURE", "GCP", "ALICLOUD", "NETFOUNDRY", "OCP"]:
                     params['provider'] = provider
                 else:
                     raise Exception("ERROR: unexpected cloud provider {:s}".format(provider))
@@ -734,7 +734,9 @@ class Network:
                 )
             )
         if location_code:
-            return([dc for dc in data_centers if dc['locationCode'] == location_code])
+            matching_data_centers = [dc for dc in data_centers if dc['locationCode'] == location_code]
+#            import epdb; epdb.serve()
+            return(matching_data_centers)
         else:
             return(data_centers)
 
@@ -786,11 +788,14 @@ class Network:
                 "networkId": self.id,
                 "page": 0,
                 "size": 10,
-                "sort": "name,asc",
-                "beta": ''
+                "sort": "name,asc"
             }
+            if type == "service": 
+                params["beta"] = ''
+
             if name is not None:
                 params['name'] = name
+
             response = requests.get(
                 self.session.audience+'core/v2/'+type,
                 proxies=self.session.proxies,
@@ -1295,7 +1300,7 @@ class Network:
                 "findByName": name
             }
             response = requests.get(
-                self.session.audience+'/core/v2/networks',
+                self.session.audience+'core/v2/networks',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
                 headers=headers,
@@ -1335,7 +1340,7 @@ class Network:
                 "authorization": "Bearer " + self.session.token 
             }
             response = requests.get(
-                self.session.audience+'/core/v2/networks/'+network_id,
+                self.session.audience+'core/v2/networks/'+network_id,
                 proxies=self.session.proxies,
                 verify=self.session.verify,
                 headers=headers
@@ -1369,6 +1374,10 @@ class Network:
         :param wait: optional SECONDS after which to raise an exception defaults to five minutes (300)
         :param sleep: SECONDS polling interval
         """
+
+        # use the id of this instance's Network unless another one is specified
+        if type == "network" and not id:
+            id = self.id
 
         now = time.time()
 
@@ -1441,6 +1450,10 @@ class Network:
         :param sleep: SECONDS polling interval
         """
 
+        # use the id of this instance's Network unless another one is specified
+        if type == "network" and not id:
+            id = self.id
+
         now = time.time()
 
         if not wait >= sleep:
@@ -1511,6 +1524,13 @@ class Network:
 
         try:
             headers = { "authorization": "Bearer " + self.session.token }
+
+            params = dict()
+            if not type == "network":
+                params["networkId"] = self.id
+            elif type == "service": 
+                params["beta"] = ''
+
             entity_url = self.session.audience+'core/v2/'
             if type == 'network':
                 entity_url += 'networks/'+self.id
@@ -1520,10 +1540,7 @@ class Network:
                 entity_url += type+'s/'+id
             # TODO: remove "beta" when legacy Services API is decommissioned in favor of Platform Services API
             # results in HTMLv5-compliant URL param singleton with empty string value like ?beta= to invoke the Platform Services API
-            params = {
-                "networkId": self.id,
-                "beta": ''
-            }
+
             response = requests.get(
                 entity_url,
                 proxies=self.session.proxies,
@@ -1566,10 +1583,12 @@ class Network:
             entity_url = self.session.audience+'core/v2/'+type+'s/'+id
             # TODO: remove "beta" when legacy Services API is decommissioned in favor of Platform Services API
             # results in HTMLv5-compliant URL param singleton with empty string value like ?beta= to invoke the Platform Services API
-            params = {
-                "networkId": self.id,
-                "beta": ''
-            }
+            params = dict()
+            if not type == "network":
+                params["networkId"] = self.id
+            elif type == "service": 
+                params["beta"] = ''
+
             response = requests.get(
                 entity_url,
                 proxies=self.session.proxies,
@@ -1634,9 +1653,10 @@ class Network:
             eprint("WARN: deleting {:s}".format(entity_url))
             # TODO: remove "beta" when legacy Services API is decommissioned in favor of Platform Services API
             # results in HTMLv5-compliant URL param singleton with empty string value like ?beta= to invoke the Platform Services API
-            params = {
-                "beta": ''
-            }
+            params = dict()
+            if type == "service":
+                params["beta"] = ''
+
             response = requests.delete(
                 entity_url,
                 proxies=self.session.proxies,
