@@ -37,7 +37,7 @@ class Session:
         """
 
         # verify auth endpoint's server certificate if proxy is type SOCKS or None
-        if proxy == None:
+        if proxy is None:
             self.proxies = dict()
             self.verify = True
         else:
@@ -358,7 +358,7 @@ class Organization:
                 "findByNetworkGroupId": network_group_id
             }
             response = requests.get(
-                self.session.audience+'/core/v2/networks',
+                self.session.audience+'core/v2/networks',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
                 headers=headers,
@@ -495,8 +495,9 @@ class NetworkGroup:
             # data centers returns a list of dicts (data center objects)
             headers = { "authorization": "Bearer " + self.session.token }
             params = {
-                "hostType": "NC",
-                "provider": "AWS"
+                # "productVersion": self.product_version,
+                # "hostType": "NC",
+                # "provider": "AWS"
             }
             response = requests.get(
                 self.session.audience+'core/v2/data-centers',
@@ -511,7 +512,8 @@ class NetworkGroup:
 
         if response_code == requests.status_codes.codes.OK: # HTTP 200
             try:
-                data_centers = json.loads(response.text)['_embedded']['dataCenters']
+                all_data_centers = json.loads(response.text)['_embedded']['dataCenters']
+                aws_data_centers = [dc for dc in all_data_centers if dc['provider'] == "AWS"]
             except ValueError as e:
                 eprint('ERROR getting data centers')
                 raise(e)
@@ -524,43 +526,7 @@ class NetworkGroup:
                 )
             )
 
-        return(data_centers)
-
-    def get_data_center_by_location(self, location):
-        """return one data center object
-        :param location: required single location to fetch
-        """
-        try:
-            # data centers returns a list of dicts (data center objects)
-            headers = { "authorization": "Bearer " + self.session.token }
-            params = { "locationCode": location }
-            response = requests.get(
-                self.session.audience+'rest/v1/dataCenters',
-                proxies=self.session.proxies,
-                verify=self.session.verify,
-                headers=headers,
-                params=params
-            )
-            response_code = response.status_code
-        except:
-            raise
-
-        if response_code == requests.status_codes.codes.OK: # HTTP 200
-            try:
-                data_center = json.loads(response.text)
-            except ValueError as e:
-                eprint('ERROR getting data center')
-                raise(e)
-        else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
-
-        return(data_center)
+        return(aws_data_centers)
 
     def create_network(self, name: str, network_group_id: str=None, location: str="us-east-1", version: str=None, size: str="small"):
         """
@@ -568,7 +534,7 @@ class NetworkGroup:
         :param name: required network name
         :param network_group: optional Network Group ID
         :param location: optional data center region name in which to create
-        :param version: optional product version string like 7.2.0-1234567
+        :param version: optional product version string like 7.3.17
         :param size: optional network configuration metadata name from /core/v2/network-configs e.g. "medium"
         """
         
@@ -617,11 +583,8 @@ class NetworkGroup:
                 )
             )
 
-        network_id = json.loads(response.text)['id']
-        # expected value is UUID
-        UUID(network_id, version=4) # validate the returned value is a UUID
-
-        return(network_id)
+        network = json.loads(response.text)
+        return(network)
 
     def delete_network(self, network_id=None, network_name=None):
         """
@@ -631,7 +594,8 @@ class NetworkGroup:
         """
         try:
             if network_id:
-                network_name = [ net['name'] for net in self.networks_by_name if net['id'] == network_id ][0]
+#                import epdb; epdb.serve()
+                network_name = next(name for name, uuid in self.networks_by_name.items() if uuid == network_id)
             elif network_name and network_name in self.networks_by_name.keys():
                 network_id = self.networks_by_name[network_name]
         except:
@@ -659,7 +623,9 @@ class NetworkGroup:
                 )
             )
 
-        return(True)
+        network = json.loads(response.text)
+        return(network)
+
 class Network:
     """describe and use a Network
     """
@@ -738,7 +704,7 @@ class Network:
                 "hostType": "ER"
             }
             if provider is not None:
-                if provider in ["AWS", "AZURE", "GCP", "ALICLOUD", "NetFoundry", "OCP"]:
+                if provider in ["AWS", "AZURE", "GCP", "ALICLOUD", "NETFOUNDRY", "OCP"]:
                     params['provider'] = provider
                 else:
                     raise Exception("ERROR: unexpected cloud provider {:s}".format(provider))
@@ -768,7 +734,9 @@ class Network:
                 )
             )
         if location_code:
-            return([dc for dc in data_centers if dc['locationCode'] == location_code])
+            matching_data_centers = [dc for dc in data_centers if dc['locationCode'] == location_code]
+#            import epdb; epdb.serve()
+            return(matching_data_centers)
         else:
             return(data_centers)
 
@@ -820,11 +788,14 @@ class Network:
                 "networkId": self.id,
                 "page": 0,
                 "size": 10,
-                "sort": "name,asc",
-                "beta": ''
+                "sort": "name,asc"
             }
+            if type == "services": 
+                params["beta"] = ''
+
             if name is not None:
                 params['name'] = name
+
             response = requests.get(
                 self.session.audience+'core/v2/'+type,
                 proxies=self.session.proxies,
@@ -1143,7 +1114,7 @@ class Network:
         return(policy)
 
     def create_service(self, name: str, client_host_name: str, client_port_range: int, server_host_name: str=None, 
-        server_port_range: int=None, server_protocol: str="tcp", attributes: list=[], edge_router_attributes: list=[], 
+        server_port_range: int=None, server_protocol: str="tcp", attributes: list=[], edge_router_attributes: list=["#all"], 
         egress_router_id: str=None, endpoints: list=[], encryption_required: bool=True):
         """create a Service to be accessed by Tunneler Endpoints
         There are three types of servers that may be published with this method: SDK, Tunneler, or Router. 
@@ -1235,7 +1206,7 @@ class Network:
                     raise Exception('ERROR: invalid Service model: need only one of binding "endpoints" or hosting "egress_router_id" if "server_host_name" is specified')
                 
             # resolve Edge Router param
-            if edge_router_attributes:
+            if edge_router_attributes and not edge_router_attributes == ['#all']:
                 eprint("WARN: overriding default Service Edge Router Policy #all for new Service {:s}".format(name))
                 body['edgeRouterAttributes'] = edge_router_attributes
             # TODO: remove when legacy Services API is decommissioned in favor of Platform Services API
@@ -1329,7 +1300,7 @@ class Network:
                 "findByName": name
             }
             response = requests.get(
-                self.session.audience+'/core/v2/networks',
+                self.session.audience+'core/v2/networks',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
                 headers=headers,
@@ -1369,7 +1340,7 @@ class Network:
                 "authorization": "Bearer " + self.session.token 
             }
             response = requests.get(
-                self.session.audience+'/core/v2/networks/'+network_id,
+                self.session.audience+'core/v2/networks/'+network_id,
                 proxies=self.session.proxies,
                 verify=self.session.verify,
                 headers=headers
@@ -1403,6 +1374,10 @@ class Network:
         :param wait: optional SECONDS after which to raise an exception defaults to five minutes (300)
         :param sleep: SECONDS polling interval
         """
+
+        # use the id of this instance's Network unless another one is specified
+        if type == "network" and not id:
+            id = self.id
 
         now = time.time()
 
@@ -1475,6 +1450,10 @@ class Network:
         :param sleep: SECONDS polling interval
         """
 
+        # use the id of this instance's Network unless another one is specified
+        if type == "network" and not id:
+            id = self.id
+
         now = time.time()
 
         if not wait >= sleep:
@@ -1545,6 +1524,13 @@ class Network:
 
         try:
             headers = { "authorization": "Bearer " + self.session.token }
+
+            params = dict()
+            if not type == "network":
+                params["networkId"] = self.id
+            elif type == "service": 
+                params["beta"] = ''
+
             entity_url = self.session.audience+'core/v2/'
             if type == 'network':
                 entity_url += 'networks/'+self.id
@@ -1554,10 +1540,7 @@ class Network:
                 entity_url += type+'s/'+id
             # TODO: remove "beta" when legacy Services API is decommissioned in favor of Platform Services API
             # results in HTMLv5-compliant URL param singleton with empty string value like ?beta= to invoke the Platform Services API
-            params = {
-                "networkId": self.id,
-                "beta": ''
-            }
+
             response = requests.get(
                 entity_url,
                 proxies=self.session.proxies,
@@ -1600,10 +1583,12 @@ class Network:
             entity_url = self.session.audience+'core/v2/'+type+'s/'+id
             # TODO: remove "beta" when legacy Services API is decommissioned in favor of Platform Services API
             # results in HTMLv5-compliant URL param singleton with empty string value like ?beta= to invoke the Platform Services API
-            params = {
-                "networkId": self.id,
-                "beta": ''
-            }
+            params = dict()
+            if not type == "network":
+                params["networkId"] = self.id
+            elif type == "service": 
+                params["beta"] = ''
+
             response = requests.get(
                 entity_url,
                 proxies=self.session.proxies,
@@ -1668,9 +1653,10 @@ class Network:
             eprint("WARN: deleting {:s}".format(entity_url))
             # TODO: remove "beta" when legacy Services API is decommissioned in favor of Platform Services API
             # results in HTMLv5-compliant URL param singleton with empty string value like ?beta= to invoke the Platform Services API
-            params = {
-                "beta": ''
-            }
+            params = dict()
+            if type == "service":
+                params["beta"] = ''
+
             response = requests.delete(
                 entity_url,
                 proxies=self.session.proxies,

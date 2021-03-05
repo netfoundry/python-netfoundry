@@ -72,7 +72,7 @@ def main():
         network = netfoundry.Network(session, network_name=network_name)
         network.wait_for_status("PROVISIONED",wait=999,progress=True)
     else:
-        network_id = network_group.create_network(name=network_name,size="small") # use "medium" unless demo
+        network_id = network_group.create_network(name=network_name,size="small")['id'] # use "medium" unless demo
         network = netfoundry.Network(session, network_id=network_id)
         network.wait_for_status("PROVISIONED",wait=999,progress=True)
         network = netfoundry.Network(session, network_id=network_id)
