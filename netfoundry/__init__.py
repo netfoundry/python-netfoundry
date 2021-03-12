@@ -37,6 +37,7 @@ class Session:
         """
 
         # verify auth endpoint's server certificate if proxy is type SOCKS or None
+        self.proxy = proxy
         if proxy is None:
             self.proxies = dict()
             self.verify = True
@@ -57,31 +58,30 @@ class Session:
             self.token = os.environ['NETFOUNDRY_API_TOKEN']
 
         # if the token was found then extract the expiry
-        try: self.token
+        try: 
+            self.token
+#            import q; q(self.token)
         except AttributeError: epoch = None
         else:
             claim = jwt.decode(jwt=self.token, algorithms=["RS256"], options={"verify_signature": False})
             # TODO: [MOP-13438] auto-renew token when near expiry (now+1hour in epoch seconds)
             expiry = claim['exp']
             epoch = time.time()
-#            print("DEBUG: found API token in env NETFOUNDRY_API_TOKEN")
 
-        # if no token or near expiry then use credentials to obtain a token
-        if epoch is not None and epoch < (expiry - 600):
-            # extract the API URL from the claim
-            self.audience = claim['scope'].replace('/ignore-scope','')
-            # e.g. https://gateway.production.netfoundry.io/
-#            print("DEBUG: using API token from env NETFOUNDRY_API_TOKEN")
+        # persist the credentials filename in instances so that it may be used to refresh the token
+        if credentials is not None:
+            self.credentials = credentials
+            os.environ['NETFOUNDRY_API_ACCOUNT'] = self.credentials
+        elif 'NETFOUNDRY_API_ACCOUNT' in os.environ:
+            self.credentials = os.environ['NETFOUNDRY_API_ACCOUNT']
         else:
-            # persist the credentials filename in instances so that it may be used to refresh the token
-            if credentials is not None:
-                self.credentials = credentials
-                os.environ['NETFOUNDRY_API_ACCOUNT'] = self.credentials
-            elif 'NETFOUNDRY_API_ACCOUNT' in os.environ:
-                self.credentials = os.environ['NETFOUNDRY_API_ACCOUNT']
-            else:
-                self.credentials = "credentials.json"
+            self.credentials = "credentials.json"
 
+        # import q; q(epoch)
+        # import epdb; epdb.serve()
+
+        # if no token or near expiry (30 min) then use credentials to obtain a token
+        if epoch is None or epoch > (expiry - 1800):
             # unless a valid path assume relative and search the default chain
             if not os.path.exists(self.credentials):
                 default_creds_chain = [
@@ -167,6 +167,19 @@ class Session:
                         response.text
                     )
                 )
+
+        # learn about the environment from the token
+        try:
+            claim = jwt.decode(jwt=self.token, algorithms=["RS256"], options={"verify_signature": False})
+            iss = claim['iss']
+            if re.match(r'https://cognito-', iss):
+                self.environment = re.sub(r'https://gateway\.([^.]+)\.netfoundry\.io.*',r'\1',claim['scope'])
+            elif re.match(r'.*\.auth0\.com', iss):
+                self.environment = re.sub(r'https://netfoundry-([^.]+)\.auth0\.com.*',r'\1',claim['iss'])
+            # import q; q(claim)
+            # import epdb; epdb.serve()
+            self.audience = 'https://gateway.'+self.environment+'.netfoundry.io/'
+        except: raise
 
 class Organization:
     """ Use an organization
@@ -422,19 +435,10 @@ class NetworkGroup:
         self.name = self.network_group_name
         self.vanity = Organization.label.lower()
 
-        # learn about the environment from the token and predict the web console URL
-        try:
-            claim = jwt.decode(jwt=self.session.token, algorithms=["RS256"], options={"verify_signature": False})
-            iss = claim['iss']
-            if re.match('.*cognito.*', iss):
-                self.environment = re.sub(r'https://gateway\.([^.]+)\.netfoundry\.io.*',r'\1',claim['scope'])
-            elif re.match('auth0', iss):
-                self.environment = re.sub(r'https://netfoundry-([^.]+)\.auth0\.com.*',r'\1',claim['iss'])
-            if self.environment == "production":
-                self.nfconsole = "https://{vanity}.nfconsole.io".format(vanity=self.vanity)
-            else:
-                self.nfconsole = "https://{vanity}.{env}-nfconsole.io".format(vanity=self.vanity, env=self.environment)
-        except: raise
+        if self.session.environment == "production":
+            self.nfconsole = "https://{vanity}.nfconsole.io".format(vanity=self.vanity)
+        else:
+            self.nfconsole = "https://{vanity}.{env}-nfconsole.io".format(vanity=self.vanity, env=self.session.environment)
 
         # an attribute that is a dict for resolving network UUIDs by name
         self.networks_by_name = dict()
@@ -908,8 +912,13 @@ class Network:
             if k in before_resource.keys() and not before_resource[k] == patch[k]:
                 pruned_patch[k] = patch[k]
 
+        if re.match(r'.*/services/',patch['_links']['self']['href']) and patch['zitiId'] == "zFdiFkJD1":
+            import epdb; epdb.serve()
+
         # attempt to update if there's at least one difference between the current resource and the submitted patch
         if len(pruned_patch.keys()) > 0:
+            if not "name" in pruned_patch.keys():
+                pruned_patch["name"] = before_resource["name"]
             try:
                 after_response = requests.patch(
                     patch['_links']['self']['href'],
@@ -1586,7 +1595,7 @@ class Network:
             params = dict()
             if not type == "network":
                 params["networkId"] = self.id
-            elif type == "service": 
+            if type == "service": 
                 params["beta"] = ''
 
             response = requests.get(
@@ -1641,15 +1650,18 @@ class Network:
         :param id: required entity UUID to delete
         :param wait: optional seconds to wait for entity destruction
         """
+#        import epdb; epdb.serve()
         try:
             headers = { "authorization": "Bearer " + self.session.token }
             entity_url = self.session.audience+'core/v2/networks/'+self.id
-            expect = requests.status_codes.codes.ACCEPTED
+            expected_responses = [
+                requests.status_codes.codes.ACCEPTED,
+                requests.status_codes.codes.OK
+            ]
             if not type == 'network':
                 if id is None:
                     raise Exception("ERROR: need entity UUID to delete")
                 entity_url = self.session.audience+'core/v2/'+type+'s/'+id
-                expect = requests.status_codes.codes.OK
             eprint("WARN: deleting {:s}".format(entity_url))
             # TODO: remove "beta" when legacy Services API is decommissioned in favor of Platform Services API
             # results in HTMLv5-compliant URL param singleton with empty string value like ?beta= to invoke the Platform Services API
@@ -1668,7 +1680,7 @@ class Network:
         except:
             raise
 
-        if not response_code == expect:
+        if not response_code in expected_responses:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
                     requests.status_codes._codes[response_code][0].upper(),
@@ -1762,6 +1774,10 @@ RESOURCES = {
     },
     'services': {
         'embedded': "serviceList",
+        'expect': "ACCEPTED"
+    },
+    'posture-checks': {
+        'embedded': "postureCheckList",
         'expect': "ACCEPTED"
     }
 }
