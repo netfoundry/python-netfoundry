@@ -1188,7 +1188,7 @@ class Network:
                                 else: bind_endpoints += ['@'+endpoint_name] 
                             else:
                                 try:
-                                    name_lookup = self.get_resources(type="endpoints",id=endpoint)
+                                    name_lookup = self.get_resource(type="endpoint",id=endpoint)
                                     endpoint_name = name_lookup['name']
                                 except Exception as e:
                                     raise Exception('ERROR: Failed to find exactly one hosting Endpoint with ID "{}". Caught exception: {}'.format(endpoint, e))
