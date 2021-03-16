@@ -912,9 +912,6 @@ class Network:
             if k in before_resource.keys() and not before_resource[k] == patch[k]:
                 pruned_patch[k] = patch[k]
 
-        if re.match(r'.*/services/',patch['_links']['self']['href']) and patch['zitiId'] == "zFdiFkJD1":
-            import epdb; epdb.serve()
-
         # attempt to update if there's at least one difference between the current resource and the submitted patch
         if len(pruned_patch.keys()) > 0:
             if not "name" in pruned_patch.keys():
