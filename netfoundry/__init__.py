@@ -185,6 +185,7 @@ class Organization:
             self.describe = self.get_organization(id=self.caller['organizationId'])
 
         self.label = self.describe['label']
+        self.id = self.describe['id']
 
         
     def get_caller_identity(self):
