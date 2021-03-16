@@ -13,28 +13,21 @@ from pathlib import Path    #
 import os
 from re import sub
 
-class Session:
-    """ Use an API account from a credentials file as described in https://developer.netfoundry.io/v2/guides/authentication/
-    Example credentials file:
-    {
-        "clientId": "3tcm6to3qqfu78juj9huppk9g3",
-        "password": "149a7ksfj3t5lstg0pesun69m1l4k91d6h8m779l43q0ekekr782",
-        "authenticationUrl": "https://netfoundry-production-xfjiye.auth.us-east-1.amazoncognito.com/oauth2/token"
-    }
+class Organization:
+    """ Default is to use the Organization of the caller's user or API account identity
+    :param: organization_id is optional string UUID of an alternative Organization
+    :param: organization_label is optional string `label` property of an alternative Organization
+    :param token: continue using a session with this optional token from an existing instance of Organization
+    :param credentials: optional alternative path to API account credentials file, default is ~/.netfoundry/credentials.json
+    :param proxy: optional HTTP proxy, e.g., http://localhost:8080
     """
 
-    def __init__(
-        self, 
+    def __init__(self, 
+        organization_id: str=None, 
+        organization_label: str=None,
         token=None, 
         credentials=None, 
         proxy=None):
-        """initialize with a reusable API client
-        :param token: optional temporary API bearer/session token
-        :param credentials: optional alternative path to API account credentials file
-        :param proxy: optional HTTP proxy, e.g., http://localhost:8080
-        The init function also gathers a few essential objects from the API and
-        stores them as attributes on the model
-        """
 
         # verify auth endpoint's server certificate if proxy is type SOCKS or None
         self.proxy = proxy
@@ -60,7 +53,6 @@ class Session:
         # if the token was found then extract the expiry
         try: 
             self.token
-#            import q; q(self.token)
         except AttributeError: epoch = None
         else:
             claim = jwt.decode(jwt=self.token, algorithms=["RS256"], options={"verify_signature": False})
@@ -76,9 +68,6 @@ class Session:
             self.credentials = os.environ['NETFOUNDRY_API_ACCOUNT']
         else:
             self.credentials = "credentials.json"
-
-        # import q; q(epoch)
-        # import epdb; epdb.serve()
 
         # if no token or near expiry (30 min) then use credentials to obtain a token
         if epoch is None or epoch > (expiry - 1800):
@@ -181,26 +170,79 @@ class Session:
             self.audience = 'https://gateway.'+self.environment+'.netfoundry.io/'
         except: raise
 
-class Organization:
-    """ Use an organization
-    """
-
-    def __init__(self, Session):
-        self.session = Session
         # always resolve Network Groups so we can specify either name or ID when calling super()
         self.network_groups = self.get_network_groups_by_organization()
-        self.describe = self.get_organization()
+        # Obtain a session token and find own `.caller` identity and `.organizations`
+        self.caller = self.get_caller_identity()
+        if organization_id:
+            self.describe = self.get_organization(id=organization_id)
+        elif organization_label:
+            self.organizations_by_label = dict()
+            for org in self.get_organizations():
+                self.organizations_by_label[org['label']] = org['id']
+            self.describe = self.get_organization(id=self.organizations_by_label[organization_label])
+        else:
+            self.describe = self.get_organization(id=self.caller['organizationId'])
+
         self.label = self.describe['label']
 
-    def get_organization(self):
-        """return the Organizations object (formerly "tenants")
+        
+    def get_caller_identity(self):
+        """return the caller's identity object
+        """
+        # try the API account endpoint first, then the endpoint for human, interactive users
+        request = {
+            "url": self.audience+'identity/v1/api-account-identities/self',
+            "proxies": self.proxies,
+            "verify": self.verify,
+            "headers": { "authorization": "Bearer " + self.token }
+        }
+        try:
+            response = requests.get(**request)
+            response_code = response.status_code
+        except:
+            raise
+
+        if response_code == requests.status_codes.codes.OK: # HTTP 200
+            try:
+                caller = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR getting caller\'s API account identity from response document')
+                raise(e)
+        else:
+            try:
+                request["url"] = self.audience+'identity/v1/user-identities/self'
+                response = requests.get(**request)
+                response_code = response.status_code
+            except:
+                raise
+
+            if response_code == requests.status_codes.codes.OK: # HTTP 200
+                try:
+                    caller = json.loads(response.text)
+                except ValueError as e:
+                    eprint('ERROR getting caller\'s user identity from response document')
+                    raise(e)
+            else:
+                raise Exception(
+                    'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                        requests.status_codes._codes[response_code][0].upper(),
+                        response_code,
+                        response.text
+                    )
+                )
+
+        return(caller)
+
+    def get_organizations(self):
+        """return the list of Organizations (formerly "tenants")
         """
         try:
-            headers = { "authorization": "Bearer " + self.session.token }
+            headers = { "authorization": "Bearer " + self.token }
             response = requests.get(
-                self.session.audience+'identity/v1/organizations',
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                self.audience+'identity/v1/organizations',
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers
             )
             response_code = response.status_code
@@ -222,19 +264,50 @@ class Organization:
                 )
             )
 
-        return(organizations[0])
+        return(organizations)
 
+    def get_organization(self, id):
+        """return a single Organizations by ID
+        """
+        try:
+            headers = { "authorization": "Bearer " + self.token }
+            response = requests.get(
+                self.audience+'identity/v1/organizations/'+id,
+                proxies=self.proxies,
+                verify=self.verify,
+                headers=headers
+            )
+            response_code = response.status_code
+        except:
+            raise
+
+        if response_code == requests.status_codes.codes.OK: # HTTP 200
+            try:
+                organization = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR getting Network Groups')
+                raise(e)
+        else:
+            raise Exception(
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
+                )
+            )
+
+        return(organization)
 
     def get_network_group(self,network_group_id):
         """describe a Network Group
         """
         try:
             # /network-groups/{id} returns a Network Group object
-            headers = { "authorization": "Bearer " + self.session.token }
+            headers = { "authorization": "Bearer " + self.token }
             response = requests.get(
-                self.session.audience+'rest/v1/network-groups/'+network_group_id,
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                self.audience+'rest/v1/network-groups/'+network_group_id,
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers
             )
             response_code = response.status_code
@@ -263,11 +336,11 @@ class Organization:
         """
         try:
             # /networks/{id} returns a Network object
-            headers = { "authorization": "Bearer " + self.session.token }
+            headers = { "authorization": "Bearer " + self.token }
             response = requests.get(
-                self.session.audience+'rest/v1/networks/'+network_id,
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                self.audience+'rest/v1/networks/'+network_id,
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers
             )
             response_code = response.status_code
@@ -293,14 +366,15 @@ class Organization:
 
     def get_network_groups_by_organization(self):
         """list Network Groups
+        TODO: filter by Organization when that capability is available
         """
         try:
             # /network-groups returns a list of dicts (Network Group objects)
-            headers = { "authorization": "Bearer " + self.session.token }
+            headers = { "authorization": "Bearer " + self.token }
             response = requests.get(
-                self.session.audience+'rest/v1/network-groups',
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                self.audience+'rest/v1/network-groups',
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers
             )
             response_code = response.status_code
@@ -331,11 +405,11 @@ class Organization:
 
         try:
             # returns a list of dicts (network objects)
-            headers = { "authorization": "Bearer " + self.session.token }
+            headers = { "authorization": "Bearer " + self.token }
             response = requests.get(
-                self.session.audience+'core/v2/networks',
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                self.audience+'core/v2/networks',
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers
             )
             response_code = response.status_code
@@ -365,15 +439,15 @@ class Organization:
         """
         try:
             headers = { 
-                "authorization": "Bearer " + self.session.token 
+                "authorization": "Bearer " + self.token 
             }
             params = {
                 "findByNetworkGroupId": network_group_id
             }
             response = requests.get(
-                self.session.audience+'core/v2/networks',
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                self.audience+'core/v2/networks',
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers,
                 params=params
             )
@@ -403,7 +477,7 @@ class Organization:
 class NetworkGroup:
     """use a Network Group by name or ID or the first group in the organization
     """
-    def __init__(self, Organization, network_group_id=None, network_group_name=None):
+    def __init__(self, Organization: object, network_group_id: str=None, network_group_name: str=None):
         if network_group_id:
             self.network_group_id = network_group_id
             self.network_group_name = [ ng['organizationShortName'] for ng in Organization.network_groups if ng['id'] == network_group_id ][0]
@@ -429,7 +503,7 @@ class NetworkGroup:
         else:
             raise Exception("ERROR: need at least one Network Group in organization")
 
-        self.session = Organization.session
+        self.session = Organization
         self.describe = Organization.get_network_group(self.network_group_id)
         self.id = self.network_group_id
         self.name = self.network_group_name
@@ -633,18 +707,18 @@ class NetworkGroup:
 class Network:
     """describe and use a Network
     """
-    def __init__(self, Session, network_id=None, network_name=None):
+    def __init__(self, NetworkGroup: object, network_id: str=None, network_name: str=None):
         """
-        :param token: required bearer token for this session
+        :param NetworkGroup: required object of the parent Network Group of this Network
         :param network_name: optional name of the network to describe and use
         :param network_id: optional UUID of the network to describe and use
         """
-        self.session = Session
+        self.session = NetworkGroup.session
 
         if network_id:
             self.describe = self.get_network_by_id(network_id)
         elif network_name:
-            self.describe = self.get_network_by_name(network_name)
+            self.describe = self.get_network_by_name(name=network_name,group=NetworkGroup.id)
         else:
             raise Exception("ERROR: need one of network_id or network_name")
 
@@ -984,8 +1058,12 @@ class Network:
             )
         return(resource)
 
-    def create_endpoint(self, name, attributes=[]):
+    def create_endpoint(self, name: str, attributes: list=[], session_identity: str=None):
         """create an Endpoint
+        :param: name is required string on which to key future operations for this Endpoint
+        :param: attributes is an optional list of Endpoint roles of which this Endpoint is a member
+        :param: session_identity is optional string UUID of the identity in the NF Organization for
+                which a concurrent web console session is required to activate this Endpoint
         """
         try:
             headers = { 
@@ -1000,6 +1078,10 @@ class Network:
                 "attributes": attributes,
                 "enrollmentMethod": { "ott": True }
             }
+
+            if session_identity:
+                body['sessionIdentityId'] = session_identity
+
             response = requests.post(
                 self.session.audience+'core/v2/endpoints',
                 proxies=self.session.proxies,
@@ -1294,9 +1376,10 @@ class Network:
 
         return(app_wan)
 
-    def get_network_by_name(self,name):
+    def get_network_by_name(self,name: str,group: str=None):
         """return exactly one network object
-            :name required name of the NF network may contain quoted whitespace
+        :param: name required name of the NF network may contain quoted whitespace
+        :param: group optional string UUID to limit results by Network Group ID
         """
         try:
             headers = { 
@@ -1305,6 +1388,9 @@ class Network:
             params = {
                 "findByName": name
             }
+            if group is not None:
+                params['findByNetworkGroupId'] = group
+
             response = requests.get(
                 self.session.audience+'core/v2/networks',
                 proxies=self.session.proxies,
