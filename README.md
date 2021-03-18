@@ -17,23 +17,19 @@ INFO: running demo script in /home/alice/.pyenv/versions/3.9.0/lib/python3.9/sit
 import netfoundry
 
 # default API account credential file is ~/.netfoundry/credentials.json
-Session = netfoundry.Session()
+Organization = netfoundry.Organization(credentials="credentials.json")
 
-# yields a list of Network Groups in Organization.networkGroups[], but there's typically only one group
-Organization = netfoundry.Organization(Session)
-
-# use the default Network Group (the first Network Group ID known to the Organization)
-NetworkGroup = netfoundry.NetworkGroup(Organization)
+# use some Network Group, default is to use the first and there's typically only one
+network_group = netfoundry.NetworkGroup(Organization)
 
 # create a Network
-netName = "BibbidiBobbidiBoo"
-if netName in NetworkGroup.networksByName.keys():
+network_name = "BibbidiBobbidiBoo"
+if network_name in network_group.networks_by_name.keys():
     # use the Network
-    Network = netfoundry.Network(Session, networkName=netName)
-    Network.waitForStatus("PROVISIONED",wait=999,progress=True)
+    network = netfoundry.Network(network_group, network_name=network_name)
+    network.wait_for_status("PROVISIONED",wait=999,progress=True)
 else:
-    netId = NetworkGroup.createNetwork(netName)
-    Network = netfoundry.Network(Session, networkId=netId)
-    Network.waitForStatus("PROVISIONED",wait=999,progress=True)
-    Network = netfoundry.Network(Session, networkId=netId)
+    network_id = network_group.create_network(name=network_name)['id']
+    network = netfoundry.Network(network_group, network_id=network_id)
+    network.wait_for_status("PROVISIONED",wait=999,progress=True)
 ```
