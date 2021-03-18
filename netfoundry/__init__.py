@@ -70,7 +70,7 @@ class Organization:
             self.credentials = "credentials.json"
 
         # if no token or near expiry (30 min) then use credentials to obtain a token
-        if epoch is None or epoch > (expiry - 1800):
+        if epoch is None or epoch > (expiry - 600):
             # unless a valid path assume relative and search the default chain
             if not os.path.exists(self.credentials):
                 default_creds_chain = [
@@ -866,7 +866,7 @@ class Network:
             params = {
                 "networkId": self.id,
                 "page": 0,
-                "size": 10,
+                "size": 100,
                 "sort": "name,asc"
             }
             if type == "services": 
