@@ -21,6 +21,15 @@ def main():
         help="The name of your demo network"
     )
     parser.add_argument(
+        "-o", "--organization",
+        help="The label of an alternative Organization (default is Org of caller)"
+    )
+    parser.add_argument(
+        "-g", "--network-group",
+        dest="network_group",
+        help="The shortname of a Network Group (default is the first, typically singular, Group known to this Org)"
+    )
+    parser.add_argument(
         "-p", "--create-private",
         dest="private",
         default=False,
@@ -48,39 +57,34 @@ def main():
     parser.add_argument("--proxy",
         default=None,
         help="'http://localhost:8080'"+
-        " (implies certificate verification is disabled); or"+
         " 'socks5://localhost:9046'"
     )
     args = parser.parse_args()
 
     network_name = args.network
     
-    session = netfoundry.Session(
-        credentials=args.credentials if args.credentials is not None else None,
-        proxy=args.proxy,
+    # use the session with some Organization, default is to use the first and there's typically only one
+    Organization = netfoundry.Organization(
+        credentials=args.credentials if 'credentials' in args else None,
+        organization_label=args.organization if 'organization' in args else None,
+        proxy=args.proxy
     )
 
-    # yields a list of Network Groups in Organization.network_groups[], but there's typically only one group
-    Organization = netfoundry.Organization(session)
-
-    # use the default Network Group (the first Network Group ID known to the Organization)
-    network_group = netfoundry.NetworkGroup(Organization)
+    # use some Network Group, default is to use the first and there's typically only one
+    network_group = netfoundry.NetworkGroup(
+        Organization,
+        network_group_name=args.network_group if 'network_group' in args else None
+    )
 
     # create a Network
     if network_name in network_group.networks_by_name.keys():
         # use the Network
-        network = netfoundry.Network(session, network_name=network_name)
+        network = netfoundry.Network(network_group, network_name=network_name)
         network.wait_for_status("PROVISIONED",wait=999,progress=True)
     else:
         network_id = network_group.create_network(name=network_name,size="small")['id'] # use "medium" unless demo
-        network = netfoundry.Network(session, network_id=network_id)
+        network = netfoundry.Network(network_group, network_id=network_id)
         network.wait_for_status("PROVISIONED",wait=999,progress=True)
-        network = netfoundry.Network(session, network_id=network_id)
-
-    # delete the Network and wait for confirmation
-    #network.delete_network()
-
-    #print('{} is {}\n'.format(network.name, network.status))
 
     # existing hosted ERs
     hosted_edge_routers = network.edge_routers(only_hosted=True)
