@@ -23,10 +23,10 @@ class Organization:
     """
 
     def __init__(self, 
+        credentials=None, 
         organization_id: str=None, 
         organization_label: str=None,
         token=None, 
-        credentials=None, 
         proxy=None):
 
         # verify auth endpoint's server certificate if proxy is type SOCKS or None
@@ -165,8 +165,6 @@ class Organization:
                 self.environment = re.sub(r'https://gateway\.([^.]+)\.netfoundry\.io.*',r'\1',claim['scope'])
             elif re.match(r'.*\.auth0\.com', iss):
                 self.environment = re.sub(r'https://netfoundry-([^.]+)\.auth0\.com.*',r'\1',claim['iss'])
-            # import q; q(claim)
-            # import epdb; epdb.serve()
             self.audience = 'https://gateway.'+self.environment+'.netfoundry.io/'
         except: raise
 
@@ -187,6 +185,12 @@ class Organization:
         self.label = self.describe['label']
         self.id = self.describe['id']
 
+        self.network_groups_by_name = dict()
+        for group in self.network_groups:
+            self.network_groups_by_name[group['name']] = group['id']
+
+    def network_groups(self):
+        return(self.get_network_groups_by_organization())
         
     def get_caller_identity(self):
         """return the caller's identity object
@@ -471,7 +475,6 @@ class Organization:
                     response.text
                 )
             )
-
 
         return(networks)
 
