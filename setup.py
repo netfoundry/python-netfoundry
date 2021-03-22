@@ -8,7 +8,7 @@ setuptools.setup(
     name='netfoundry',
     version='4.7.0',
     py_modules=['netfoundry'],
-    url='https://developer.netfoundry.io/v2/tools/',
+    url='https://developer.netfoundry.io/guides/python/',
     description='Interface to the NetFoundry network-as-code orchestration Platform',
     long_description=long_description,
     long_description_content_type="text/markdown",
