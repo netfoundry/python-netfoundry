@@ -95,7 +95,7 @@ def main():
     fabric_placement_count = 1
     for region in geo_regions:
         data_center_ids = [dc['id'] for dc in network.aws_geo_regions[region]]
-        existing_count = len([er for er in hosted_edge_routers if er['dataCenterId'] in data_center_ids])
+        existing_count = len([er for er in hosted_edge_routers if 'host' in er.keys() and er['host']['dataCenterId'] in data_center_ids])
         if existing_count < fabric_placement_count:
             choice = random.choice(network.aws_geo_regions[region])
             # append the current major region to the randomly-chosen data center object

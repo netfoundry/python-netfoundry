@@ -748,10 +748,10 @@ class Network:
         if only_hosted and only_customer:
             raise Exception("ERROR: specify only one of only_hosted or only_customer")
         elif only_hosted:
-            hosted_edge_routers = [er for er in all_edge_routers if er['dataCenterId']]
+            hosted_edge_routers = [er for er in all_edge_routers if 'host' in er.keys() and 'dataCenterId' in er['host'].keys() and er['host']['dataCenterId']]
             return(hosted_edge_routers)
         elif only_customer:
-            customer_edge_routers = [er for er in all_edge_routers if not er['dataCenterId']]
+            customer_edge_routers = [er for er in all_edge_routers if not 'host' in er.keys() or not 'dataCenterId' in er['host'].keys() or not er['host']['dataCenterId']]
             return(customer_edge_routers)
         else:
             return(all_edge_routers)
