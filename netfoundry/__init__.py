@@ -751,10 +751,12 @@ class Network:
         if only_hosted and only_customer:
             raise Exception("ERROR: specify only one of only_hosted or only_customer")
         elif only_hosted:
-            hosted_edge_routers = [er for er in all_edge_routers if 'host' in er.keys() and 'dataCenterId' in er['host'].keys() and er['host']['dataCenterId']]
+#            hosted_edge_routers = [er for er in all_edge_routers if 'host' in er.keys() and 'dataCenterId' in er['host'].keys() and er['host']['dataCenterId']]
+            hosted_edge_routers = [er for er in all_edge_routers if er['dataCenterId']]
             return(hosted_edge_routers)
         elif only_customer:
-            customer_edge_routers = [er for er in all_edge_routers if not 'host' in er.keys() or not 'dataCenterId' in er['host'].keys() or not er['host']['dataCenterId']]
+#            customer_edge_routers = [er for er in all_edge_routers if not 'host' in er.keys() or not 'dataCenterId' in er['host'].keys() or not er['host']['dataCenterId']]
+            customer_edge_routers = [er for er in all_edge_routers if not er['dataCenterId']]
             return(customer_edge_routers)
         else:
             return(all_edge_routers)
@@ -1205,14 +1207,31 @@ class Network:
 
         return(policy)
 
-    def create_service(self, name: str, client_host_name: str, client_port_range: int, server_host_name: str=None, 
-        server_port_range: int=None, server_protocol: str="tcp", attributes: list=[], edge_router_attributes: list=["#all"], 
-        egress_router_id: str=None, endpoints: list=[], encryption_required: bool=True):
-        """create a Service to be accessed by Tunneler Endpoints
-        There are three types of servers that may be published with this method: SDK, Tunneler, or Router. 
+    def create_service(self, name: str, client_host_names: list, client_port_range: str, client_protocols: list=["tcp"], 
+        server_host_name: str=None, server_port: str=None, server_protocol: str=None, attributes: list=[], 
+        edge_router_attributes: list=["#all"], egress_router_id: str=None, endpoints: list=[], encryption_required: bool=True):
+        """create a Service to be accessed by Endpoints
+        There are three hosting strategies for a Service: SDK, Tunneler, or Router. 
         If server details are absent then the type is inferred to be SDK (Service is hosted by a Ziti SDK,
         not a Tunneler or Router). If server details are present then the Service is either hosted by a
-        Tunneler or Router, depending on which value is present i.e. Tunneler Endpoint or Edge Router. 
+        Tunneler or Router, depending on which value is present i.e. Tunneler Endpoint or Edge Router.
+
+        Multiple client intercepts may be specified i.e. lists of domain names or IP addresses, ports, and protocols. If alternative 
+        server details are not given they are assumed to be the same as the intercept. If server details are provided then all intercepts 
+        flow to that server.
+
+        :param: name is required string
+        :param: client_host_names is required list of strings that are intercept hostnames (DNS) or IPv4
+        :param: client_port_range is required string of the range of ports to intercept as PPPP:PPPP
+        :param: client_protocols is required list of strings of the transports. Choices: ["tcp","udp"]
+        :param: server_hostname is optional string that is a hostname (DNS) or IPv4. If omitted the client hostname is used.
+        :param: server_port is optional string of the server port. If omitted the same client port is used. 
+        :param: server_protocol is optional string of the server protocol. If omitted the same client protocol is used.
+        :param: attributes is optional list of strings of Service roles to assign. Default is [].
+        :param: edge_router_attributes is optional list of strings of Router roles or Router names that can "see" this Service.
+        :param: egress_router_id is optional string of UUID or name of hosting Router. Selects Router-hosting strategy.
+        :param: endpoints is optional list of strings of hosting Endpoints. Selects Endpoint-hosting strategy.
+        :param: encryption_required is optional Boolean
         """
         try:
             headers = { 
