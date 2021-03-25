@@ -874,8 +874,8 @@ class Network:
                 "size": 100,
                 "sort": "name,asc"
             }
-            if type == "services": 
-                params["beta"] = ''
+            # if type == "services": 
+            #     params["beta"] = ''
 
             if name is not None:
                 params['name'] = name
@@ -1322,11 +1322,10 @@ class Network:
             if edge_router_attributes and not edge_router_attributes == ['#all']:
                 eprint("WARN: overriding default Service Edge Router Policy #all for new Service {:s}".format(name))
                 body['edgeRouterAttributes'] = edge_router_attributes
-            # TODO: remove when legacy Services API is decommissioned in favor of Platform Services API
-            # results in HTMLv5-compliant URL param singleton with empty string value like ?beta= to invoke the Platform Services API
-            params = {
-                "beta": ''
-            }
+            params = dict()
+            # params = {
+            #     "beta": ''
+            # }
 
             response = requests.post(
                 self.session.audience+'core/v2/services',
@@ -1479,11 +1478,10 @@ class Network:
                 "attributes" : attributes,
             }
 
-            # TODO: remove when legacy Services API is decommissioned in favor of Platform Services API
-            # results in HTMLv5-compliant URL param singleton with empty string value like ?beta= to invoke the Platform Services API
-            params = {
-                "beta": ''
-            }
+            params = dict()
+            # params = {
+            #     "beta": ''
+            # }
 
             response = requests.post(
                 self.session.audience+'core/v2/services',
@@ -1803,8 +1801,8 @@ class Network:
             params = dict()
             if not type == "network":
                 params["networkId"] = self.id
-            elif type == "service": 
-                params["beta"] = ''
+            # elif type == "service": 
+            #     params["beta"] = ''
 
             entity_url = self.session.audience+'core/v2/'
             if type == 'network':
@@ -1813,8 +1811,6 @@ class Network:
                 raise Exception("ERROR: entity UUID must be specified if not a network")
             else:
                 entity_url += type+'s/'+id
-            # TODO: remove "beta" when legacy Services API is decommissioned in favor of Platform Services API
-            # results in HTMLv5-compliant URL param singleton with empty string value like ?beta= to invoke the Platform Services API
 
             response = requests.get(
                 entity_url,
@@ -1856,13 +1852,11 @@ class Network:
         try:
             headers = { "authorization": "Bearer " + self.session.token }
             entity_url = self.session.audience+'core/v2/'+type+'s/'+id
-            # TODO: remove "beta" when legacy Services API is decommissioned in favor of Platform Services API
-            # results in HTMLv5-compliant URL param singleton with empty string value like ?beta= to invoke the Platform Services API
             params = dict()
             if not type == "network":
                 params["networkId"] = self.id
-            if type == "service": 
-                params["beta"] = ''
+            # if type == "service": 
+            #     params["beta"] = ''
 
             response = requests.get(
                 entity_url,
@@ -1929,11 +1923,9 @@ class Network:
                     raise Exception("ERROR: need entity UUID to delete")
                 entity_url = self.session.audience+'core/v2/'+type+'s/'+id
             eprint("WARN: deleting {:s}".format(entity_url))
-            # TODO: remove "beta" when legacy Services API is decommissioned in favor of Platform Services API
-            # results in HTMLv5-compliant URL param singleton with empty string value like ?beta= to invoke the Platform Services API
             params = dict()
-            if type == "service":
-                params["beta"] = ''
+            # if type == "service":
+            #     params["beta"] = ''
 
             response = requests.delete(
                 entity_url,
