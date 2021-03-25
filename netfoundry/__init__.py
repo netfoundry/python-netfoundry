@@ -23,10 +23,10 @@ class Organization:
     """
 
     def __init__(self, 
+        credentials=None, 
         organization_id: str=None, 
         organization_label: str=None,
         token=None, 
-        credentials=None, 
         proxy=None):
 
         # verify auth endpoint's server certificate if proxy is type SOCKS or None
@@ -165,8 +165,6 @@ class Organization:
                 self.environment = re.sub(r'https://gateway\.([^.]+)\.netfoundry\.io.*',r'\1',claim['scope'])
             elif re.match(r'.*\.auth0\.com', iss):
                 self.environment = re.sub(r'https://netfoundry-([^.]+)\.auth0\.com.*',r'\1',claim['iss'])
-            # import q; q(claim)
-            # import epdb; epdb.serve()
             self.audience = 'https://gateway.'+self.environment+'.netfoundry.io/'
         except: raise
 
@@ -187,6 +185,12 @@ class Organization:
         self.label = self.describe['label']
         self.id = self.describe['id']
 
+        self.network_groups_by_name = dict()
+        for group in self.network_groups:
+            self.network_groups_by_name[group['name']] = group['id']
+
+    def network_groups(self):
+        return(self.get_network_groups_by_organization())
         
     def get_caller_identity(self):
         """return the caller's identity object
@@ -472,7 +476,6 @@ class Organization:
                 )
             )
 
-
         return(networks)
 
 class NetworkGroup:
@@ -748,9 +751,11 @@ class Network:
         if only_hosted and only_customer:
             raise Exception("ERROR: specify only one of only_hosted or only_customer")
         elif only_hosted:
+#            hosted_edge_routers = [er for er in all_edge_routers if 'host' in er.keys() and 'dataCenterId' in er['host'].keys() and er['host']['dataCenterId']]
             hosted_edge_routers = [er for er in all_edge_routers if er['dataCenterId']]
             return(hosted_edge_routers)
         elif only_customer:
+#            customer_edge_routers = [er for er in all_edge_routers if not 'host' in er.keys() or not 'dataCenterId' in er['host'].keys() or not er['host']['dataCenterId']]
             customer_edge_routers = [er for er in all_edge_routers if not er['dataCenterId']]
             return(customer_edge_routers)
         else:
@@ -1202,14 +1207,33 @@ class Network:
 
         return(policy)
 
-    def create_service(self, name: str, client_host_name: str, client_port_range: int, server_host_name: str=None, 
-        server_port_range: int=None, server_protocol: str="tcp", attributes: list=[], edge_router_attributes: list=["#all"], 
+    def create_service(self, name: str, client_host_name: str, client_port: int, server_host_name: str=None, 
+        server_port: int=None, server_protocol: str="tcp", attributes: list=[], edge_router_attributes: list=["#all"], 
         egress_router_id: str=None, endpoints: list=[], encryption_required: bool=True):
-        """create a Service to be accessed by Tunneler Endpoints
-        There are three types of servers that may be published with this method: SDK, Tunneler, or Router. 
+        """create a Service that is compatible with broadly-compatible Ziti config types ziti-tunneler-client.v1, ziti-tunneler-server.v1
+
+        There are three hosting strategies for a Service: SDK, Tunneler, or Router.
+
         If server details are absent then the type is inferred to be SDK (Service is hosted by a Ziti SDK,
         not a Tunneler or Router). If server details are present then the Service is either hosted by a
-        Tunneler or Router, depending on which value is present i.e. Tunneler Endpoint or Edge Router. 
+        Tunneler or Router, depending on which value is present i.e. Tunneler Endpoint or Edge Router.
+
+        Multiple client intercepts may be specified i.e. lists of domain names or IP addresses, ports, and protocols. If alternative 
+        server details are not given they are assumed to be the same as the intercept. If server details are provided then all intercepts 
+        flow to that server.
+
+        :param: name is required string
+        :param: client_host_name is required strings that is the intercept hostname (DNS) or IPv4
+        :param: client_port is required integer of the ports to intercept
+        :param: client_protocol is required string of the transport protocol. Choices: ["tcp","udp"]
+        :param: server_host_name is optional string that is a hostname (DNS) or IPv4. If omitted Service is assumed to be SDK-hosted (not Tunneler or Router-hosted).
+        :param: server_port is optional integer of the server port. If omitted the client port is used. 
+        :param: server_protocol is optional string of the server protocol. If omitted the same client protocol is used.
+        :param: attributes is optional list of strings of Service roles to assign. Default is [].
+        :param: edge_router_attributes is optional list of strings of Router roles or Router names that can "see" this Service. Default is ["#all"].
+        :param: egress_router_id is optional string of UUID or name of hosting Router. Selects Router-hosting strategy.
+        :param: endpoints is optional list of strings of hosting Endpoints. Selects Endpoint-hosting strategy.
+        :param: encryption_required is optional Boolean. Default is to enable edge-to-edge encryption.
         """
         try:
             headers = { 
@@ -1225,7 +1249,7 @@ class Network:
                 "model": {
                     "clientIngress" : {
                         "host": client_host_name, 
-                        "port": client_port_range,
+                        "port": client_port,
                     },
                     "edgeRouterAttributes" : edge_router_attributes
                 },
@@ -1234,13 +1258,13 @@ class Network:
             # resolve exit hosting params
             if not server_host_name:
                 body['modelType'] = "TunnelerToSdk"
-                if server_port_range:
+                if server_port:
                     eprint("WARN: ignoring unexpected server details for SDK-hosted Service")
             else:
                 server_egress = {
                     "protocol": server_protocol.lower(),
                     "host": server_host_name,
-                    "port": server_port_range
+                    "port": server_port if server_port else client_port
                 }            
                 if endpoints and not egress_router_id:
                     body['modelType'] = "TunnelerToEndpoint"
@@ -1315,6 +1339,164 @@ class Network:
             response_code = response.status_code
         except:
             raise
+        if response_code == requests.status_codes.codes[RESOURCES['services']['expect']]:
+            try:
+                service = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load {:s} object from POST response'.format("Service"))
+                raise(e)
+        else:
+            raise Exception(
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
+                )
+            )
+
+        return(service)
+
+    def create_endpoint_service(self, name: str, endpoints: list, client_host_names: list, client_port_ranges: list, client_protocols: list=["tcp"], 
+        server_host_name: str=None, server_port: str=None, server_protocol: str=None, attributes: list=[], 
+        edge_router_attributes: list=["#all"], encryption_required: bool=True):
+        """create an Endpoint-hosted Service compatible with Ziti config types intercept.v1, host.v1.
+
+        Multiple client intercepts may be specified i.e. lists of domain names or IP addresses, ports, and protocols. If alternative 
+        server details are not given they are assumed to be the same as the intercept. If server details are provided then all intercepts 
+        flow to that server.
+
+        :param: name is required string
+        :param: client_host_names is required list of strings that are intercept hostnames (DNS) or IPv4
+        :param: client_port_ranges is required list of strings of the port ranges to intercept as ["80","5900:5999"]
+        :param: client_protocols is required list of strings of the transports. Choices: ["tcp","udp", "sctp"]
+        :param: server_hostname is optional string that is a hostname (DNS) or IPv4. If omitted the client hostname is used.
+        :param: server_port is optional string of the server port. If omitted the same client port is used. 
+        :param: server_protocol is optional string of the server protocol. If omitted the same client protocol is used.
+        :param: attributes is optional list of strings of Service roles to assign. Default is [].
+        :param: edge_router_attributes is optional list of strings of Router roles or Router names that can "see" this Service. Default is ["#all"].
+        :param: endpoints is optional list of strings of hosting Endpoints.
+        :param: encryption_required is optional Boolean. Default is to enable edge-to-edge encryption.
+        """
+        try:
+            # validate roles
+            for role in attributes:
+                if not role[0:1] == '#':
+                    raise Exception('ERROR: invalid role "{:s}". Must begin with "#"'.format(role))
+
+            # these elements could be a single port as integer or a string with one or two ports separated by a : or -
+            separators = re.compile('[:-]')
+            valid_range = re.compile('^\d+[:-]\d+$')
+            valid_client_port_ranges = list()
+            for range in client_port_ranges:
+                # if an integer or single port then use same number for low:high
+                if isinstance(range, int):
+                    range = str(range)+':'+str(range)
+                elif not re.search(separators,range):
+                    range = range+':'+range
+                
+                if not re.fullmatch(valid_range, range):
+                    raise Exception("ERROR: failed to parse client port range: {}".format(range))
+
+                bounds = re.split(separators, range)
+                if not len(bounds) == 2 or int(bounds[0]) > int(bounds[1]):
+                    raise Exception("ERROR: failed to find one lower, one higher port for range: {}".format(range))
+                else:
+                    valid_client_port_ranges.append({"low": bounds[0], "high": bounds[1]})
+
+            # validate client protocols
+            valid_client_protocols = list()
+            for proto in client_protocols:
+                if not proto in ["tcp", "udp", "sctp", "TCP", "UDP", "SCTP"]:
+                    raise Exception("ERROR: client intercept protocol \"{}\" is not valid.".format(proto))
+                else:
+                    valid_client_protocols.append(proto.lower())
+
+            # resolve exit hosting params
+            server_egress = dict()
+            if server_host_name:
+                server_egress["address"] = server_host_name
+            else:
+                server_egress["dialInterceptAddress"] = True
+
+            if server_port:
+                server_egress["port"] = server_port
+            else:
+                server_egress["dialInterceptPort"] = True
+
+            if server_protocol:
+                server_egress["protocol"] = server_protocol
+            else:
+                server_egress["dialInterceptProtocol"] = True
+
+            # parse out the elements in the list of endpoints as one of #attribute, UUID, or resolvable Endoint name
+            bind_endpoints = list()
+            for endpoint in endpoints:
+                if endpoint[0:1] == '#':
+                    bind_endpoints.append(endpoint) # is an Endpoint role attribute
+                else:
+                    # strip leading @ if present and re-add later after verifying the named Endpoint exists
+                    if endpoint[0:1] == '@':
+                        endpoint = endpoint[1:]
+
+                    # if UUIDv4 then resolve to name, else verify the named Endpoint exists 
+                    try:
+                        UUID(endpoint, version=4) # assigned below under "else" if already a UUID
+                    except ValueError:
+                        # else assume is a name and resolve to ID
+                        try: 
+                            name_lookup = self.get_resources(type="endpoints",name=endpoint)[0]
+                            endpoint_name = name_lookup['name']
+                        except Exception as e:
+                            raise Exception('ERROR: Failed to find exactly one hosting Endpoint named "{}". Caught exception: {}'.format(endpoint, e))
+                        # append to list after successfully resolving name to ID
+                        else: bind_endpoints.append('@'+endpoint_name) # is an existing Endpoint's name
+                    else:
+                        try:
+                            name_lookup = self.get_resource(type="endpoint",id=endpoint)
+                            endpoint_name = name_lookup['name']
+                        except Exception as e:
+                            raise Exception('ERROR: Failed to find exactly one hosting Endpoint with ID "{}". Caught exception: {}'.format(endpoint, e))
+                        else: bind_endpoints.append('@'+endpoint_name) # is an existing Endpoint's name resolved from UUID
+
+            headers = { 
+                "authorization": "Bearer " + self.session.token 
+            }
+            body = {
+                "networkId": self.id,
+                "name": name,
+                "encryptionRequired": encryption_required,
+                "modelType": "AdvancedTunnelerToEndpoint",
+                "model": {
+                    "bindEndpointAttributes": bind_endpoints,
+                    "clientIngress" : {
+                        "addresses": client_host_names, 
+                        "ports": valid_client_port_ranges,
+                        "protocols": valid_client_protocols
+                    },
+                    "serverEgress": server_egress,
+                    "edgeRouterAttributes" : edge_router_attributes
+                },
+                "attributes" : attributes,
+            }
+
+            # TODO: remove when legacy Services API is decommissioned in favor of Platform Services API
+            # results in HTMLv5-compliant URL param singleton with empty string value like ?beta= to invoke the Platform Services API
+            params = {
+                "beta": ''
+            }
+
+            response = requests.post(
+                self.session.audience+'core/v2/services',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                json=body,
+                params=params
+            )
+            response_code = response.status_code
+        except:
+            raise
+
         if response_code == requests.status_codes.codes[RESOURCES['services']['expect']]:
             try:
                 service = json.loads(response.text)

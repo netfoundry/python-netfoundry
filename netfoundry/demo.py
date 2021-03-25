@@ -206,10 +206,10 @@ def main():
                 name=service1_name,
                 attributes=["#welcomeWagon"],
                 client_host_name="hello.netfoundry",
-                client_port_range="80",
+                client_port="80",
                 endpoints=[exit1['id']],
                 server_host_name="hello",
-                server_port_range="3000",
+                server_port="3000",
                 server_protocol="TCP"
             )
             print("INFO: created Service \"{:s}\"".format(service1['name']))
@@ -224,10 +224,10 @@ def main():
                 name=service2_name,
                 attributes=["#welcomeWagon"],
                 client_host_name="httpbin.netfoundry",
-                client_port_range="80",
+                client_port="80",
                 endpoints=[exit1['id']],
                 server_host_name="httpbin",
-                server_port_range="80",
+                server_port="80",
                 server_protocol="TCP"
             )
             print("INFO: created Service \"{:s}\"".format(service2['name']))
@@ -245,10 +245,10 @@ def main():
             name=service3_name,
             attributes=["#welcomeWagon"],
             client_host_name="fireworks.netfoundry",
-            client_port_range="80",
+            client_port="80",
             egress_router_id=hosting_router['id'],
             server_host_name="fireworks-load-balancer-1246256380.us-east-1.elb.amazonaws.com",
-            server_port_range="80",
+            server_port="80",
             server_protocol="TCP"
         )
         print("INFO: created Service \"{:s}\"".format(service3['name']))
@@ -263,10 +263,10 @@ def main():
             name=service4_name,
             attributes=["#welcomeWagon"],
             client_host_name="weather.netfoundry",
-            client_port_range="80",
+            client_port="80",
             egress_router_id=hosting_router['id'],
             server_host_name="wttr.in",
-            server_port_range="80",
+            server_port="80",
             server_protocol="TCP"
         )
         print("INFO: created Service \"{:s}\"".format(service4['name']))
@@ -284,10 +284,10 @@ def main():
             name=service5_name,
             attributes=["#welcomeWagon"],
             client_host_name="echo.netfoundry",
-            client_port_range="80",
+            client_port="80",
             egress_router_id=hosting_router['id'],
             server_host_name="eth0.me",
-            server_port_range="80",
+            server_port="80",
             server_protocol="TCP"
         )
         print("INFO: created Service \"{:s}\"".format(service5['name']))
