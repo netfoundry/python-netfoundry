@@ -1226,7 +1226,7 @@ class Network:
         :param: client_host_name is required strings that is the intercept hostname (DNS) or IPv4
         :param: client_port is required integer of the ports to intercept
         :param: client_protocol is required string of the transport protocol. Choices: ["tcp","udp"]
-        :param: server_host_name is optional string that is a hostname (DNS) or IPv4. If omitted the client hostname is used.
+        :param: server_host_name is optional string that is a hostname (DNS) or IPv4. If omitted Service is assumed to be SDK-hosted (not Tunneler or Router-hosted).
         :param: server_port is optional integer of the server port. If omitted the client port is used. 
         :param: server_protocol is optional string of the server protocol. If omitted the same client protocol is used.
         :param: attributes is optional list of strings of Service roles to assign. Default is [].
@@ -1264,7 +1264,7 @@ class Network:
                 server_egress = {
                     "protocol": server_protocol.lower(),
                     "host": server_host_name,
-                    "port": server_port
+                    "port": server_port if server_port else client_port
                 }            
                 if endpoints and not egress_router_id:
                     body['modelType'] = "TunnelerToEndpoint"
@@ -1356,9 +1356,9 @@ class Network:
 
         return(service)
 
-    def create_endpoint_service(self, name: str, client_host_names: list, client_port_ranges: list, client_protocols: list=["tcp"], 
+    def create_endpoint_service(self, name: str, endpoints: list, client_host_names: list, client_port_ranges: list, client_protocols: list=["tcp"], 
         server_host_name: str=None, server_port: str=None, server_protocol: str=None, attributes: list=[], 
-        edge_router_attributes: list=["#all"], endpoints: list=[], encryption_required: bool=True):
+        edge_router_attributes: list=["#all"], encryption_required: bool=True):
         """create an Endpoint-hosted Service compatible with Ziti config types intercept.v1, host.v1.
 
         Multiple client intercepts may be specified i.e. lists of domain names or IP addresses, ports, and protocols. If alternative 
@@ -1373,7 +1373,7 @@ class Network:
         :param: server_port is optional string of the server port. If omitted the same client port is used. 
         :param: server_protocol is optional string of the server protocol. If omitted the same client protocol is used.
         :param: attributes is optional list of strings of Service roles to assign. Default is [].
-        :param: edge_router_attributes is optional list of strings of Router roles or Router names that can "see" this Service.
+        :param: edge_router_attributes is optional list of strings of Router roles or Router names that can "see" this Service. Default is ["#all"].
         :param: endpoints is optional list of strings of hosting Endpoints.
         :param: encryption_required is optional Boolean. Default is to enable edge-to-edge encryption.
         """
@@ -1432,7 +1432,7 @@ class Network:
             bind_endpoints = list()
             for endpoint in endpoints:
                 if endpoint[0:1] == '#':
-                    bind_endpoints += [endpoint]
+                    bind_endpoints.append(endpoint) # is an Endpoint role attribute
                 else:
                     # strip leading @ if present and re-add later after verifying the named Endpoint exists
                     if endpoint[0:1] == '@':
@@ -1449,14 +1449,14 @@ class Network:
                         except Exception as e:
                             raise Exception('ERROR: Failed to find exactly one hosting Endpoint named "{}". Caught exception: {}'.format(endpoint, e))
                         # append to list after successfully resolving name to ID
-                        else: bind_endpoints += ['@'+endpoint_name] 
+                        else: bind_endpoints.append('@'+endpoint_name) # is an existing Endpoint's name
                     else:
                         try:
                             name_lookup = self.get_resource(type="endpoint",id=endpoint)
                             endpoint_name = name_lookup['name']
                         except Exception as e:
                             raise Exception('ERROR: Failed to find exactly one hosting Endpoint with ID "{}". Caught exception: {}'.format(endpoint, e))
-                        else: bind_endpoints += ['@'+endpoint_name] 
+                        else: bind_endpoints.append('@'+endpoint_name) # is an existing Endpoint's name resolved from UUID
 
             headers = { 
                 "authorization": "Bearer " + self.session.token 
@@ -1467,6 +1467,7 @@ class Network:
                 "encryptionRequired": encryption_required,
                 "modelType": "AdvancedTunnelerToEndpoint",
                 "model": {
+                    "bindEndpointAttributes": bind_endpoints,
                     "clientIngress" : {
                         "addresses": client_host_names, 
                         "ports": valid_client_port_ranges,
