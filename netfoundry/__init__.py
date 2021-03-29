@@ -12,6 +12,7 @@ import jwt                  # decode the JWT claimset
 from pathlib import Path    #
 import os
 from re import sub
+import unicodedata          # case insensitive compare in Utility
 
 class Organization:
     """ Default is to use the Organization of the caller's user or API account identity
@@ -956,7 +957,8 @@ class Network:
         """
 
         headers = {
-            "authorization": "Bearer " + self.session.token 
+            "authorization": "Bearer " + self.session.token,
+            "content-type": "application/json;as=create"
         }
 
         try:
@@ -1843,10 +1845,13 @@ class Network:
                 'response_code': response_code
             }
 
-    def get_resource(self, type: str, id: str):
+    def get_resource(self, type: str, id: str, accept: str=None):
         """return an object describing an entity
         :param type: the type of entity e.g. network, endpoint, service, edge-router, edge-router-policy, posture-check
         :param id: the UUID of the entity if not a network
+        :param: as: optional modifier string specifying the form of the desired response. Choices ["create","update"] where
+                "create" is useful for comparing an existing entity to a set of properties that are used to create the same type of
+                entity in a POST request, and "update" may be used in the same way for a PUT update.
         """
 
         try:
@@ -1992,6 +1997,12 @@ class Utility:
 
     def snake(self, camel_str):
         return sub(r'(?<!^)(?=[A-Z])', '_', camel_str).lower()
+
+    def normalize_caseless(self, text):
+        return unicodedata.normalize("NFKD", text.casefold())
+
+    def caseless_equal(self, left, right):
+        return self.normalize_caseless(left) == self.normalize_caseless(right)
 
 STATUSES_BY_CODE = {
     100: ('new', 'created'),
