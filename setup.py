@@ -24,7 +24,8 @@ setuptools.setup(
     install_requires=[
         'requests >= 2.25.1',
         'pysocks >= 1.7.1',
-        'pyjwt >= 2.0.0'
+        'pyjwt >= 2.0.0',
+        'inflect >= 5.3'
     ]
 )
 

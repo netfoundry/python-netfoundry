@@ -13,6 +13,7 @@ from pathlib import Path    #
 import os
 from re import sub
 import unicodedata          # case insensitive compare in Utility
+import inflect              # singular and plural nouns
 
 class Organization:
     """ Default is to use the Organization of the caller's user or API account identity
@@ -861,14 +862,77 @@ class Network:
                 )
             )
             
-    def get_resources(self,type,name=None):
-        """return the resources object
-            :type [required]
+    def get_resource(self, type: str, id: str, accept: str=None):
+        """return an object describing an entity
+        :param type: required string of the singular of an entity type e.g. network, endpoint, service, edge-router, edge-router-policy, posture-check
+        :param id: the UUID of the entity if not a network
+        :param: accept: optional modifier string specifying the form of the desired response. Choices ["create","update"] where
+                "create" is useful for comparing an existing entity to a set of properties that are used to create the same type of
+                entity in a POST request, and "update" may be used in the same way for a PUT update.
         """
+
+        # to singular if plural
+        if type[-1] == "s":
+            type = singular(type)
+
         try:
-            headers = {
-                "authorization": "Bearer " + self.session.token 
-            }
+            headers = { "authorization": "Bearer " + self.session.token }
+            if accept and accept in ["create", "update"]:
+                headers['accept'] = "application/json;as="+accept
+            elif accept:
+                raise Exception("ERROR: invalid value for param \"accept\" in {}".format(accept))
+            entity_url = self.session.audience+'core/v2/'+plural(type)+'/'+id
+            params = dict()
+            if not type == "network":
+                params["networkId"] = self.id
+            # if type == "service": 
+            #     params["beta"] = ''
+
+            if not plural(type) in RESOURCES.keys():
+                raise Exception("ERROR: unknown type \"{singular}\" as plural \"{plural}\". Choices: {choices}".format(
+                    singular=type,
+                    plural=plural(type),
+                    choices=RESOURCES.keys()
+                ))
+
+            response = requests.get(
+                entity_url,
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                params=params
+            )
+            response_code = response.status_code
+        except:
+            raise
+
+        if response_code == requests.status_codes.codes.OK:
+            try:
+                entity = json.loads(response.text)
+            except:
+                raise Exception('ERROR parsing response as object, got:\n{}'.format(response.text))
+            else:
+                return(entity)
+
+    def get_resources(self, type: str,name: str=None, accept: str=None):
+        """return the resources object
+        :param: type: required string of the plural of an entity type e.g. networks, endpoints, services, posture-checks, etc...
+        :param: name: optional string of the unique name of an entity to find
+        :param: accept: optional modifier string specifying the form of the desired response. Choices ["create","update"] where
+                "create" is useful for comparing an existing entity to a set of properties that are used to create the same type of
+                entity in a POST request, and "update" may be used in the same way for a PUT update.
+        """
+
+        # pluralize if singular
+        if not type[-1] == "s":
+            type = plural(type)
+
+        try:
+            headers = { "authorization": "Bearer " + self.session.token }
+            if accept and accept in ["create", "update"]:
+                headers['accept'] = "application/json;as="+accept
+            elif accept:
+                raise Exception("ERROR: invalid value for param \"accept\" in {}".format(accept))
             params = {
                 "networkId": self.id,
                 "page": 0,
@@ -880,6 +944,9 @@ class Network:
 
             if name is not None:
                 params['name'] = name
+
+            if not type in RESOURCES.keys():
+                raise Exception("ERROR: unknown type \"{}\". Choices: {}".format(type, RESOURCES.keys()))
 
             response = requests.get(
                 self.session.audience+'core/v2/'+type,
@@ -993,6 +1060,10 @@ class Network:
         for k in patch.keys():
             if k in before_resource.keys() and not before_resource[k] == patch[k]:
                 pruned_patch[k] = patch[k]
+
+        headers = {
+            "authorization": "Bearer " + self.session.token
+        }
 
         # attempt to update if there's at least one difference between the current resource and the submitted patch
         if len(pruned_patch.keys()) > 0:
@@ -1359,7 +1430,7 @@ class Network:
 
     def create_endpoint_service(self, name: str, endpoints: list, client_host_names: list, client_port_ranges: list, client_protocols: list=["tcp"], 
         server_host_name: str=None, server_port: str=None, server_protocol: str=None, attributes: list=[], 
-        edge_router_attributes: list=["#all"], encryption_required: bool=True):
+        edge_router_attributes: list=["#all"], encryption_required: bool=True, dry_run: bool=False):
         """create an Endpoint-hosted Service compatible with Ziti config types intercept.v1, host.v1.
 
         Multiple client intercepts may be specified i.e. lists of domain names or IP addresses, ports, and protocols. If alternative 
@@ -1377,6 +1448,7 @@ class Network:
         :param: edge_router_attributes is optional list of strings of Router roles or Router names that can "see" this Service. Default is ["#all"].
         :param: endpoints is optional list of strings of hosting Endpoints.
         :param: encryption_required is optional Boolean. Default is to enable edge-to-edge encryption.
+        :param: dry_run is optional Boolean where True returns the entity model without sending a request.
         """
         try:
             # validate roles
@@ -1416,18 +1488,24 @@ class Network:
             server_egress = dict()
             if server_host_name:
                 server_egress["address"] = server_host_name
+                server_egress["dialInterceptAddress"] = None
             else:
                 server_egress["dialInterceptAddress"] = True
+                server_egress["address"] = None
 
             if server_port:
                 server_egress["port"] = server_port
+                server_egress["dialInterceptPort"] = None
             else:
                 server_egress["dialInterceptPort"] = True
+                server_egress["port"] = None
 
             if server_protocol:
                 server_egress["protocol"] = server_protocol
+                server_egress["dialInterceptProtocol"] = None
             else:
                 server_egress["dialInterceptProtocol"] = True
+                server_egress["protocol"] = None
 
             # parse out the elements in the list of endpoints as one of #attribute, UUID, or resolvable Endoint name
             bind_endpoints = list()
@@ -1484,6 +1562,9 @@ class Network:
             # params = {
             #     "beta": ''
             # }
+
+            if dry_run:
+                return(body)
 
             response = requests.post(
                 self.session.audience+'core/v2/services',
@@ -1845,43 +1926,6 @@ class Network:
                 'response_code': response_code
             }
 
-    def get_resource(self, type: str, id: str, accept: str=None):
-        """return an object describing an entity
-        :param type: the type of entity e.g. network, endpoint, service, edge-router, edge-router-policy, posture-check
-        :param id: the UUID of the entity if not a network
-        :param: as: optional modifier string specifying the form of the desired response. Choices ["create","update"] where
-                "create" is useful for comparing an existing entity to a set of properties that are used to create the same type of
-                entity in a POST request, and "update" may be used in the same way for a PUT update.
-        """
-
-        try:
-            headers = { "authorization": "Bearer " + self.session.token }
-            entity_url = self.session.audience+'core/v2/'+type+'s/'+id
-            params = dict()
-            if not type == "network":
-                params["networkId"] = self.id
-            # if type == "service": 
-            #     params["beta"] = ''
-
-            response = requests.get(
-                entity_url,
-                proxies=self.session.proxies,
-                verify=self.session.verify,
-                headers=headers,
-                params=params
-            )
-            response_code = response.status_code
-        except:
-            raise
-
-        if response_code == requests.status_codes.codes.OK:
-            try:
-                entity = json.loads(response.text)
-            except:
-                raise Exception('ERROR parsing response as object, got:\n{}'.format(response.text))
-            else:
-                return(entity)
-
     def get_edge_router_registration(self, id: str):
         """return the registration key and expiration as a dict
         :param id: the UUID of the edge router
@@ -1986,6 +2030,13 @@ class LookupDict(dict):
 
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
+
+p = inflect.engine()
+def plural(singular):
+    return(p.plural_noun(singular))
+
+def singular(plural):
+    return(p.singular_noun(plural))
 
 class Utility:
     def __init__(self):
