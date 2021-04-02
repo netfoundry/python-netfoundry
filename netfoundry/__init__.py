@@ -1020,7 +1020,7 @@ class Network:
 
     def patch_resource(self,patch):
         """returns a resource
-            :patch: required dictionary with changed properties 
+            :patch: required dictionary with changed properties and _links.self.href
         """
 
         headers = {
@@ -1028,9 +1028,10 @@ class Network:
             "content-type": "application/json;as=create"
         }
 
+        self_link = patch['_links']['self']['href']
         try:
             before_response = requests.get(
-                patch['_links']['self']['href'],
+                self_link,
                 proxies=self.session.proxies,
                 verify=self.session.verify,
                 headers=headers
@@ -1069,6 +1070,8 @@ class Network:
         if len(pruned_patch.keys()) > 0:
             if not "name" in pruned_patch.keys():
                 pruned_patch["name"] = before_resource["name"]
+            if "/services" in self_link and not "modelType" in pruned_patch.keys():
+                pruned_patch["modelType"] = before_resource["modelType"]
             try:
                 after_response = requests.patch(
                     patch['_links']['self']['href'],
