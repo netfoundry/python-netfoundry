@@ -612,6 +612,56 @@ class NetworkGroup:
 
         return(aws_data_centers)
 
+    def get_product_metadata(self):
+        """fetch all product metadata
+        """
+        try:
+            response = requests.get(
+                self.session.audience+'product-metadata/v2/download-urls.json',
+                proxies=self.session.proxies,
+                verify=self.session.verify
+            )
+            response_code = response.status_code
+        except:
+            raise
+
+        if response_code == requests.status_codes.codes.OK: # HTTP 200
+            try:
+                product_metadata = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR getting product metadata')
+                raise(e)
+        else:
+            raise Exception(
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
+                )
+            )
+
+        return (product_metadata)
+
+    def list_product_versions(self, product_metadata: dict={}):
+        """find all product version from product metadata
+        """
+        if product_metadata:
+            product_versions = product_metadata.keys()
+        else:
+            product_metadata = self.get_product_metadata()
+            product_versions = product_metadata.keys()
+
+        return (product_versions)
+
+    def find_latest_product_version(self, product_versions: list=[]):
+        """find the highest sorted product version number (may be experimental, not stable)
+        """
+        if not product_versions:
+            product_versions = self.list_product_versions()
+
+        from distutils.version import LooseVersion
+        return sorted(product_versions, key=LooseVersion)[-1]
+
     def create_network(self, name: str, network_group_id: str=None, location: str="us-east-1", version: str=None, size: str="small"):
         """
         create a network with
@@ -639,7 +689,15 @@ class NetworkGroup:
             request["networkGroupId"] = self.network_group_id
 
         if version:
-            request['productVersion'] = version
+            product_versions = self.list_product_versions()
+            if version == "latest":
+                request['productVersion'] = self.find_latest_product_version(product_versions)
+            elif version in product_versions:
+                request['productVersion'] = version
+            else:
+                raise Exception("ERROR: invalid version \"{version}\". Expected one of {product_versions}".format(
+                    version=version,
+                    product_versions=product_versions))
 
         headers = {
             'Content-Type': 'application/json',
@@ -1954,6 +2012,14 @@ class Network:
                 raise Exception('ERROR parsing response as object, got:\n{}'.format(response.text))
             else:
                 return(registration_object)
+        else:
+            raise Exception(
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
+                )
+            )
 
     def delete_resource(self, type, id=None, wait=int(0), progress=False):
         """
