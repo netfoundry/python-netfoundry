@@ -1,4 +1,8 @@
 
+## User Guide
+
+[Python module guide](https://developer.netfoundry.io/guides/python/)
+
 ## Play the demo
 
 This creates a demo network named "BibbidiBobbidiBoo" with your API account stored in ~/.netfoundry/credentials.json
