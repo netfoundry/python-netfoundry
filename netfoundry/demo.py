@@ -134,7 +134,7 @@ def main():
 
     for location in fabric_placements:
         er = network.create_edge_router(
-            name=location['locationName'],
+            name=location['locationName']+" ["+location['geoRegion']+"]",
             attributes=[
                 "#defaultRouters",
                 "#"+location['locationCode'],
