@@ -17,6 +17,13 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "command",
+        nargs='?',
+        default="create",
+        help="the command to run",
+        choices=["create","delete"]
+    )
+    parser.add_argument(
         "-n", "--network",
         help="The name of your demo network"
     )
@@ -30,18 +37,31 @@ def main():
         help="The shortname of a Network Group (default is the first, typically singular, Group known to this Org)"
     )
     parser.add_argument(
+        "-s", "--network-size",
+        dest="size",
+        default="small",
+        help="Billable Network size to create",
+        choices=["small","medium","large"]
+    )
+    parser.add_argument(
+        "-v", "--network-version",
+        dest="version",
+        default="default",
+        help="Network product version from https://gateway.production.netfoundry.io/product-metadata/v2/download-urls.json"
+    )
+    parser.add_argument(
         "-p", "--create-private",
         dest="private",
         default=False,
         action="store_true",
-        help="Also create private Services for the Docker Compose Demo"
+        help="Also create private Endpoint-hosted Services for the optional Docker Compose portion of the quickstart"
     )
     parser.add_argument(
-        "-d", "--create-dialer",
-        dest="dialer",
+        "-c", "--create-client",
+        dest="client",
         default=False,
         action="store_true",
-        help="Also create a Linux dialer for the Docker Compose Demo"
+        help="Also create a client Endpoint for the optional Linux portion of the quickstart"
     )
     parser.add_argument("--credentials",
         default=None,
@@ -80,9 +100,16 @@ def main():
     if network_name in network_group.networks_by_name.keys():
         # use the Network
         network = netfoundry.Network(network_group, network_name=network_name)
-        network.wait_for_status("PROVISIONED",wait=999,progress=True)
-    else:
-        network_id = network_group.create_network(name=network_name,size="small")['id'] # use "medium" unless demo
+        if args.command == "create":
+            network.wait_for_status("PROVISIONED",wait=999,progress=True)
+        elif args.command == "delete":
+            if query_yes_no("Permanently destroy Network \"{network_name}\" now?".format(network_name=network_name)):
+                network.delete_network(progress=True)
+            else:
+                print("Not deleting Network \"{network_name}\".".format(network_name=network_name))
+            sys.exit()
+    elif args.command == "create":
+        network_id = network_group.create_network(name=network_name,size=args.size,version=args.version)['id']
         network = netfoundry.Network(network_group, network_id=network_id)
         network.wait_for_status("PROVISIONED",wait=999,progress=True)
 
@@ -107,7 +134,7 @@ def main():
 
     for location in fabric_placements:
         er = network.create_edge_router(
-            name=location['locationName'],
+            name=location['locationName']+" ["+location['geoRegion']+"]",
             attributes=[
                 "#defaultRouters",
                 "#"+location['locationCode'],
@@ -156,7 +183,7 @@ def main():
         print("INFO: found Endpoint \"{:s}\"".format(client2['name']))
     clients += [client2]
 
-    if args.dialer:
+    if args.client:
         client3_name = "Linux1"
         if not client3_name in [end['name'] for end in endpoints]:
             # create an Endpoint for the dialing device that will access Services
@@ -308,9 +335,9 @@ def main():
     # wait for customer router to be PROVISIONED so that registration will be available 
     try:
         network.wait_for_status("PROVISIONED",id=customer_router['id'],type="edge-router",wait=999,progress=True)
+        customer_router_registration = network.get_edge_router_registration(id=customer_router['id'])
     except:
         raise
-    customer_router_registration = network.get_edge_router_registration(id=customer_router['id'])
     print("INFO: Ready to register branch exit Edge Router {name} with key {key} (expires {expiry})".format(
         name=customer_router_name,
         key=customer_router_registration['registrationKey'],
@@ -329,10 +356,42 @@ def main():
         app_wan1 = [aw for aw in app_wans if aw['name'] == app_wan1_name][0]
         print("INFO: found AppWAN \"{:s}\"".format(app_wan1['name']))
 
-    print("SUCCESS! The next step is to enroll one or more of your dialer Endpoints on some device(s) and visit one of the demo Service URLs described in the demo document ({doc})."
+    print("SUCCESS! The next step is to enroll one or more of your client Endpoints on some device(s) and visit one of the demo Service URLs described in the demo document ({doc})."
             "You may also log in to the web console ({nfconsole}) to play with your Network".format(doc="https://developer.netfoundry.io/v2/tools/#demos",nfconsole=network_group.nfconsole))
     for svc in network.services():
         print("* {name}:\thttp://{url}/".format(name=svc['name'],url=svc['model']['clientIngress']['host']))
+
+def query_yes_no(question: str, default: str="no"):
+    """Ask a yes/no question via input() and return their answer.
+
+    "question" is a string that is presented to the user.
+    "default" is the presumed answer if the user just hits <Enter>.
+        It must be "yes" (the default), "no" or None (meaning
+        an answer is required of the user).
+
+    The "answer" return value is True for "yes" or False for "no".
+    """
+    valid = {"yes": True, "y": True, "ye": True,
+            "no": False, "n": False}
+    if default is None:
+        prompt = " [y/n] "
+    elif default == "yes":
+        prompt = " [Y/n] "
+    elif default == "no":
+        prompt = " [y/N] "
+    else:
+        raise ValueError("invalid default answer: '%s'" % default)
+
+    while True:
+        sys.stdout.write(question + prompt)
+        choice = input().lower()
+        if default is not None and choice == '':
+            return valid[default]
+        elif choice in valid:
+            return valid[choice]
+        else:
+            sys.stdout.write("Please respond with 'yes' or 'no' "
+                            "(or 'y' or 'n').\n")
 
 if __name__ == '__main__':
     main()
