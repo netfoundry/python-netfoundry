@@ -47,7 +47,7 @@ def main():
         "-v", "--network-version",
         dest="version",
         default="default",
-        help="Network product version from https://gateway.production.netfoundry.io/product-metadata/v2/download-urls.json"
+        help="Network product version: \"default\", \"latest\", or semver"
     )
     parser.add_argument(
         "-p", "--create-private",
@@ -67,12 +67,23 @@ def main():
         default=None,
         help="path to API account credentials JSON file overrides NETFOUNDRY_API_ACCOUNT"
     )
-    parser.add_argument("--regions",
+    parser.add_argument("--provider",
+        default="AWS",
+        required=False,
+        help="cloud provider to host Edge Routers",
+        choices=["AWS", "AZURE", "GCP", "ALICLOUD", "NETFOUNDRY", "OCP"]
+    )
+    regions_group = parser.add_mutually_exclusive_group(required=True)
+    regions_group.add_argument("--regions",
         default=["Americas"],
         nargs="+",
-        required=False,
-        help="space-separated one or more major geographic regions in which to place Edge Routers for overlay fabric: "
-                +' '.join(["Americas", "EuropeMiddleEastAfrica", "AsiaPacific"])
+        help="space-separated one or more major geographic regions in which to place Edge Routers for overlay fabric",
+        choices=["Americas", "EuropeMiddleEastAfrica", "AsiaPacific"]
+    )
+    regions_group.add_argument("--location-codes",
+        dest="location_codes",
+        nargs="+",
+        help="cloud location codes in which to host Edge Routers"
     )
     parser.add_argument("--proxy",
         default=None,
@@ -116,37 +127,63 @@ def main():
     # existing hosted ERs
     hosted_edge_routers = network.edge_routers(only_hosted=True)
     # a list of places where Endpoints are dialing from
-    geo_regions = args.regions
+
     # a list of locations to place one hosted ER
     fabric_placements = list()
-    fabric_placement_count = 1
-    for region in geo_regions:
-        data_center_ids = [dc['id'] for dc in network.aws_geo_regions[region]]
-        existing_count = len([er for er in hosted_edge_routers if er['dataCenterId'] in data_center_ids])
-        if existing_count < fabric_placement_count:
-            choice = random.choice(network.aws_geo_regions[region])
-            # append the current major region to the randomly-chosen data center object
-            #   so we can use it as a role attribute when we create the hosted Edge Router
-            choice['geoRegion'] = region
-            fabric_placements += [choice]
-        else:
-            print("INFO: found at least {count} hosted Edge Router(s) in {major}".format(count=fabric_placement_count, major=region))
+    if args.location_codes:
+        for location in args.location_codes:
+            data_centers = [dc for dc in network.get_edge_router_data_centers(provider=args.provider,location_code=location)]
+            data_center = data_centers[0]
+            existing_count = len([er for er in hosted_edge_routers if er['dataCenterId'] == data_center['id']])
+            if existing_count < 1:
+                fabric_placements += [data_center]
+            else:
+                print("INFO: found a hosted Edge Router(s) in {location}".format(location=location))
 
-    for location in fabric_placements:
-        er = network.create_edge_router(
-            name=location['locationName']+" ["+location['geoRegion']+"]",
-            attributes=[
-                "#defaultRouters",
-                "#"+location['locationCode'],
-                "#"+location['geoRegion']
-            ],
-            data_center_id=location['id']
-        )
-        hosted_edge_routers += [er]
-        print("INFO: Placed Edge Router in {major} ({location_name})".format(
-            major=location['geoRegion'],
-            location_name=location['locationName']
-        ))
+        for location in fabric_placements:
+            er = network.create_edge_router(
+                name=location['locationName']+" ["+location['provider']+"]",
+                attributes=[
+                    "#defaultRouters",
+                    "#"+location['locationCode'],
+                    "#"+location['provider']
+                ],
+                data_center_id=location['id']
+            )
+            hosted_edge_routers += [er]
+            print("INFO: Placed Edge Router in {provider} ({location_name})".format(
+                provider=location['provider'],
+                location_name=location['locationName']
+            ))
+    elif args.regions:
+        geo_regions = args.regions
+        for region in geo_regions:
+            data_center_ids = [dc['id'] for dc in network.aws_geo_regions[region]]
+            existing_count = len([er for er in hosted_edge_routers if er['dataCenterId'] in data_center_ids])
+            if existing_count < 1:
+                choice = random.choice(network.aws_geo_regions[region])
+                # append the current major region to the randomly-chosen data center object
+                #   so we can use it as a role attribute when we create the hosted Edge Router
+                choice['geoRegion'] = region
+                fabric_placements += [choice]
+            else:
+                print("INFO: found a hosted Edge Router(s) in {major}".format(major=region))
+
+        for location in fabric_placements:
+            er = network.create_edge_router(
+                name=location['locationName']+" ["+location['geoRegion']+"]",
+                attributes=[
+                    "#defaultRouters",
+                    "#"+location['locationCode'],
+                    "#"+location['geoRegion']
+                ],
+                data_center_id=location['id']
+            )
+            hosted_edge_routers += [er]
+            print("INFO: Placed Edge Router in {major} ({location_name})".format(
+                major=location['geoRegion'],
+                location_name=location['locationName']
+            ))
 
     for router_id in [r['id'] for r in hosted_edge_routers]:
         try:
