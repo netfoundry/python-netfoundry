@@ -73,7 +73,7 @@ def main():
         help="cloud provider to host Edge Routers",
         choices=["AWS", "AZURE", "GCP", "ALICLOUD", "NETFOUNDRY", "OCP"]
     )
-    regions_group = parser.add_mutually_exclusive_group(required=True)
+    regions_group = parser.add_mutually_exclusive_group(required=False)
     regions_group.add_argument("--regions",
         default=["Americas"],
         nargs="+",
