@@ -213,13 +213,14 @@ class Network:
             else:
                 return(entity)
 
-    def get_resources(self, type: str,name: str=None, accept: str=None):
+    def get_resources(self, type: str,name: str=None, accept: str=None, deleted: bool=False):
         """return the resources object
         :param: type: required string of the plural of an entity type e.g. networks, endpoints, services, posture-checks, etc...
         :param: name: optional string of the unique name of an entity to find
         :param: accept: optional modifier string specifying the form of the desired response. Choices ["create","update"] where
                 "create" is useful for comparing an existing entity to a set of properties that are used to create the same type of
                 entity in a POST request, and "update" may be used in the same way for a PUT update.
+        :param: deleted: optional bool to include resource entities that have a non-null property deletedAt
         """
 
         # pluralize if singular
@@ -280,7 +281,7 @@ class Network:
             return([])
         # if there is one page of resources
         elif total_pages == 1:
-            return(resources['_embedded'][RESOURCES[type]['embedded']])
+            all_pages = resources['_embedded'][RESOURCES[type]['embedded']]
         # if there are multiple pages of resources
         else:
             # initialize the list with the first page of resources
@@ -315,6 +316,11 @@ class Network:
                             response.text
                         )
                     )
+
+        # omit deleted entities by default
+        if not deleted:
+            return([entity for entity in all_pages if not entity['deletedAt']])
+        else:
             return(all_pages)
 
     def patch_resource(self,patch):
@@ -369,7 +375,8 @@ class Network:
         if len(pruned_patch.keys()) > 0:
             if not "name" in pruned_patch.keys():
                 pruned_patch["name"] = before_resource["name"]
-            if "/services" in self_link and not "modelType" in pruned_patch.keys():
+            # if entity is a Service and "model" is patched then always include "modelType"
+            if "/services" in self_link and not "modelType" in pruned_patch.keys() and "model" in pruned_patch.keys():
                 pruned_patch["modelType"] = before_resource["modelType"]
             try:
                 after_response = requests.patch(
