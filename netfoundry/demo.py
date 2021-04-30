@@ -161,7 +161,7 @@ def main():
             data_center_ids = [dc['id'] for dc in network.aws_geo_regions[region]]
             existing_count = len([er for er in hosted_edge_routers if er['dataCenterId'] in data_center_ids])
             if existing_count < 1:
-                choice = random.choice(network.aws_geo_regions[region])
+                choice = random.choice(network.aws_geo_regions[region]) # nosec
                 # append the current major region to the randomly-chosen data center object
                 #   so we can use it as a role attribute when we create the hosted Edge Router
                 choice['geoRegion'] = region
@@ -245,7 +245,7 @@ def main():
 
     # the demo containers have the demo working dir mounted on /netfoundry
     if os.access('/netfoundry', os.W_OK):
-        token_path = '/netfoundry'
+        token_path = '/netfoundry' # nosec
     else:
         token_path = str(Path.cwd())
     for end in clients+exits:
@@ -300,7 +300,7 @@ def main():
             print("INFO: found Service \"{:s}\"".format(service2['name']))
 
     # Create router-hosted Services unless exists
-    hosting_router = random.choice(hosted_edge_routers)
+    hosting_router = random.choice(hosted_edge_routers) # nosec
 
     service3_name = "Fireworks Service"
     if not service3_name in [svc['name'] for svc in services]:
