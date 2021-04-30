@@ -137,7 +137,7 @@ class NetworkGroup:
 
         return(aws_data_centers)
 
-    def get_product_metadata(self):
+    def get_product_metadata(self, is_active: bool=True):
         """fetch all product metadata
         """
         try:
@@ -165,7 +165,14 @@ class NetworkGroup:
                 )
             )
 
-        return (product_metadata)
+        if is_active:
+            active_product_metadata = dict()
+            for product in product_metadata.keys():
+                if product_metadata[product]['active']:
+                    active_product_metadata[product] = product_metadata[product]
+            return (active_product_metadata)
+        else:
+            return (product_metadata)
 
     def list_product_versions(self, product_metadata: dict={}):
         """find all product version from product metadata

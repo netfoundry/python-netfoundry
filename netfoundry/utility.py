@@ -71,7 +71,7 @@ RESOURCES = {
     },
     'endpoints': {
         'embedded': "endpointList",
-        'expect': "OK"
+        'expect': "ACCEPTED"
     },
     'edge-routers': {
         'embedded': "edgeRouterList",
