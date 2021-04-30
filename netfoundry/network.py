@@ -480,7 +480,7 @@ class Network:
             response_code = response.status_code
         except:
             raise
-        if response_code == requests.status_codes.codes.OK: # HTTP 200 (synchronous fulfillment)
+        if response_code == requests.status_codes.codes[RESOURCES['endpoints']['expect']]:
             try:
                 endpoint = json.loads(response.text)
             except ValueError as e:
