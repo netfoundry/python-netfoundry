@@ -737,27 +737,28 @@ class Network:
 
         return(service)
 
-    def create_endpoint_service(self, name: str, endpoints: list, client_host_names: list, client_port_ranges: list, client_protocols: list=["tcp"], 
-        server_host_name: str=None, server_port: str=None, server_protocol: str=None, attributes: list=[], 
+    def create_endpoint_service(self, name: str, endpoints: list, client_hosts: list, client_ports: list, client_protocols: list=["tcp"], 
+        server_hosts: list=[], server_ports: list=[], server_protocols: list=[], attributes: list=[], 
         edge_router_attributes: list=["#all"], encryption_required: bool=True, dry_run: bool=False):
         """create an Endpoint-hosted Service compatible with Ziti config types intercept.v1, host.v1.
 
         Multiple client intercepts may be specified i.e. lists of domain names or IP addresses, ports, and protocols. If alternative 
         server details are not given they are assumed to be the same as the intercept. If server details are provided then all intercepts 
-        flow to that server.
+        flow to that server. You may constrain the list of allowed server hosts, ports, and protocols
+        that may be forwarded.
 
         :param: name is required string
-        :param: client_host_names is required list of strings that are intercept hostnames (DNS) or IPv4
-        :param: client_port_ranges is required list of strings of the port ranges to intercept as ["80","5900:5999"]
-        :param: client_protocols is required list of strings of the transports. Choices: ["tcp","udp", "sctp"]
-        :param: server_hostname is optional string that is a hostname (DNS) or IPv4. If omitted the client hostname is used.
-        :param: server_port is optional string of the server port. If omitted the same client port is used. 
-        :param: server_protocol is optional string of the server protocol. If omitted the same client protocol is used.
-        :param: attributes is optional list of strings of Service roles to assign. Default is [].
+        :param: client_hosts is required list of strings that are intercept domain name or IPv4.
+        :param: client_ports is required list of strings of the port ranges to intercept as ["80","5900:5999"].
+        :param: client_protocols is optional list of strings of the transports to intercept. Choices: ["tcp","udp"]. Default is ["tcp"].
+        :param: server_hosts is optional list of strings that are a domain name, IPv4, or IPv6. If omitted the client host is used.
+        :param: server_ports is optional list of strings of the port ranges to forward as ["80","5900:5999"]. If omitted same client port is used.
+        :param: server_protocols is optional list of strings of the server protocols to forward. Choices: ["tcp","udp"]. If omitted the client protocol is used.
+        :param: attributes is optional list of strings of Service roles to assign, associating the Service with a matching AppWAN. Default is [].
         :param: edge_router_attributes is optional list of strings of Router roles or Router names that can "see" this Service. Default is ["#all"].
-        :param: endpoints is optional list of strings of hosting Endpoints.
+        :param: endpoints is optional list of strings of Endpoints' #hashtag or @name that will host this Service.
         :param: encryption_required is optional Boolean. Default is to enable edge-to-edge encryption.
-        :param: dry_run is optional Boolean where True returns the entity model without sending a request.
+        :param: dry_run is optional Boolean where True returns only the entity model without sending a request.
         """
         try:
             # validate roles
@@ -768,12 +769,11 @@ class Network:
             # these elements could be a single port as integer or a string with one or two ports separated by a : or -
             separators = re.compile('[:-]')
             valid_range = re.compile('^\d+[:-]\d+$')
-            valid_client_port_ranges = list()
-            for range in client_port_ranges:
-                # if an integer or single port then use same number for low:high
-                if isinstance(range, int):
+            valid_client_ports = list()
+            for range in client_ports:
+                if isinstance(range, int): # if an integer or single port then use same number for low:high
                     range = str(range)+':'+str(range)
-                elif not re.search(separators,range):
+                elif not re.search(separators,range): # if a string of a single port (no : or - separator) then cat with separator :
                     range = range+':'+range
                 
                 if not re.fullmatch(valid_range, range):
@@ -783,38 +783,68 @@ class Network:
                 if not len(bounds) == 2 or int(bounds[0]) > int(bounds[1]):
                     raise Exception("ERROR: failed to find one lower, one higher port for range: {}".format(range))
                 else:
-                    valid_client_port_ranges.append({"low": bounds[0], "high": bounds[1]})
+                    valid_client_ports.append({"low": bounds[0], "high": bounds[1]})
+            valid_server_ports = list()
+            for range in server_ports:
+                if isinstance(range, int): # if an integer or single port then use same number for low:high
+                    range = str(range)+':'+str(range)
+                elif not re.search(separators,range): # if a string of a single port (no : or - separator) then cat with separator :
+                    range = range+':'+range
+                
+                if not re.fullmatch(valid_range, range):
+                    raise Exception("ERROR: failed to parse server port range: {}".format(range))
+
+                bounds = re.split(separators, range)
+                if not len(bounds) == 2 or int(bounds[0]) > int(bounds[1]):
+                    raise Exception("ERROR: expecting a port or port range, got: {range}".format(range=range))
+                else:
+                    valid_server_ports.append({"low": bounds[0], "high": bounds[1]})
 
             # validate client protocols
             valid_client_protocols = list()
             for proto in client_protocols:
-                if not proto in ["tcp", "udp", "sctp", "TCP", "UDP", "SCTP"]:
-                    raise Exception("ERROR: client intercept protocol \"{}\" is not valid.".format(proto))
+                if not proto.lower() in ["tcp", "udp"]:
+                    raise Exception("ERROR: client intercept protocol \"{}\" is not valid.".format(proto.lower()))
                 else:
                     valid_client_protocols.append(proto.lower())
 
+            # validate server protocols
+            valid_server_protocols = list()
+            for proto in server_protocols:
+                if not proto.lower() in ["tcp", "udp"]:
+                    raise Exception("ERROR: server protocol \"{}\" is not valid.".format(proto.lower()))
+                else:
+                    valid_server_protocols.append(proto.lower())
+
             # resolve exit hosting params
             server_egress = dict()
-            if server_host_name:
-                server_egress["address"] = server_host_name
-                server_egress["dialInterceptAddress"] = None
+            if server_hosts and len(server_hosts) == 1:
+                server_egress["host"] = server_hosts[0]
+            elif server_hosts and len(server_hosts) > 1:
+                server_egress["forwardHost"] = True
+                server_egress["allowedHosts"] = server_hosts
             else:
-                server_egress["dialInterceptAddress"] = True
-                server_egress["address"] = None
+                server_egress["forwardHost"] = True
+                server_egress["allowedHosts"] = client_hosts
 
-            if server_port:
-                server_egress["port"] = server_port
-                server_egress["dialInterceptPort"] = None
+            if valid_server_ports and len(valid_server_ports) == 1 and valid_server_ports[0]['low'] == valid_server_ports[0]['high']:
+                server_egress["port"] = valid_server_ports[0]['low']
+            elif valid_server_ports:
+                server_egress["forwardPort"] = True
+                server_egress["allowedPortRanges"] = valid_server_ports
             else:
-                server_egress["dialInterceptPort"] = True
-                server_egress["port"] = None
+                server_egress["forwardPort"] = True
+                server_egress["allowedPortRanges"] = valid_client_ports
 
-            if server_protocol:
-                server_egress["protocol"] = server_protocol
-                server_egress["dialInterceptProtocol"] = None
+            if server_protocols and len(server_protocols) == 1:
+                server_egress["protocol"] = server_protocols[0]
+            elif server_protocols and len(server_protocols) > 1:
+                server_egress["forwardProtocol"] = True
+                server_egress["allowedProtocols"] = server_protocols
             else:
-                server_egress["dialInterceptProtocol"] = True
-                server_egress["protocol"] = None
+                server_egress["forwardProtocol"] = True
+                server_egress["allowedProtocols"] = client_protocols
+
 
             # parse out the elements in the list of endpoints as one of #attribute, UUID, or resolvable Endoint name
             bind_endpoints = list()
@@ -857,8 +887,8 @@ class Network:
                 "model": {
                     "bindEndpointAttributes": bind_endpoints,
                     "clientIngress" : {
-                        "addresses": client_host_names, 
-                        "ports": valid_client_port_ranges,
+                        "addresses": client_hosts, 
+                        "ports": valid_client_ports,
                         "protocols": valid_client_protocols
                     },
                     "serverEgress": server_egress,
