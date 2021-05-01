@@ -480,7 +480,7 @@ class Network:
             response_code = response.status_code
         except:
             raise
-        if response_code == requests.status_codes.codes[RESOURCES['endpoints']['expect']]:
+        if response_code in requests.status_codes.codes[RESOURCES['endpoints']['create_responses']]:
             try:
                 endpoint = json.loads(response.text)
             except ValueError as e:
@@ -526,7 +526,7 @@ class Network:
             response_code = response.status_code
         except:
             raise
-        if response_code == requests.status_codes.codes[RESOURCES['edge-routers']['expect']]:
+        if response_code in requests.status_codes.codes[RESOURCES['edge-routers']['create_responses']]:
             try:
                 router = json.loads(response.text)
             except ValueError as e:
@@ -572,7 +572,7 @@ class Network:
             response_code = response.status_code
         except:
             raise
-        if response_code == requests.status_codes.codes[RESOURCES['edge-router-policies']['expect']]:
+        if response_code in requests.status_codes.codes[RESOURCES['edge-router-policies']['create_responses']]:
             try:
                 policy = json.loads(response.text)
             except ValueError as e:
@@ -720,7 +720,7 @@ class Network:
             response_code = response.status_code
         except:
             raise
-        if response_code == requests.status_codes.codes[RESOURCES['services']['expect']]:
+        if response_code in requests.status_codes.codes[RESOURCES['services']['create_responses']]:
             try:
                 service = json.loads(response.text)
             except ValueError as e:
@@ -917,7 +917,7 @@ class Network:
         except:
             raise
 
-        if response_code == requests.status_codes.codes[RESOURCES['services']['expect']]:
+        if response_code == requests.status_codes.codes[RESOURCES['services']['create_responses']]:
             try:
                 service = json.loads(response.text)
             except ValueError as e:
@@ -962,7 +962,7 @@ class Network:
             response_code = response.status_code
         except:
             raise
-        if response_code == requests.status_codes.codes[RESOURCES['app-wans']['expect']]:
+        if response_code == requests.status_codes.codes[RESOURCES['app-wans']['create_responses']]:
             try:
                 app_wan = json.loads(response.text)
             except ValueError as e:

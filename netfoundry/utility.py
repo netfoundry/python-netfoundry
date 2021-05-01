@@ -67,31 +67,31 @@ for code, titles in STATUSES_BY_CODE.items():
 RESOURCES = {
     'networks': {
         'embedded': "networkList",
-        'expect': "ACCEPTED"
+        'create_responses': ["ACCEPTED"]
     },
     'endpoints': {
         'embedded': "endpointList",
-        'expect': "ACCEPTED"
+        'create_responses': ["OK", "ACCEPTED"]
     },
     'edge-routers': {
         'embedded': "edgeRouterList",
-        'expect': "ACCEPTED"
+        'create_responses': ["ACCEPTED"]
     },
     'edge-router-policies': {
         'embedded': "edgeRouterPolicyList",
-        'expect': "ACCEPTED"
+        'create_responses': ["ACCEPTED"]
     },
     'app-wans': {
         'embedded': "appWanList",
-        'expect': "OK"
+        'create_responses': ["OK"]
     },
     'services': {
         'embedded': "serviceList",
-        'expect': "ACCEPTED"
+        'create_responses': ["ACCEPTED"]
     },
     'posture-checks': {
         'embedded': "postureCheckList",
-        'expect': "ACCEPTED"
+        'create_responses': ["ACCEPTED"]
     }
 }
 
