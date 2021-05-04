@@ -446,7 +446,7 @@ class Network:
             )
         return(resource)
 
-    def create_endpoint(self, name: str, attributes: list=[], session_identity: str=None, wait: int=10, progress: bool=False):
+    def create_endpoint(self, name: str, attributes: list=[], session_identity: str=None, wait: int=10, sleep: int=1, progress: bool=False):
         """create an Endpoint
         :param: name is required string on which to key future operations for this Endpoint
         :param: attributes is an optional list of Endpoint roles of which this Endpoint is a member
@@ -502,8 +502,7 @@ class Network:
             )
 
         if wait:
-            self.wait_for_property_defined(property_name="jwt", property_type=str, entity_type="endpoint", id=endpoint['id'], wait=wait, sleep=1, progress=progress)
-
+            endpoint = self.wait_for_property_defined(property_name="jwt", property_type=str, entity_type="endpoint", id=endpoint['id'], wait=wait, sleep=sleep, progress=progress)
         return(endpoint)
 
     def create_edge_router(self, name, attributes=[], link_listener=False, data_center_id=None):
@@ -1126,7 +1125,7 @@ class Network:
                 raise
 
             # if expected property value is not null then evaluate type, else sleep
-            if entity[property_name]:
+            if property_name in entity.keys() and entity[property_name]:
                 property_value = entity[property_name]
                 # if expected type then return, else sleep
                 if isinstance(property_value, property_type):
@@ -1147,14 +1146,12 @@ class Network:
             print() # newline terminates progress meter
 
         if not property_value:
-            raise Exception('ERROR: failed to find property "{:s}"; got HTTP response {} ({:d})'.format(
-                    property_name,
-                    entity['http_status'],
-                    entity['response_code']
+            raise Exception('ERROR: failed to find any value for property "{:s}"'.format(
+                    property_name
                 )
             )
         else:
-            raise Exception('ERROR: timed out waiting for property {:s} ({:s})'.format(
+            raise Exception('ERROR: timed out waiting for property {:s} to have expected type: {:s}'.format(
                     property_name,
                     str(property_type),
                 )

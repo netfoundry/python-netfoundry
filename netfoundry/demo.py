@@ -123,6 +123,8 @@ def main():
         network_id = network_group.create_network(name=network_name,size=args.size,version=args.version)['id']
         network = netfoundry.Network(network_group, network_id=network_id)
         network.wait_for_status("PROVISIONED",wait=999,progress=True)
+    else:
+        raise Exception("ERROR: failed to find a network named \"{:s}\"".format(network_name))
 
     # existing hosted ERs
     hosted_edge_routers = network.edge_routers(only_hosted=True)
