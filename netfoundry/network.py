@@ -1,4 +1,4 @@
-import json                 # 
+import json
 import requests             # HTTP user agent will not emit server cert warnings if verify=False
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
@@ -446,7 +446,7 @@ class Network:
             )
         return(resource)
 
-    def create_endpoint(self, name: str, attributes: list=[], session_identity: str=None):
+    def create_endpoint(self, name: str, attributes: list=[], session_identity: str=None, wait: int=10, sleep: int=1, progress: bool=False):
         """create an Endpoint
         :param: name is required string on which to key future operations for this Endpoint
         :param: attributes is an optional list of Endpoint roles of which this Endpoint is a member
@@ -480,21 +480,29 @@ class Network:
             response_code = response.status_code
         except:
             raise
-        if response_code in requests.status_codes.codes[RESOURCES['endpoints']['create_responses']]:
+
+        endpoint = None
+        any_in = lambda a, b: any(i in b for i in a)
+        response_code_symbols = [s.upper() for s in requests.status_codes._codes[response_code]]
+        if any_in(response_code_symbols, RESOURCES['endpoints']['create_responses']):
             try:
                 endpoint = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR: failed to load {:s} object from POST response'.format("Endpoint"))
-                raise(e)
-        else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                raise e('ERROR: failed to load endpoint JSON, got HTTP code {:s} ({:d}) with body {:s}'.format(
                     requests.status_codes._codes[response_code][0].upper(),
                     response_code,
-                    response.text
+                    response.text)
                 )
+                    
+        else:
+            raise Exception('ERROR: got unexpected HTTP code {:s} ({:d}) with body {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text)
             )
 
+        if wait:
+            endpoint = self.wait_for_property_defined(property_name="jwt", property_type=str, entity_type="endpoint", id=endpoint['id'], wait=wait, sleep=sleep, progress=progress)
         return(endpoint)
 
     def create_edge_router(self, name, attributes=[], link_listener=False, data_center_id=None):
@@ -526,7 +534,9 @@ class Network:
             response_code = response.status_code
         except:
             raise
-        if response_code in requests.status_codes.codes[RESOURCES['edge-routers']['create_responses']]:
+        any_in = lambda a, b: any(i in b for i in a)
+        response_code_symbols = [s.upper() for s in requests.status_codes._codes[response_code]]
+        if any_in(response_code_symbols, RESOURCES['edge-routers']['create_responses']):
             try:
                 router = json.loads(response.text)
             except ValueError as e:
@@ -572,7 +582,9 @@ class Network:
             response_code = response.status_code
         except:
             raise
-        if response_code in requests.status_codes.codes[RESOURCES['edge-router-policies']['create_responses']]:
+        any_in = lambda a, b: any(i in b for i in a)
+        response_code_symbols = [s.upper() for s in requests.status_codes._codes[response_code]]
+        if any_in(response_code_symbols, RESOURCES['edge-router-policies']['create_responses']):
             try:
                 policy = json.loads(response.text)
             except ValueError as e:
@@ -720,7 +732,9 @@ class Network:
             response_code = response.status_code
         except:
             raise
-        if response_code in requests.status_codes.codes[RESOURCES['services']['create_responses']]:
+        any_in = lambda a, b: any(i in b for i in a)
+        response_code_symbols = [s.upper() for s in requests.status_codes._codes[response_code]]
+        if any_in(response_code_symbols, RESOURCES['services']['create_responses']):
             try:
                 service = json.loads(response.text)
             except ValueError as e:
@@ -917,7 +931,9 @@ class Network:
         except:
             raise
 
-        if response_code == requests.status_codes.codes[RESOURCES['services']['create_responses']]:
+        any_in = lambda a, b: any(i in b for i in a)
+        response_code_symbols = [s.upper() for s in requests.status_codes._codes[response_code]]
+        if any_in(response_code_symbols, RESOURCES['services']['create_responses']):
             try:
                 service = json.loads(response.text)
             except ValueError as e:
@@ -962,7 +978,9 @@ class Network:
             response_code = response.status_code
         except:
             raise
-        if response_code == requests.status_codes.codes[RESOURCES['app-wans']['create_responses']]:
+        any_in = lambda a, b: any(i in b for i in a)
+        response_code_symbols = [s.upper() for s in requests.status_codes._codes[response_code]]
+        if any_in(response_code_symbols, RESOURCES['app-wans']['create_responses']):
             try:
                 app_wan = json.loads(response.text)
             except ValueError as e:
@@ -1060,6 +1078,84 @@ class Network:
             )
 
         return(network)
+
+    def wait_for_property_defined(self, property_name: str, property_type: object=str, entity_type: str="network", wait: int=300, sleep: int=20, id: str=None, progress: bool=False):
+        """continuously poll until expiry for the expected property to become defined with the any value of the expected type
+        :param property_name: a top-level property to wait for e.g. `zitiId`
+        :param property_type: optional Python instance type to expect for the value of property_name
+        :param id: the UUID of the entity having a status if entity is not a network
+        :param entity_type: optional type of entity e.g. network (default), endpoint, service, edge-router
+        :param wait: optional SECONDS after which to raise an exception defaults to five minutes (300)
+        :param sleep: SECONDS polling interval
+        """
+
+        # use the id of this instance's Network unless another one is specified
+        if entity_type == "network" and not id:
+            id = self.id
+
+        now = time.time()
+
+        if not wait >= sleep:
+            raise Exception(
+                "ERROR: wait duration ({:d}) must be greater than or equal to polling interval ({:d})".format(
+                    wait, sleep
+                )
+            )
+
+        # poll for status until expiry
+        if progress:
+            sys.stdout.write(
+                '\twaiting for property {:s} ({:s}) or until {:s}.'.format(
+                    property_name,
+                    str(property_type),
+                    time.ctime(now+wait)
+                )
+            )
+
+#        response_code = int()
+        property_value = None
+        while time.time() < now+wait:
+            if progress:
+                sys.stdout.write('.') # print a stop each iteration to imply progress
+                sys.stdout.flush()
+
+            try:
+                entity = self.get_resource(type=entity_type, id=id)
+            except:
+                raise
+
+            # if expected property value is not null then evaluate type, else sleep
+            if property_name in entity.keys() and entity[property_name]:
+                property_value = entity[property_name]
+                # if expected type then return, else sleep
+                if isinstance(property_value, property_type):
+                    if progress:
+                        print() # newline terminates progress meter
+                    return(entity)
+                else:
+                    if progress:
+                        sys.stdout.write('\n{:^19s}:{:^19s} ({:s}):'.format(entity['name'],property_name, str(property_type)))
+                    time.sleep(sleep)
+            else:
+                if progress:
+                    sys.stdout.write('\n{:^19s}:{:^19s} ({:s}):'.format("fetching",property_name, str(property_type)))
+                time.sleep(sleep)
+
+        # 
+        if progress:
+            print() # newline terminates progress meter
+
+        if not property_value:
+            raise Exception('ERROR: failed to find any value for property "{:s}"'.format(
+                    property_name
+                )
+            )
+        else:
+            raise Exception('ERROR: timed out waiting for property {:s} to have expected type: {:s}'.format(
+                    property_name,
+                    str(property_type),
+                )
+            )
 
     def wait_for_status(self, expect: str="PROVISIONED", type: str="network", wait: int=300, sleep: int=20, id: str=None, progress: bool=False):
         """continuously poll for the expected status until expiry
