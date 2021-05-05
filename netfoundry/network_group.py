@@ -250,7 +250,20 @@ class NetworkGroup:
         except:
             raise
 
-        if not response_code == requests.status_codes.codes[RESOURCES['networks']['expect']]:
+        any_in = lambda a, b: any(i in b for i in a)
+        response_code_symbols = [s.upper() for s in requests.status_codes._codes[response_code]]
+        if any_in(response_code_symbols, RESOURCES['networks']['create_responses']):
+            try:
+                network = json.loads(response.text)
+            except ValueError as e:
+                raise e('ERROR: failed to load created network JSON, got HTTP code {:s} ({:d}) with body {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text)
+                )
+            else:
+                return(network)
+        else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
                     requests.status_codes._codes[response_code][0].upper(),
@@ -258,9 +271,6 @@ class NetworkGroup:
                     response.text
                 )
             )
-
-        network = json.loads(response.text)
-        return(network)
 
     def delete_network(self, network_id=None, network_name=None):
         """
