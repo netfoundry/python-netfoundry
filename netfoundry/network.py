@@ -7,7 +7,7 @@ from uuid import UUID       # validate UUIDv4 strings
 import time                 # enforce a timeout; sleep
 import sys
 
-from .utility import MAJOR_REGIONS, RESOURCES, eprint, plural, singular
+from .utility import MAJOR_REGIONS, RESOURCES, HOST_PROPERTIES, eprint, plural, singular
 
 class Network:
     """describe and use a Network
@@ -52,11 +52,9 @@ class Network:
         if only_hosted and only_customer:
             raise Exception("ERROR: specify only one of only_hosted or only_customer")
         elif only_hosted:
-#            hosted_edge_routers = [er for er in all_edge_routers if 'host' in er.keys() and 'dataCenterId' in er['host'].keys() and er['host']['dataCenterId']]
             hosted_edge_routers = [er for er in all_edge_routers if er['dataCenterId']]
             return(hosted_edge_routers)
         elif only_customer:
-#            customer_edge_routers = [er for er in all_edge_routers if not 'host' in er.keys() or not 'dataCenterId' in er['host'].keys() or not er['host']['dataCenterId']]
             customer_edge_routers = [er for er in all_edge_routers if not er['dataCenterId']]
             return(customer_edge_routers)
         else:
@@ -120,7 +118,6 @@ class Network:
             )
         if location_code:
             matching_data_centers = [dc for dc in data_centers if dc['locationCode'] == location_code]
-#            import epdb; epdb.serve()
             return(matching_data_centers)
         else:
             return(data_centers)
@@ -184,7 +181,7 @@ class Network:
             params = dict()
             if not type == "network":
                 params["networkId"] = self.id
-            # if type == "service": 
+            # if singular(type) == "service": 
             #     params["beta"] = ''
 
             if not plural(type) in RESOURCES.keys():
@@ -193,6 +190,8 @@ class Network:
                     plural=plural(type),
                     choices=RESOURCES.keys()
                 ))
+            elif plural(type) == "edge-routers":
+                params['embed'] = "host"
 
             response = requests.get(
                 entity_url,
@@ -210,8 +209,17 @@ class Network:
                 entity = json.loads(response.text)
             except:
                 raise Exception('ERROR parsing response as object, got:\n{}'.format(response.text))
-            else:
-                return(entity)
+
+        # routers are a special case because the value of entity._embedded.host.dataCenterId is expected by
+        # downstream consumers of this method to be found at entity.dataCenterId
+        if plural(type) == "edge-routers":
+            if (entity["hostId"]
+                    and "_embedded" in entity.keys()
+                    and "host" in entity['_embedded'].keys()
+                ):
+                for prop in HOST_PROPERTIES:
+                    entity[prop] = entity['_embedded']['host'][prop]
+        return(entity)
 
     def get_resources(self, type: str,name: str=None, accept: str=None, deleted: bool=False):
         """return the resources object
@@ -233,6 +241,7 @@ class Network:
                 headers['accept'] = "application/json;as="+accept
             elif accept:
                 raise Exception("ERROR: invalid value for param \"accept\" in {}".format(accept))
+
             params = {
                 "networkId": self.id,
                 "page": 0,
@@ -247,6 +256,8 @@ class Network:
 
             if not type in RESOURCES.keys():
                 raise Exception("ERROR: unknown type \"{}\". Choices: {}".format(type, RESOURCES.keys()))
+            elif type == "edge-routers":
+                params['embed'] = "host"
 
             response = requests.get(
                 self.session.audience+'core/v2/'+type,
@@ -281,11 +292,11 @@ class Network:
             return([])
         # if there is one page of resources
         elif total_pages == 1:
-            all_pages = resources['_embedded'][RESOURCES[type]['embedded']]
+            all_entities = resources['_embedded'][RESOURCES[type]['embedded']]
         # if there are multiple pages of resources
         else:
             # initialize the list with the first page of resources
-            all_pages = resources['_embedded'][RESOURCES[type]['embedded']]
+            all_entities = resources['_embedded'][RESOURCES[type]['embedded']]
             # append the remaining pages of resources
             for page in range(1,total_pages):
                 try:
@@ -304,7 +315,7 @@ class Network:
                 if response_code == requests.status_codes.codes.OK: # HTTP 200
                     try:
                         resources = json.loads(response.text)
-                        all_pages += resources['_embedded'][RESOURCES[type]['embedded']]
+                        all_entities.extend(resources['_embedded'][RESOURCES[type]['embedded']])
                     except ValueError as e:
                         eprint('ERROR: failed to load resources object from GET response')
                         raise(e)
@@ -319,9 +330,23 @@ class Network:
 
         # omit deleted entities by default
         if not deleted:
-            return([entity for entity in all_pages if not entity['deletedAt']])
+            all_entities = [entity for entity in all_entities if not entity['deletedAt']]
+
+        # routers are a special case because the value of entity._embedded.host.dataCenterId is expected by
+        # downstream consumers of this method to be found at entity.dataCenterId
+        if type == "edge-routers":
+            all_routers = list()
+            for entity in all_entities:
+                if (entity["hostId"]
+                        and "_embedded" in entity.keys()
+                        and "host" in entity['_embedded'].keys()
+                    ):
+                    for prop in HOST_PROPERTIES:
+                        entity[prop] = entity['_embedded']['host'][prop]
+                all_routers.extend([entity])
+            return(all_routers)
         else:
-            return(all_pages)
+            return(all_entities)
 
     def patch_resource(self,patch):
         """returns a resource
