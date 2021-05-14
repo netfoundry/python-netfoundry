@@ -104,3 +104,4 @@ MAJOR_REGIONS = {
     }
 }
 
+HOST_PROPERTIES = ["ownerIdentityId", "ipAddress", "port", "provider", "providerInstanceId", "size", "locationMetadataId", "dataCenterId"]
