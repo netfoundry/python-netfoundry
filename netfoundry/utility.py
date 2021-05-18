@@ -105,3 +105,13 @@ MAJOR_REGIONS = {
 }
 
 HOST_PROPERTIES = ["ownerIdentityId", "ipAddress", "port", "provider", "providerInstanceId", "size", "locationMetadataId", "dataCenterId"]
+
+EXCLUDED_PATCH_PROPERTIES = {
+    "edge-routers": ["registration"],
+    "services": [],
+    "endpoints": [],
+    "edge-router-policies": [],
+    "networks": [],
+    "app-wans": [],
+    "posture-checks": []
+}

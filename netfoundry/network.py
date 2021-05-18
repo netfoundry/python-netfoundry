@@ -7,7 +7,7 @@ from uuid import UUID       # validate UUIDv4 strings
 import time                 # enforce a timeout; sleep
 import sys
 
-from .utility import MAJOR_REGIONS, RESOURCES, HOST_PROPERTIES, eprint, plural, singular
+from .utility import MAJOR_REGIONS, RESOURCES, HOST_PROPERTIES, EXCLUDED_PATCH_PROPERTIES, eprint, plural, singular
 
 class Network:
     """describe and use a Network
@@ -52,10 +52,10 @@ class Network:
         if only_hosted and only_customer:
             raise Exception("ERROR: specify only one of only_hosted or only_customer")
         elif only_hosted:
-            hosted_edge_routers = [er for er in all_edge_routers if er['dataCenterId']]
+            hosted_edge_routers = [er for er in all_edge_routers if 'dataCenterId' in er.keys() and er['dataCenterId']]
             return(hosted_edge_routers)
         elif only_customer:
-            customer_edge_routers = [er for er in all_edge_routers if not er['dataCenterId']]
+            customer_edge_routers = [er for er in all_edge_routers if not 'dataCenterId' in er.keys() or not er['dataCenterId']]
             return(customer_edge_routers)
         else:
             return(all_edge_routers)
@@ -359,6 +359,11 @@ class Network:
         }
 
         self_link = patch['_links']['self']['href']
+        type = self_link.split('/')[5]
+        if not type in EXCLUDED_PATCH_PROPERTIES.keys():
+            raise Exception("ERROR: got unexpected type {:s} for patch request from self URL {:s}".format(
+                type, 
+                self_link))
         try:
             before_response = requests.get(
                 self_link,
@@ -389,7 +394,7 @@ class Network:
         # compare the patch to the discovered, current state, adding new or updated keys to pruned_patch
         pruned_patch = dict()
         for k in patch.keys():
-            if k in before_resource.keys() and not before_resource[k] == patch[k]:
+            if k not in EXCLUDED_PATCH_PROPERTIES[type] and k in before_resource.keys() and not before_resource[k] == patch[k]:
                 pruned_patch[k] = patch[k]
 
         headers = {
@@ -401,7 +406,7 @@ class Network:
             if not "name" in pruned_patch.keys():
                 pruned_patch["name"] = before_resource["name"]
             # if entity is a Service and "model" is patched then always include "modelType"
-            if "/services" in self_link and not "modelType" in pruned_patch.keys() and "model" in pruned_patch.keys():
+            if type == "services" and not "modelType" in pruned_patch.keys() and "model" in pruned_patch.keys():
                 pruned_patch["modelType"] = before_resource["modelType"]
             try:
                 after_response = requests.patch(
@@ -471,7 +476,7 @@ class Network:
             )
         return(resource)
 
-    def create_endpoint(self, name: str, attributes: list=[], session_identity: str=None, wait: int=10, sleep: int=1, progress: bool=False):
+    def create_endpoint(self, name: str, attributes: list=[], session_identity: str=None, wait: int=30, sleep: int=2, progress: bool=False):
         """create an Endpoint
         :param: name is required string on which to key future operations for this Endpoint
         :param: attributes is an optional list of Endpoint roles of which this Endpoint is a member
