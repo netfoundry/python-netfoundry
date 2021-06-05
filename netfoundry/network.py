@@ -782,8 +782,7 @@ class Network:
 
         return(service)
 
-    def create_service_with_configs(self, name: str, endpoints: list, client_hosts: list, client_ports: list, client_protocols: list=["tcp"],
-        server_hosts: list=[], server_ports: list=[], server_protocols: list=[], attributes: list=[], 
+    def create_service_with_configs(self, name: str, endpoints: list, intercept_config_data: dict, host_config_data: dict, attributes: list=[],
         edge_router_attributes: list=["#all"], encryption_required: bool=True, dry_run: bool=False):
         """create an endpoint-hosted Service compatible with Ziti config types intercept.v1, host.v1.
 
