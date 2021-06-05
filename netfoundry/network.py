@@ -477,11 +477,11 @@ class Network:
         return(resource)
 
     def create_endpoint(self, name: str, attributes: list=[], session_identity: str=None, wait: int=30, sleep: int=2, progress: bool=False):
-        """create an Endpoint
-        :param: name is required string on which to key future operations for this Endpoint
-        :param: attributes is an optional list of Endpoint roles of which this Endpoint is a member
+        """create an endpoint
+        :param: name is required string on which to key future operations for this endpoint
+        :param: attributes is an optional list of endpoint roles of which this endpoint is a member
         :param: session_identity is optional string UUID of the identity in the NF Organization for
-                which a concurrent web console session is required to activate this Endpoint
+                which a concurrent web console session is required to activate this endpoint
         """
         try:
             headers = { 
@@ -489,7 +489,7 @@ class Network:
             }
             for role in attributes:
                 if not role[0:1] == '#':
-                    raise Exception("ERROR: hashtag role attributes on an Endpoint must begin with #")
+                    raise Exception("ERROR: hashtag role attributes on an endpoint must begin with #")
             body = {
                 "networkId": self.id,
                 "name": name,
@@ -535,7 +535,7 @@ class Network:
             endpoint = self.wait_for_property_defined(property_name="jwt", property_type=str, entity_type="endpoint", id=endpoint['id'], wait=wait, sleep=sleep, progress=progress)
         return(endpoint)
 
-    def create_edge_router(self, name, attributes=[], link_listener=False, data_center_id=None):
+    def create_edge_router(self, name: str, attributes: list=[], link_listener: bool=False, data_center_id: str=None, tunneler_enabled: bool=False):
         """create an Edge Router
         """
         try:
@@ -544,12 +544,13 @@ class Network:
             }
             for role in attributes:
                 if not role[0:1] == '#':
-                    raise Exception("ERROR: hashtag role attributes on an Endpoint must begin with #")
+                    raise Exception("ERROR: hashtag role attributes on an endpoint must begin with #")
             body = {
                 "networkId": self.id,
                 "name": name,
                 "attributes": attributes,
-                "linkListener": link_listener
+                "linkListener": link_listener,
+                "tunnelerEnabled": tunneler_enabled
             }
             if data_center_id:
                 body['dataCenterId'] = data_center_id
@@ -640,7 +641,7 @@ class Network:
 
         If server details are absent then the type is inferred to be SDK (Service is hosted by a Ziti SDK,
         not a Tunneler or Router). If server details are present then the Service is either hosted by a
-        Tunneler or Router, depending on which value is present i.e. Tunneler Endpoint or Edge Router.
+        Tunneler or Router, depending on which value is present i.e. Tunneler endpoint or Edge Router.
 
         Multiple client intercepts may be specified i.e. lists of domain names or IP addresses, ports, and protocols. If alternative 
         server details are not given they are assumed to be the same as the intercept. If server details are provided then all intercepts 
@@ -656,7 +657,7 @@ class Network:
         :param: attributes is optional list of strings of Service roles to assign. Default is [].
         :param: edge_router_attributes is optional list of strings of Router roles or Router names that can "see" this Service. Default is ["#all"].
         :param: egress_router_id is optional string of UUID or name of hosting Router. Selects Router-hosting strategy.
-        :param: endpoints is optional list of strings of hosting Endpoints. Selects Endpoint-hosting strategy.
+        :param: endpoints is optional list of strings of hosting endpoints. Selects endpoint-hosting strategy.
         :param: encryption_required is optional Boolean. Default is to enable edge-to-edge encryption.
         """
         try:
@@ -698,11 +699,11 @@ class Network:
                         if endpoint[0:1] == '#':
                             bind_endpoints += [endpoint]
                         else:
-                            # strip leading @ if present and re-add later after verifying the named Endpoint exists
+                            # strip leading @ if present and re-add later after verifying the named endpoint exists
                             if endpoint[0:1] == '@':
                                 endpoint = endpoint[1:]
 
-                            # if UUIDv4 then resolve to name, else verify the named Endpoint exists 
+                            # if UUIDv4 then resolve to name, else verify the named endpoint exists 
                             try:
                                 UUID(endpoint, version=4) # assigned below under "else" if already a UUID
                             except ValueError:
@@ -711,7 +712,7 @@ class Network:
                                     name_lookup = self.get_resources(type="endpoints",name=endpoint)[0]
                                     endpoint_name = name_lookup['name']
                                 except Exception as e:
-                                    raise Exception('ERROR: Failed to find exactly one hosting Endpoint named "{}". Caught exception: {}'.format(endpoint, e))
+                                    raise Exception('ERROR: Failed to find exactly one hosting endpoint named "{}". Caught exception: {}'.format(endpoint, e))
                                 # append to list after successfully resolving name to ID
                                 else: bind_endpoints += ['@'+endpoint_name] 
                             else:
@@ -719,7 +720,7 @@ class Network:
                                     name_lookup = self.get_resource(type="endpoint",id=endpoint)
                                     endpoint_name = name_lookup['name']
                                 except Exception as e:
-                                    raise Exception('ERROR: Failed to find exactly one hosting Endpoint with ID "{}". Caught exception: {}'.format(endpoint, e))
+                                    raise Exception('ERROR: Failed to find exactly one hosting endpoint with ID "{}". Caught exception: {}'.format(endpoint, e))
                                 else: bind_endpoints += ['@'+endpoint_name] 
                     body['model']['bindEndpointAttributes'] = bind_endpoints
                     body['model']['serverEgress'] = server_egress
@@ -781,10 +782,10 @@ class Network:
 
         return(service)
 
-    def create_endpoint_service(self, name: str, endpoints: list, client_hosts: list, client_ports: list, client_protocols: list=["tcp"], 
+    def create_service_with_configs(self, name: str, endpoints: list, client_hosts: list, client_ports: list, client_protocols: list=["tcp"],
         server_hosts: list=[], server_ports: list=[], server_protocols: list=[], attributes: list=[], 
         edge_router_attributes: list=["#all"], encryption_required: bool=True, dry_run: bool=False):
-        """create an Endpoint-hosted Service compatible with Ziti config types intercept.v1, host.v1.
+        """create an endpoint-hosted Service compatible with Ziti config types intercept.v1, host.v1.
 
         Multiple client intercepts may be specified i.e. lists of domain names or IP addresses, ports, and protocols. If alternative 
         server details are not given they are assumed to be the same as the intercept. If server details are provided then all intercepts 
@@ -800,7 +801,7 @@ class Network:
         :param: server_protocols is optional list of strings of the server protocols to forward. Choices: ["tcp","udp"]. If omitted the client protocol is used.
         :param: attributes is optional list of strings of Service roles to assign, associating the Service with a matching AppWAN. Default is [].
         :param: edge_router_attributes is optional list of strings of Router roles or Router names that can "see" this Service. Default is ["#all"].
-        :param: endpoints is optional list of strings of Endpoints' #hashtag or @name that will host this Service.
+        :param: endpoints is optional list of strings of endpoints' #hashtag or @name that will host this Service.
         :param: encryption_required is optional Boolean. Default is to enable edge-to-edge encryption.
         :param: dry_run is optional Boolean where True returns only the entity model without sending a request.
         """
@@ -894,13 +895,13 @@ class Network:
             bind_endpoints = list()
             for endpoint in endpoints:
                 if endpoint[0:1] == '#':
-                    bind_endpoints.append(endpoint) # is an Endpoint role attribute
+                    bind_endpoints.append(endpoint) # is an endpoint role attribute
                 else:
-                    # strip leading @ if present and re-add later after verifying the named Endpoint exists
+                    # strip leading @ if present and re-add later after verifying the named endpoint exists
                     if endpoint[0:1] == '@':
                         endpoint = endpoint[1:]
 
-                    # if UUIDv4 then resolve to name, else verify the named Endpoint exists 
+                    # if UUIDv4 then resolve to name, else verify the named endpoint exists 
                     try:
                         UUID(endpoint, version=4) # assigned below under "else" if already a UUID
                     except ValueError:
@@ -909,16 +910,215 @@ class Network:
                             name_lookup = self.get_resources(type="endpoints",name=endpoint)[0]
                             endpoint_name = name_lookup['name']
                         except Exception as e:
-                            raise Exception('ERROR: Failed to find exactly one hosting Endpoint named "{}". Caught exception: {}'.format(endpoint, e))
+                            raise Exception('ERROR: Failed to find exactly one hosting endpoint named "{}". Caught exception: {}'.format(endpoint, e))
                         # append to list after successfully resolving name to ID
-                        else: bind_endpoints.append('@'+endpoint_name) # is an existing Endpoint's name
+                        else: bind_endpoints.append('@'+endpoint_name) # is an existing endpoint's name
                     else:
                         try:
                             name_lookup = self.get_resource(type="endpoint",id=endpoint)
                             endpoint_name = name_lookup['name']
                         except Exception as e:
-                            raise Exception('ERROR: Failed to find exactly one hosting Endpoint with ID "{}". Caught exception: {}'.format(endpoint, e))
-                        else: bind_endpoints.append('@'+endpoint_name) # is an existing Endpoint's name resolved from UUID
+                            raise Exception('ERROR: Failed to find exactly one hosting endpoint with ID "{}". Caught exception: {}'.format(endpoint, e))
+                        else: bind_endpoints.append('@'+endpoint_name) # is an existing endpoint's name resolved from UUID
+
+            headers = { 
+                "authorization": "Bearer " + self.session.token 
+            }
+            body = {
+                "networkId": self.id,
+                "name": name,
+                "encryptionRequired": encryption_required,
+                "modelType": "AdvancedTunnelerToEndpoint",
+                "model": {
+                    "bindEndpointAttributes": bind_endpoints,
+                    "clientIngress" : {
+                        "addresses": client_hosts, 
+                        "ports": valid_client_ports,
+                        "protocols": valid_client_protocols
+                    },
+                    "serverEgress": server_egress,
+                    "edgeRouterAttributes" : edge_router_attributes
+                },
+                "attributes" : attributes,
+            }
+
+            params = dict()
+            # params = {
+            #     "beta": ''
+            # }
+
+            if dry_run:
+                return(body)
+
+            response = requests.post(
+                self.session.audience+'core/v2/services',
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                json=body,
+                params=params
+            )
+            response_code = response.status_code
+        except:
+            raise
+
+        any_in = lambda a, b: any(i in b for i in a)
+        response_code_symbols = [s.upper() for s in requests.status_codes._codes[response_code]]
+        if any_in(response_code_symbols, RESOURCES['services']['create_responses']):
+            try:
+                service = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load {:s} object from POST response'.format("Service"))
+                raise(e)
+        else:
+            raise Exception(
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    requests.status_codes._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
+                )
+            )
+
+        return(service)
+
+    def create_service_advanced(self, name: str, endpoints: list, client_hosts: list, client_ports: list, client_protocols: list=["tcp"], 
+        server_hosts: list=[], server_ports: list=[], server_protocols: list=[], attributes: list=[], 
+        edge_router_attributes: list=["#all"], encryption_required: bool=True, dry_run: bool=False):
+        """create an "advanced" PSM-based (platform service model) endpoint-hosted Service.
+
+        Multiple client intercepts may be specified i.e. lists of domain names or IP addresses, ports, and protocols. If alternative 
+        server details are not given they are assumed to be the same as the intercept. If server details are provided then all intercepts 
+        flow to that server. You may constrain the list of allowed server hosts, ports, and protocols
+        that may be forwarded.
+
+        :param: name is required string
+        :param: client_hosts is required list of strings that are intercept domain name or IPv4.
+        :param: client_ports is required list of strings of the port ranges to intercept as ["80","5900:5999"].
+        :param: client_protocols is optional list of strings of the transports to intercept. Choices: ["tcp","udp"]. Default is ["tcp"].
+        :param: server_hosts is optional list of strings that are a domain name, IPv4, or IPv6. If omitted the client host is used.
+        :param: server_ports is optional list of strings of the port ranges to forward as ["80","5900:5999"]. If omitted same client port is used.
+        :param: server_protocols is optional list of strings of the server protocols to forward. Choices: ["tcp","udp"]. If omitted the client protocol is used.
+        :param: attributes is optional list of strings of Service roles to assign, associating the Service with a matching AppWAN. Default is [].
+        :param: edge_router_attributes is optional list of strings of Router roles or Router names that can "see" this Service. Default is ["#all"].
+        :param: endpoints is optional list of strings of endpoints' #hashtag or @name that will host this Service.
+        :param: encryption_required is optional Boolean. Default is to enable edge-to-edge encryption.
+        :param: dry_run is optional Boolean where True returns only the entity model without sending a request.
+        """
+        try:
+            # validate roles
+            for role in attributes:
+                if not role[0:1] == '#':
+                    raise Exception('ERROR: invalid role "{:s}". Must begin with "#"'.format(role))
+
+            # these elements could be a single port as integer or a string with one or two ports separated by a : or -
+            separators = re.compile('[:-]')
+            valid_range = re.compile('^\d+[:-]\d+$')
+            valid_client_ports = list()
+            for range in client_ports:
+                if isinstance(range, int): # if an integer or single port then use same number for low:high
+                    range = str(range)+':'+str(range)
+                elif not re.search(separators,range): # if a string of a single port (no : or - separator) then cat with separator :
+                    range = range+':'+range
+                
+                if not re.fullmatch(valid_range, range):
+                    raise Exception("ERROR: failed to parse client port range: {}".format(range))
+
+                bounds = re.split(separators, range)
+                if not len(bounds) == 2 or int(bounds[0]) > int(bounds[1]):
+                    raise Exception("ERROR: failed to find one lower, one higher port for range: {}".format(range))
+                else:
+                    valid_client_ports.append({"low": bounds[0], "high": bounds[1]})
+            valid_server_ports = list()
+            for range in server_ports:
+                if isinstance(range, int): # if an integer or single port then use same number for low:high
+                    range = str(range)+':'+str(range)
+                elif not re.search(separators,range): # if a string of a single port (no : or - separator) then cat with separator :
+                    range = range+':'+range
+                
+                if not re.fullmatch(valid_range, range):
+                    raise Exception("ERROR: failed to parse server port range: {}".format(range))
+
+                bounds = re.split(separators, range)
+                if not len(bounds) == 2 or int(bounds[0]) > int(bounds[1]):
+                    raise Exception("ERROR: expecting a port or port range, got: {range}".format(range=range))
+                else:
+                    valid_server_ports.append({"low": bounds[0], "high": bounds[1]})
+
+            # validate client protocols
+            valid_client_protocols = list()
+            for proto in client_protocols:
+                if not proto.lower() in ["tcp", "udp"]:
+                    raise Exception("ERROR: client intercept protocol \"{}\" is not valid.".format(proto.lower()))
+                else:
+                    valid_client_protocols.append(proto.lower())
+
+            # validate server protocols
+            valid_server_protocols = list()
+            for proto in server_protocols:
+                if not proto.lower() in ["tcp", "udp"]:
+                    raise Exception("ERROR: server protocol \"{}\" is not valid.".format(proto.lower()))
+                else:
+                    valid_server_protocols.append(proto.lower())
+
+            # resolve exit hosting params
+            server_egress = dict()
+            if server_hosts and len(server_hosts) == 1:
+                server_egress["host"] = server_hosts[0]
+            elif server_hosts and len(server_hosts) > 1:
+                server_egress["forwardHost"] = True
+                server_egress["allowedHosts"] = server_hosts
+            else:
+                server_egress["forwardHost"] = True
+                server_egress["allowedHosts"] = client_hosts
+
+            if valid_server_ports and len(valid_server_ports) == 1 and valid_server_ports[0]['low'] == valid_server_ports[0]['high']:
+                server_egress["port"] = valid_server_ports[0]['low']
+            elif valid_server_ports:
+                server_egress["forwardPort"] = True
+                server_egress["allowedPortRanges"] = valid_server_ports
+            else:
+                server_egress["forwardPort"] = True
+                server_egress["allowedPortRanges"] = valid_client_ports
+
+            if server_protocols and len(server_protocols) == 1:
+                server_egress["protocol"] = server_protocols[0]
+            elif server_protocols and len(server_protocols) > 1:
+                server_egress["forwardProtocol"] = True
+                server_egress["allowedProtocols"] = server_protocols
+            else:
+                server_egress["forwardProtocol"] = True
+                server_egress["allowedProtocols"] = client_protocols
+
+
+            # parse out the elements in the list of endpoints as one of #attribute, UUID, or resolvable Endoint name
+            bind_endpoints = list()
+            for endpoint in endpoints:
+                if endpoint[0:1] == '#':
+                    bind_endpoints.append(endpoint) # is an endpoint role attribute
+                else:
+                    # strip leading @ if present and re-add later after verifying the named endpoint exists
+                    if endpoint[0:1] == '@':
+                        endpoint = endpoint[1:]
+
+                    # if UUIDv4 then resolve to name, else verify the named endpoint exists 
+                    try:
+                        UUID(endpoint, version=4) # assigned below under "else" if already a UUID
+                    except ValueError:
+                        # else assume is a name and resolve to ID
+                        try: 
+                            name_lookup = self.get_resources(type="endpoints",name=endpoint)[0]
+                            endpoint_name = name_lookup['name']
+                        except Exception as e:
+                            raise Exception('ERROR: Failed to find exactly one hosting endpoint named "{}". Caught exception: {}'.format(endpoint, e))
+                        # append to list after successfully resolving name to ID
+                        else: bind_endpoints.append('@'+endpoint_name) # is an existing endpoint's name
+                    else:
+                        try:
+                            name_lookup = self.get_resource(type="endpoint",id=endpoint)
+                            endpoint_name = name_lookup['name']
+                        except Exception as e:
+                            raise Exception('ERROR: Failed to find exactly one hosting endpoint with ID "{}". Caught exception: {}'.format(endpoint, e))
+                        else: bind_endpoints.append('@'+endpoint_name) # is an existing endpoint's name resolved from UUID
 
             headers = { 
                 "authorization": "Bearer " + self.session.token 
@@ -1109,7 +1309,7 @@ class Network:
 
         return(network)
 
-    def wait_for_property_defined(self, property_name: str, property_type: object=str, entity_type: str="network", wait: int=300, sleep: int=20, id: str=None, progress: bool=False):
+    def wait_for_property_defined(self, property_name: str, property_type: object=str, entity_type: str="network", wait: int=60, sleep: int=3, id: str=None, progress: bool=False):
         """continuously poll until expiry for the expected property to become defined with the any value of the expected type
         :param property_name: a top-level property to wait for e.g. `zitiId`
         :param property_type: optional Python instance type to expect for the value of property_name
