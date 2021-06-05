@@ -405,7 +405,7 @@ class Network:
         if len(pruned_patch.keys()) > 0:
             if not "name" in pruned_patch.keys():
                 pruned_patch["name"] = before_resource["name"]
-            # if entity is a Service and "model" is patched then always include "modelType"
+            # if entity is a service and "model" is patched then always include "modelType"
             if type == "services" and not "modelType" in pruned_patch.keys() and "model" in pruned_patch.keys():
                 pruned_patch["modelType"] = before_resource["modelType"]
             try:
@@ -635,12 +635,12 @@ class Network:
     def create_service(self, name: str, client_host_name: str, client_port: int, server_host_name: str=None, 
         server_port: int=None, server_protocol: str="tcp", attributes: list=[], edge_router_attributes: list=["#all"], 
         egress_router_id: str=None, endpoints: list=[], encryption_required: bool=True):
-        """create a Service that is compatible with broadly-compatible Ziti config types ziti-tunneler-client.v1, ziti-tunneler-server.v1
+        """create a service that is compatible with broadly-compatible Ziti config types ziti-tunneler-client.v1, ziti-tunneler-server.v1
 
-        There are three hosting strategies for a Service: SDK, Tunneler, or Router.
+        There are three hosting strategies for a service: SDK, Tunneler, or Router.
 
-        If server details are absent then the type is inferred to be SDK (Service is hosted by a Ziti SDK,
-        not a Tunneler or Router). If server details are present then the Service is either hosted by a
+        If server details are absent then the type is inferred to be SDK (service is hosted by a Ziti SDK,
+        not a Tunneler or Router). If server details are present then the service is either hosted by a
         Tunneler or Router, depending on which value is present i.e. Tunneler endpoint or Edge Router.
 
         Multiple client intercepts may be specified i.e. lists of domain names or IP addresses, ports, and protocols. If alternative 
@@ -651,11 +651,11 @@ class Network:
         :param: client_host_name is required strings that is the intercept hostname (DNS) or IPv4
         :param: client_port is required integer of the ports to intercept
         :param: client_protocol is required string of the transport protocol. Choices: ["tcp","udp"]
-        :param: server_host_name is optional string that is a hostname (DNS) or IPv4. If omitted Service is assumed to be SDK-hosted (not Tunneler or Router-hosted).
+        :param: server_host_name is optional string that is a hostname (DNS) or IPv4. If omitted service is assumed to be SDK-hosted (not Tunneler or Router-hosted).
         :param: server_port is optional integer of the server port. If omitted the client port is used. 
         :param: server_protocol is optional string of the server protocol. If omitted the same client protocol is used.
-        :param: attributes is optional list of strings of Service roles to assign. Default is [].
-        :param: edge_router_attributes is optional list of strings of Router roles or Router names that can "see" this Service. Default is ["#all"].
+        :param: attributes is optional list of strings of service roles to assign. Default is [].
+        :param: edge_router_attributes is optional list of strings of Router roles or Router names that can "see" this service. Default is ["#all"].
         :param: egress_router_id is optional string of UUID or name of hosting Router. Selects Router-hosting strategy.
         :param: endpoints is optional list of strings of hosting endpoints. Selects endpoint-hosting strategy.
         :param: encryption_required is optional Boolean. Default is to enable edge-to-edge encryption.
@@ -684,7 +684,7 @@ class Network:
             if not server_host_name:
                 body['modelType'] = "TunnelerToSdk"
                 if server_port:
-                    eprint("WARN: ignoring unexpected server details for SDK-hosted Service")
+                    eprint("WARN: ignoring unexpected server details for SDK-hosted service")
             else:
                 server_egress = {
                     "protocol": server_protocol.lower(),
@@ -741,11 +741,11 @@ class Network:
                             "serverEgress": server_egress,
                         }]
                 else:
-                    raise Exception('ERROR: invalid Service model: need only one of binding "endpoints" or hosting "egress_router_id" if "server_host_name" is specified')
+                    raise Exception('ERROR: invalid service model: need only one of binding "endpoints" or hosting "egress_router_id" if "server_host_name" is specified')
                 
             # resolve Edge Router param
             if edge_router_attributes and not edge_router_attributes == ['#all']:
-                eprint("WARN: overriding default Service Edge Router Policy #all for new Service {:s}".format(name))
+                eprint("WARN: overriding default service Edge Router Policy #all for new service {:s}".format(name))
                 body['edgeRouterAttributes'] = edge_router_attributes
             params = dict()
             # params = {
@@ -769,7 +769,7 @@ class Network:
             try:
                 service = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR: failed to load {:s} object from POST response'.format("Service"))
+                eprint('ERROR: failed to load {:s} object from POST response'.format("service"))
                 raise(e)
         else:
             raise Exception(
@@ -784,7 +784,7 @@ class Network:
 
     def create_service_with_configs(self, name: str, endpoints: list, intercept_config_data: dict, host_config_data: dict, attributes: list=[],
         edge_router_attributes: list=["#all"], encryption_required: bool=True, dry_run: bool=False):
-        """create an endpoint-hosted Service compatible with Ziti config types intercept.v1, host.v1.
+        """create an endpoint-hosted service compatible with Ziti config types intercept.v1, host.v1.
 
         Multiple client intercepts may be specified i.e. lists of domain names or IP addresses, ports, and protocols. If alternative 
         server details are not given they are assumed to be the same as the intercept. If server details are provided then all intercepts 
@@ -798,9 +798,9 @@ class Network:
         :param: server_hosts is optional list of strings that are a domain name, IPv4, or IPv6. If omitted the client host is used.
         :param: server_ports is optional list of strings of the port ranges to forward as ["80","5900:5999"]. If omitted same client port is used.
         :param: server_protocols is optional list of strings of the server protocols to forward. Choices: ["tcp","udp"]. If omitted the client protocol is used.
-        :param: attributes is optional list of strings of Service roles to assign, associating the Service with a matching AppWAN. Default is [].
-        :param: edge_router_attributes is optional list of strings of Router roles or Router names that can "see" this Service. Default is ["#all"].
-        :param: endpoints is optional list of strings of endpoints' #hashtag or @name that will host this Service.
+        :param: attributes is optional list of strings of service roles to assign, associating the service with a matching AppWAN. Default is [].
+        :param: edge_router_attributes is optional list of strings of Router roles or Router names that can "see" this service. Default is ["#all"].
+        :param: endpoints is optional list of strings of endpoints' #hashtag or @name that will host this service.
         :param: encryption_required is optional Boolean. Default is to enable edge-to-edge encryption.
         :param: dry_run is optional Boolean where True returns only the entity model without sending a request.
         """
@@ -967,7 +967,7 @@ class Network:
             try:
                 service = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR: failed to load {:s} object from POST response'.format("Service"))
+                eprint('ERROR: failed to load {:s} object from POST response'.format("service"))
                 raise(e)
         else:
             raise Exception(
@@ -983,7 +983,7 @@ class Network:
     def create_service_advanced(self, name: str, endpoints: list, client_hosts: list, client_ports: list, client_protocols: list=["tcp"], 
         server_hosts: list=[], server_ports: list=[], server_protocols: list=[], attributes: list=[], 
         edge_router_attributes: list=["#all"], encryption_required: bool=True, dry_run: bool=False):
-        """create an "advanced" PSM-based (platform service model) endpoint-hosted Service.
+        """create an "advanced" PSM-based (platform service model) endpoint-hosted service.
 
         Multiple client intercepts may be specified i.e. lists of domain names or IP addresses, ports, and protocols. If alternative 
         server details are not given they are assumed to be the same as the intercept. If server details are provided then all intercepts 
@@ -997,9 +997,9 @@ class Network:
         :param: server_hosts is optional list of strings that are a domain name, IPv4, or IPv6. If omitted the client host is used.
         :param: server_ports is optional list of strings of the port ranges to forward as ["80","5900:5999"]. If omitted same client port is used.
         :param: server_protocols is optional list of strings of the server protocols to forward. Choices: ["tcp","udp"]. If omitted the client protocol is used.
-        :param: attributes is optional list of strings of Service roles to assign, associating the Service with a matching AppWAN. Default is [].
-        :param: edge_router_attributes is optional list of strings of Router roles or Router names that can "see" this Service. Default is ["#all"].
-        :param: endpoints is optional list of strings of endpoints' #hashtag or @name that will host this Service.
+        :param: attributes is optional list of strings of service roles to assign, associating the service with a matching AppWAN. Default is [].
+        :param: edge_router_attributes is optional list of strings of Router roles or Router names that can "see" this service. Default is ["#all"].
+        :param: endpoints is optional list of strings of endpoints' #hashtag or @name that will host this service.
         :param: encryption_required is optional Boolean. Default is to enable edge-to-edge encryption.
         :param: dry_run is optional Boolean where True returns only the entity model without sending a request.
         """
@@ -1166,7 +1166,7 @@ class Network:
             try:
                 service = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR: failed to load {:s} object from POST response'.format("Service"))
+                eprint('ERROR: failed to load {:s} object from POST response'.format("service"))
                 raise(e)
         else:
             raise Exception(
