@@ -43,7 +43,11 @@ def eprint(*args, **kwargs):
 
 p = inflect.engine()
 def plural(singular):
-    return(p.plural_noun(singular))
+    # if already plural then return, else pluralize
+    if singular[-1:] == 's':
+        return(singular)
+    else:
+        return(p.plural_noun(singular))
 
 def singular(plural):
     return(p.singular_noun(plural))
@@ -89,6 +93,14 @@ RESOURCES = {
         'embedded': "serviceList",
         'create_responses': ["ACCEPTED"]
     },
+    'service-policies': {
+        'embedded': "servicePolicyList",
+        'create_responses': ["ACCEPTED"]
+    },
+    'service-edge-router-policies': {
+        'embedded': "serviceEdgeRouterPolicyList",
+        'create_responses': ["ACCEPTED"]
+    },
     'posture-checks': {
         'embedded': "postureCheckList",
         'create_responses': ["ACCEPTED"]
@@ -115,3 +127,12 @@ EXCLUDED_PATCH_PROPERTIES = {
     "app-wans": [],
     "posture-checks": []
 }
+
+VALID_SERVICE_PROTOCOLS = ["tcp", "udp"]
+VALID_SEPARATORS = '[:-]' # : or - will match regex pattern
+
+def docstring_parameters(*args, **kwargs):
+    def dec(obj):
+        obj.__doc__ = obj.__doc__.format(*args, **kwargs)
+        return obj
+    return dec
