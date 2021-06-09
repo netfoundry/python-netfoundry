@@ -1115,6 +1115,14 @@ class Network:
                 "allowedSourceAddresses": transparent_hosts
             }
 
+            service = self.create_service_with_configs(
+                name=name, 
+                intercept_config_data=intercept_config_data, 
+                host_config_data=host_config_data, 
+                attributes=attributes, 
+                encryption_required=encryption_required, 
+                dry_run=dry_run
+            )
             service_policy = self.create_service_policy(
                 name=name+"-BindServicePolicy", 
                 services=["@"+name], 
@@ -1128,14 +1136,6 @@ class Network:
                 services=["@"+name], 
                 edge_routers=edge_routers, 
                 semantic="AnyOf", 
-                dry_run=dry_run
-            )
-            service = self.create_service_with_configs(
-                name=name, 
-                intercept_config_data=intercept_config_data, 
-                host_config_data=host_config_data, 
-                attributes=attributes, 
-                encryption_required=encryption_required, 
                 dry_run=dry_run
             )
 
@@ -1170,7 +1170,7 @@ class Network:
             service_edge_router_policy_name = name+"-ServiceEdgeRouterPolicy"
             service_edge_router_policies = self.get_resources(name=service_edge_router_policy_name, type="service-edge-router-policies")
             if len(service_edge_router_policies) == 1:
-                service_edge_router_policy_result = self.delete_resource(type="service", id=service_edge_router_policies[0]['id'])
+                service_edge_router_policy_result = self.delete_resource(type="service-edge-router-policy", id=service_edge_router_policies[0]['id'])
             elif len(service_edge_router_policies) > 1:
                 raise Exception("ERROR: found more than one service with name \"{}\"".format(service_edge_router_policy_name))
             else:
