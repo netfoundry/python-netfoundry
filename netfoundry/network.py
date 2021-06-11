@@ -44,8 +44,11 @@ class Network:
         for geo in MAJOR_REGIONS['AWS'].keys():
             self.aws_geo_regions[geo] = [dc for dc in self.get_edge_router_data_centers(provider="AWS") if dc['locationName'] in MAJOR_REGIONS['AWS'][geo]]
 
-    def endpoints(self):
-        return(self.get_resources("endpoints"))
+    def endpoints(self, typeId: str=None):
+        if typeId is not None:
+            return(self.get_resources(type="endpoints", typeId=type))
+        else:
+            return(self.get_resources(type="endpoints"))
 
     def edge_routers(self, only_hosted: bool=False, only_customer: bool=False):
         all_edge_routers = self.get_resources("edge-routers")
@@ -292,14 +295,15 @@ class Network:
                     entity[prop] = entity['_embedded']['host'][prop]
         return(entity)
 
-    def get_resources(self, type: str,name: str=None, accept: str=None, deleted: bool=False):
+    def get_resources(self, type: str,name: str=None, accept: str=None, deleted: bool=False, typeId: str=None):
         """return the resources object
-        :param: type: required string of the plural of an entity type e.g. networks, endpoints, services, posture-checks, etc...
-        :param: name: optional string of the unique name of an entity to find
-        :param: accept: optional modifier string specifying the form of the desired response. Choices ["create","update"] where
+        :param str type: plural of an entity type e.g. networks, endpoints, services, posture-checks, etc...
+        :param str name: filter results by name
+        :param str accept: specifying the form of the desired response. Choices ["create","update"] where
                 "create" is useful for comparing an existing entity to a set of properties that are used to create the same type of
                 entity in a POST request, and "update" may be used in the same way for a PUT update.
-        :param: deleted: optional bool to include resource entities that have a non-null property deletedAt
+        :param bool deleted: include resource entities that have a non-null property deletedAt
+        :param str typeId: filter results by typeId
         """
 
         # pluralize if singular
@@ -1780,8 +1784,8 @@ class Network:
                 'response_code': response_code
             }
 
-    def get_edge_router_registration(self, id: str):
-        """return the registration key and expiration as a dict
+    def rotate_edge_router_registration(self, id: str):
+        """rotate and return the registration key like {"registrationKey": str, "expiresAt": date}
         :param id: the UUID of the edge router
         """
 
@@ -1813,6 +1817,8 @@ class Network:
                     response.text
                 )
             )
+
+    get_edge_router_registration = rotate_edge_router_registration
 
     def delete_resource(self, type, id=None, wait=int(0), progress=False):
         """
