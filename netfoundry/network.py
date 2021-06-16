@@ -46,7 +46,8 @@ class Network:
 
     def endpoints(self, typeId: str=None):
         if typeId is not None:
-            return(self.get_resources(type="endpoints", typeId=type))
+#            import epdb; epdb.serve()
+            return(self.get_resources(type="endpoints", typeId=typeId))
         else:
             return(self.get_resources(type="endpoints"))
 
@@ -328,6 +329,8 @@ class Network:
 
             if name is not None:
                 params['name'] = name
+            if typeId is not None:
+                params['typeId'] = typeId
 
             if not type in RESOURCES.keys():
                 raise Exception("ERROR: unknown type \"{}\". Choices: {}".format(type, RESOURCES.keys()))
@@ -1827,7 +1830,6 @@ class Network:
         :param id: required entity UUID to delete
         :param wait: optional seconds to wait for entity destruction
         """
-#        import epdb; epdb.serve()
         try:
             headers = { "authorization": "Bearer " + self.session.token }
             entity_url = self.session.audience+'core/v2/networks/'+self.id
