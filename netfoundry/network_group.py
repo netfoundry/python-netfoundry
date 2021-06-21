@@ -15,7 +15,11 @@ class NetworkGroup:
         # TODO: review the use of org short name ref https://netfoundry.slack.com/archives/C45UDKR8V/p1603655594135000?thread_ts=1580318187.149400&cid=C45UDKR8V
         elif network_group_name:
             self.network_group_name = network_group_name
-            self.network_group_id = [ ng['id'] for ng in Organization.network_groups if ng['organizationShortName'] == network_group_name ][0]
+            network_group_matches = [ ng['id'] for ng in Organization.network_groups if ng['organizationShortName'] == network_group_name ]
+            if len(network_group_matches) == 1:
+                self.network_group_id = [ ng['id'] for ng in Organization.network_groups if ng['organizationShortName'] == network_group_name ][0]
+            else:
+                raise Exception("ERROR: there was not exactly one network group matching the name \"{}\"".format(network_group_name))
         elif len(Organization.network_groups) > 0:
             # first Network Group is typically the only Network Group
             self.network_group_id = Organization.network_groups[0]['id']
