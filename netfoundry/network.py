@@ -613,7 +613,7 @@ class Network:
             endpoint = self.wait_for_property_defined(property_name="jwt", property_type=str, entity_type="endpoint", id=endpoint['id'], wait=wait, sleep=sleep, progress=progress)
         return(endpoint)
 
-    def create_edge_router(self, name: str, attributes: list=[], link_listener: bool=False, data_center_id: str=None, tunneler_enabled: bool=False):
+    def create_edge_router(self, name: str, attributes: list=[], link_listener: bool=False, data_center_id: str=None, tunneler_enabled: bool=False, wait: int=30):
         """create an Edge Router
         """
         try:
@@ -663,9 +663,13 @@ class Network:
                 )
             )
 
-        return(router)
+        if wait:
+            router_complete = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="edge-router", id=router['id'], wait=wait)
+            return(router_complete)
+        else:
+            return(router)
 
-    def create_edge_router_policy(self, name, endpoint_attributes=[], edge_router_attributes=[]):
+    def create_edge_router_policy(self, name: str, endpoint_attributes: list=[], edge_router_attributes: list=[], wait: int=30):
         """create an Edge Router Policy
         """
         try:
@@ -708,12 +712,16 @@ class Network:
                 )
             )
 
-        return(policy)
+        if wait:
+            policy_complete = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="edge-router-policy", id=policy['id'], wait=wait)
+            return(policy_complete)
+        else:
+            return(policy)
 
     @docstring_parameters(valid_service_protocols=VALID_SERVICE_PROTOCOLS)
     def create_service_simple(self, name: str, client_host_name: str, client_port: int, server_host_name: str=None, 
         server_port: int=None, server_protocol: str="tcp", attributes: list=[], edge_router_attributes: list=["#all"], 
-        egress_router_id: str=None, endpoints: list=[], encryption_required: bool=True):
+        egress_router_id: str=None, endpoints: list=[], encryption_required: bool=True, wait: int=30):
         """create a service that is compatible with broadly-compatible Ziti config types ziti-tunneler-client.v1, ziti-tunneler-server.v1
 
         There are three hosting strategies for a service: SDK, Tunneler, or Router.
@@ -860,12 +868,16 @@ class Network:
                 )
             )
 
-        return(service)
+        if wait:
+            service_complete = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service", id=service['id'], wait=wait)
+            return(service_complete)
+        else:
+            return(service)
 
     # the above method was renamed to follow the development of PSM-based services (platform service models)
     create_service = create_service_simple
 
-    def create_service_policy(self, name: str, services: list, endpoints: list, type: str="Bind", semantic: str="AnyOf", posture_checks: list=[], dry_run: bool=False):
+    def create_service_policy(self, name: str, services: list, endpoints: list, type: str="Bind", semantic: str="AnyOf", posture_checks: list=[], dry_run: bool=False, wait: int=30):
         """
         Create a generic Ziti service policy. AppWANs are Dial-type service policies.
 
@@ -932,9 +944,14 @@ class Network:
                 )
             )
 
-        return(service_policy)
+        if wait:
+            service_policy_complete = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service-policy", id=service_policy['id'], wait=wait)
+            return(service_policy_complete)
+        else:
+            return(service_policy)
 
-    def create_service_edge_router_policy(self, name: str, services: list, edge_routers: list, semantic: str="AnyOf", dry_run: bool=False):
+
+    def create_service_edge_router_policy(self, name: str, services: list, edge_routers: list, semantic: str="AnyOf", dry_run: bool=False, wait: int=30):
         """
         Create a generic Ziti service edge router policy (SERP). Model-based services auto-create a SERP.
 
@@ -994,10 +1011,15 @@ class Network:
                     response.text
                 )
             )
-        return(service_edge_router_policy)
+
+        if wait:
+            service_edge_router_policy_complete = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service-edge-router-policy", id=service_edge_router_policy['id'], wait=wait)
+            return(service_edge_router_policy_complete)
+        else:
+            return(service_edge_router_policy)
 
     def create_service_with_configs(self, name: str, intercept_config_data: dict, host_config_data: dict, attributes: list=[],
-        encryption_required: bool=True, dry_run: bool=False):
+        encryption_required: bool=True, dry_run: bool=False, wait: int=30):
         """create an endpoint-hosted service by providing the raw config data for intercept.v1, host.v1.
 
         :param: name is required string
@@ -1074,7 +1096,11 @@ class Network:
                 )
             )
 
-        return(service)
+        if wait:
+            service_complete = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service", id=service['id'], wait=wait)
+            return(service_complete)
+        else:
+            return(service)
 
     @docstring_parameters(valid_service_protocols=VALID_SERVICE_PROTOCOLS)
     def create_service_transparent(self, name: str, client_hosts: list, client_ports: list, transparent_hosts: list, client_protocols: list=["tcp"], attributes: list=[],
@@ -1205,7 +1231,7 @@ class Network:
     @docstring_parameters(valid_service_protocols=VALID_SERVICE_PROTOCOLS)
     def create_service_advanced(self, name: str, endpoints: list, client_hosts: list, client_ports: list, client_protocols: list=["tcp"], 
         server_hosts: list=[], server_ports: list=[], server_protocols: list=[], attributes: list=[], 
-        edge_router_attributes: list=["#all"], encryption_required: bool=True, dry_run: bool=False):
+        edge_router_attributes: list=["#all"], encryption_required: bool=True, dry_run: bool=False, wait: int=30):
         """create an "advanced" PSM-based (platform service model) endpoint-hosted service.
 
         Multiple client intercepts may be specified i.e. lists of domain names or IP addresses, ports, and protocols. If alternative 
@@ -1371,7 +1397,11 @@ class Network:
                 )
             )
 
-        return(service)
+        if wait:
+            service_complete = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service", id=service['id'], wait=wait)
+            return(service_complete)
+        else:
+            return(service)
 
     # the above method was renamed to follow the development of PSM-based services (platform service models)
     create_endpoint_service = create_service_advanced
