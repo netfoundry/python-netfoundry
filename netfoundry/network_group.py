@@ -1,9 +1,9 @@
 import json                 # 
-import requests             # HTTP user agent will not emit server cert warnings if verify=False
-from requests.packages.urllib3.exceptions import InsecureRequestWarning
-requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-from .utility import RESOURCES, eprint
+from .utility import (
+    RESOURCES, STATUS_CODES,
+    eprint, http, 
+)
 
 class NetworkGroup:
     """use a Network Group by name or ID or the first group in the organization
@@ -77,7 +77,7 @@ class NetworkGroup:
                 # "hostType": "NC",
                 # "provider": "AWS"
             }
-            response = requests.get(
+            response = http.get(
                 self.session.audience+'core/v2/data-centers',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -88,7 +88,7 @@ class NetworkGroup:
         except:
             raise
 
-        if response_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == STATUS_CODES.codes.OK: # HTTP 200
             try:
                 all_data_centers = json.loads(response.text)['_embedded']['dataCenters']
                 aws_data_centers = [dc for dc in all_data_centers if dc['provider'] == "AWS"]
@@ -98,7 +98,7 @@ class NetworkGroup:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
@@ -110,7 +110,7 @@ class NetworkGroup:
         """fetch all product metadata
         """
         try:
-            response = requests.get(
+            response = http.get(
                 self.session.audience+'product-metadata/v2/download-urls.json',
                 proxies=self.session.proxies,
                 verify=self.session.verify
@@ -119,7 +119,7 @@ class NetworkGroup:
         except:
             raise
 
-        if response_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == STATUS_CODES.codes.OK: # HTTP 200
             try:
                 product_metadata = json.loads(response.text)
             except ValueError as e:
@@ -128,7 +128,7 @@ class NetworkGroup:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
@@ -206,7 +206,7 @@ class NetworkGroup:
         }
 
         try:
-            response = requests.post(
+            response = http.post(
                 self.session.audience+"core/v2/networks",
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -218,13 +218,13 @@ class NetworkGroup:
             raise
 
         any_in = lambda a, b: any(i in b for i in a)
-        response_code_symbols = [s.upper() for s in requests.status_codes._codes[response_code]]
+        response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['networks']['create_responses']):
             try:
                 network = json.loads(response.text)
             except ValueError as e:
                 raise e('ERROR: failed to load created network JSON, got HTTP code {:s} ({:d}) with body {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text)
                 )
@@ -233,7 +233,7 @@ class NetworkGroup:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
@@ -258,7 +258,7 @@ class NetworkGroup:
         try:
             headers = { "authorization": "Bearer " + self.session.token }
             entity_url = self.session.audience+'core/v2/networks/'+network_id
-            response = requests.delete(
+            response = http.delete(
                 entity_url,
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -268,10 +268,10 @@ class NetworkGroup:
         except:
             raise
 
-        if not response_code == requests.status_codes.codes.ACCEPTED:
+        if not response_code == STATUS_CODES.codes.ACCEPTED:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
