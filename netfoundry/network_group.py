@@ -49,57 +49,18 @@ class NetworkGroup:
         else:
             self.nfconsole = "https://{vanity}.{env}-nfconsole.io".format(vanity=self.vanity, env=self.session.environment)
 
-        # an attribute that is a dict for resolving network UUIDs by name
-        self.networks_by_name = dict()
-        for net in Organization.get_networks_by_group(self.network_group_id):
-            self.networks_by_name[net['name']] = net['id']
-        self.id = self.network_group_id
-        self.name = self.network_group_name
-
-        #inventory of infrequently-changing assets: configs, data centers
-        self.network_config_metadata = self.get_network_config_metadata()
-        self.network_config_metadata_by_name = dict()
-        for config in self.network_config_metadata:
-            self.network_config_metadata_by_name[config['name']] = config['id']
-            # e.g. { small: 2616da5c-4441-4c3d-a9a2-ed37262f2ef4 }
         self.nc_data_centers = self.get_controller_data_centers()
         self.nc_data_centers_by_location = dict()
         for dc in self.nc_data_centers:
             self.nc_data_centers_by_location[dc['locationCode']] = dc['id']
             # e.g. { us-east-1: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
 
-    def get_network_config_metadata(self):
-        """return the list of network config metadata which are required to create a network
-        """
-        try:
-            headers = { "authorization": "Bearer " + self.session.token }
-            response = requests.get(
-                self.session.audience+'core/v2/network-configs',
-                proxies=self.session.proxies,
-                verify=self.session.verify,
-                headers=headers
-            )
-
-            response_code = response.status_code
-        except:
-            raise
-
-        if response_code == requests.status_codes.codes.OK: # HTTP 200
-            try:
-                network_config_metadata = json.loads(response.text)['_embedded']['networkConfigMetadataList']
-            except ValueError as e:
-                eprint('ERROR getting network config metadata')
-                raise(e)
-        else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
-
-        return(network_config_metadata)
+    # resolve network UUIDs by name
+    def networks_by_name(self): # this was attribute self.networks_by_name and converted to method to avoid calling preemptively with self.__init__
+        my_networks_by_name = dict()
+        for net in self.session.get_networks_by_group(self.network_group_id):
+            my_networks_by_name[net['name']] = net['id']
+        return(my_networks_by_name)
 
     def get_controller_data_centers(self):
         """list the data centers where a Network Controller may be created
@@ -208,9 +169,6 @@ class NetworkGroup:
         :param size: optional network configuration metadata name from /core/v2/network-configs e.g. "medium"
         """
         
-        if not size in self.network_config_metadata_by_name.keys():
-            raise Exception("ERROR: unexpected Network size '{:s}'. Valid sizes include: {}.".format(size, str(self.network_config_metadata_by_name.keys())))
-
         if not location in self.nc_data_centers_by_location.keys():
             raise Exception("ERROR: unexpected Network location '{:s}'. Valid locations include: {}.".format(location, self.nc_data_centers_by_location.keys()))
 
