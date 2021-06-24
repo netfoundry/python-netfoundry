@@ -49,11 +49,15 @@ class NetworkGroup:
         else:
             self.nfconsole = "https://{vanity}.{env}-nfconsole.io".format(vanity=self.vanity, env=self.session.environment)
 
-        self.nc_data_centers = self.get_controller_data_centers()
-        self.nc_data_centers_by_location = dict()
-        for dc in self.nc_data_centers:
-            self.nc_data_centers_by_location[dc['locationCode']] = dc['id']
+    def nc_data_centers(self): # this was attribute self.nc_data_centers and converted to method to avoid calling preemptively with self.__init__
+        return(self.get_controller_data_centers())
+
+    def nc_data_centers_by_location(self): # this was attribute self.nc_data_centers_by_location and converted to method to avoid calling preemptively with self.__init__
+        my_nc_data_centers_by_location = dict()
+        for dc in self.get_controller_data_centers():
+            my_nc_data_centers_by_location[dc['locationCode']] = dc['id']
             # e.g. { us-east-1: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
+        return(my_nc_data_centers_by_location)
 
     # resolve network UUIDs by name
     def networks_by_name(self): # this was attribute self.networks_by_name and converted to method to avoid calling preemptively with self.__init__
@@ -169,8 +173,9 @@ class NetworkGroup:
         :param size: optional network configuration metadata name from /core/v2/network-configs e.g. "medium"
         """
         
-        if not location in self.nc_data_centers_by_location.keys():
-            raise Exception("ERROR: unexpected Network location '{:s}'. Valid locations include: {}.".format(location, self.nc_data_centers_by_location.keys()))
+        my_nc_data_centers_by_location = self.nc_data_centers_by_location()
+        if not location in my_nc_data_centers_by_location.keys():
+            raise Exception("ERROR: unexpected Network location '{:s}'. Valid locations include: {}.".format(location, my_nc_data_centers_by_location.keys()))
 
         request = {
             "name": name,
@@ -241,11 +246,12 @@ class NetworkGroup:
         :param name: optional Network name to delete
         """
         try:
+            networks_by_name = self.networks_by_name()
             if network_id:
 #                import epdb; epdb.serve()
-                network_name = next(name for name, uuid in self.networks_by_name.items() if uuid == network_id)
-            elif network_name and network_name in self.networks_by_name.keys():
-                network_id = self.networks_by_name[network_name]
+                network_name = next(name for name, uuid in networks_by_name.items() if uuid == network_id)
+            elif network_name and network_name in networks_by_name.keys():
+                network_id = networks_by_name[network_name]
         except:
             raise Exception("ERROR: need one of network_id or network_name for a Network in this Network Group: {:s}".format(self.name))
 

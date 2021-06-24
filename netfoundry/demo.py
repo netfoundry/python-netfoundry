@@ -108,7 +108,7 @@ def main():
     )
 
     # create a Network
-    if network_name in network_group.networks_by_name.keys():
+    if network_name in network_group.networks_by_name().keys():
         # use the Network
         network = netfoundry.Network(network_group, network_name=network_name)
         if args.command == "create":
