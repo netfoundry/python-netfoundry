@@ -150,7 +150,7 @@ RETRY_STRATEGY = Retry(
     backoff_factor=1
 )
 
-DEFAULT_TIMEOUT = 3#1 # seconds, Gateway Service waits 30s before responding with an error code e.g. 503 and
+DEFAULT_TIMEOUT = 31 # seconds, Gateway Service waits 30s before responding with an error code e.g. 503 and
 # so waiting at least 31s is necessary to obtain that information
 class TimeoutHTTPAdapter(HTTPAdapter):
     def __init__(self, *args, **kwargs):
