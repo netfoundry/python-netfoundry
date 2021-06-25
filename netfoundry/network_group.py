@@ -1,9 +1,9 @@
 import json                 # 
-import requests             # HTTP user agent will not emit server cert warnings if verify=False
-from requests.packages.urllib3.exceptions import InsecureRequestWarning
-requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-from .utility import RESOURCES, eprint
+from .utility import (
+    RESOURCES, STATUS_CODES,
+    eprint, http, 
+)
 
 class NetworkGroup:
     """use a Network Group by name or ID or the first group in the organization
@@ -15,7 +15,11 @@ class NetworkGroup:
         # TODO: review the use of org short name ref https://netfoundry.slack.com/archives/C45UDKR8V/p1603655594135000?thread_ts=1580318187.149400&cid=C45UDKR8V
         elif network_group_name:
             self.network_group_name = network_group_name
-            self.network_group_id = [ ng['id'] for ng in Organization.network_groups if ng['organizationShortName'] == network_group_name ][0]
+            network_group_matches = [ ng['id'] for ng in Organization.network_groups if ng['organizationShortName'] == network_group_name ]
+            if len(network_group_matches) == 1:
+                self.network_group_id = [ ng['id'] for ng in Organization.network_groups if ng['organizationShortName'] == network_group_name ][0]
+            else:
+                raise Exception("ERROR: there was not exactly one network group matching the name \"{}\"".format(network_group_name))
         elif len(Organization.network_groups) > 0:
             # first Network Group is typically the only Network Group
             self.network_group_id = Organization.network_groups[0]['id']
@@ -45,57 +49,22 @@ class NetworkGroup:
         else:
             self.nfconsole = "https://{vanity}.{env}-nfconsole.io".format(vanity=self.vanity, env=self.session.environment)
 
-        # an attribute that is a dict for resolving network UUIDs by name
-        self.networks_by_name = dict()
-        for net in Organization.get_networks_by_group(self.network_group_id):
-            self.networks_by_name[net['name']] = net['id']
-        self.id = self.network_group_id
-        self.name = self.network_group_name
+    def nc_data_centers(self): # this was attribute self.nc_data_centers and converted to method to avoid calling preemptively with self.__init__
+        return(self.get_controller_data_centers())
 
-        #inventory of infrequently-changing assets: configs, data centers
-        self.network_config_metadata = self.get_network_config_metadata()
-        self.network_config_metadata_by_name = dict()
-        for config in self.network_config_metadata:
-            self.network_config_metadata_by_name[config['name']] = config['id']
-            # e.g. { small: 2616da5c-4441-4c3d-a9a2-ed37262f2ef4 }
-        self.nc_data_centers = self.get_controller_data_centers()
-        self.nc_data_centers_by_location = dict()
-        for dc in self.nc_data_centers:
-            self.nc_data_centers_by_location[dc['locationCode']] = dc['id']
+    def nc_data_centers_by_location(self): # this was attribute self.nc_data_centers_by_location and converted to method to avoid calling preemptively with self.__init__
+        my_nc_data_centers_by_location = dict()
+        for dc in self.get_controller_data_centers():
+            my_nc_data_centers_by_location[dc['locationCode']] = dc['id']
             # e.g. { us-east-1: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
+        return(my_nc_data_centers_by_location)
 
-    def get_network_config_metadata(self):
-        """return the list of network config metadata which are required to create a network
-        """
-        try:
-            headers = { "authorization": "Bearer " + self.session.token }
-            response = requests.get(
-                self.session.audience+'core/v2/network-configs',
-                proxies=self.session.proxies,
-                verify=self.session.verify,
-                headers=headers
-            )
-
-            response_code = response.status_code
-        except:
-            raise
-
-        if response_code == requests.status_codes.codes.OK: # HTTP 200
-            try:
-                network_config_metadata = json.loads(response.text)['_embedded']['networkConfigMetadataList']
-            except ValueError as e:
-                eprint('ERROR getting network config metadata')
-                raise(e)
-        else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
-
-        return(network_config_metadata)
+    # resolve network UUIDs by name
+    def networks_by_name(self): # this was attribute self.networks_by_name and converted to method to avoid calling preemptively with self.__init__
+        my_networks_by_name = dict()
+        for net in self.session.get_networks_by_group(self.network_group_id):
+            my_networks_by_name[net['name']] = net['id']
+        return(my_networks_by_name)
 
     def get_controller_data_centers(self):
         """list the data centers where a Network Controller may be created
@@ -108,7 +77,7 @@ class NetworkGroup:
                 # "hostType": "NC",
                 # "provider": "AWS"
             }
-            response = requests.get(
+            response = http.get(
                 self.session.audience+'core/v2/data-centers',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -119,7 +88,7 @@ class NetworkGroup:
         except:
             raise
 
-        if response_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == STATUS_CODES.codes.OK: # HTTP 200
             try:
                 all_data_centers = json.loads(response.text)['_embedded']['dataCenters']
                 aws_data_centers = [dc for dc in all_data_centers if dc['provider'] == "AWS"]
@@ -129,7 +98,7 @@ class NetworkGroup:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
@@ -141,7 +110,7 @@ class NetworkGroup:
         """fetch all product metadata
         """
         try:
-            response = requests.get(
+            response = http.get(
                 self.session.audience+'product-metadata/v2/download-urls.json',
                 proxies=self.session.proxies,
                 verify=self.session.verify
@@ -150,7 +119,7 @@ class NetworkGroup:
         except:
             raise
 
-        if response_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == STATUS_CODES.codes.OK: # HTTP 200
             try:
                 product_metadata = json.loads(response.text)
             except ValueError as e:
@@ -159,7 +128,7 @@ class NetworkGroup:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
@@ -204,11 +173,9 @@ class NetworkGroup:
         :param size: optional network configuration metadata name from /core/v2/network-configs e.g. "medium"
         """
         
-        if not size in self.network_config_metadata_by_name.keys():
-            raise Exception("ERROR: unexpected Network size '{:s}'. Valid sizes include: {}.".format(size, str(self.network_config_metadata_by_name.keys())))
-
-        if not location in self.nc_data_centers_by_location.keys():
-            raise Exception("ERROR: unexpected Network location '{:s}'. Valid locations include: {}.".format(location, self.nc_data_centers_by_location.keys()))
+        my_nc_data_centers_by_location = self.nc_data_centers_by_location()
+        if not location in my_nc_data_centers_by_location.keys():
+            raise Exception("ERROR: unexpected Network location '{:s}'. Valid locations include: {}.".format(location, my_nc_data_centers_by_location.keys()))
 
         request = {
             "name": name,
@@ -239,7 +206,7 @@ class NetworkGroup:
         }
 
         try:
-            response = requests.post(
+            response = http.post(
                 self.session.audience+"core/v2/networks",
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -251,13 +218,13 @@ class NetworkGroup:
             raise
 
         any_in = lambda a, b: any(i in b for i in a)
-        response_code_symbols = [s.upper() for s in requests.status_codes._codes[response_code]]
+        response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['networks']['create_responses']):
             try:
                 network = json.loads(response.text)
             except ValueError as e:
                 raise e('ERROR: failed to load created network JSON, got HTTP code {:s} ({:d}) with body {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text)
                 )
@@ -266,7 +233,7 @@ class NetworkGroup:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
@@ -279,18 +246,19 @@ class NetworkGroup:
         :param name: optional Network name to delete
         """
         try:
+            networks_by_name = self.networks_by_name()
             if network_id:
 #                import epdb; epdb.serve()
-                network_name = next(name for name, uuid in self.networks_by_name.items() if uuid == network_id)
-            elif network_name and network_name in self.networks_by_name.keys():
-                network_id = self.networks_by_name[network_name]
+                network_name = next(name for name, uuid in networks_by_name.items() if uuid == network_id)
+            elif network_name and network_name in networks_by_name.keys():
+                network_id = networks_by_name[network_name]
         except:
             raise Exception("ERROR: need one of network_id or network_name for a Network in this Network Group: {:s}".format(self.name))
 
         try:
             headers = { "authorization": "Bearer " + self.session.token }
             entity_url = self.session.audience+'core/v2/networks/'+network_id
-            response = requests.delete(
+            response = http.delete(
                 entity_url,
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -300,10 +268,10 @@ class NetworkGroup:
         except:
             raise
 
-        if not response_code == requests.status_codes.codes.ACCEPTED:
+        if not response_code == STATUS_CODES.codes.ACCEPTED:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )

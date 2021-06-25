@@ -2,7 +2,12 @@ import unicodedata          # case insensitive compare in Utility
 import inflect              # singular and plural nouns
 import sys                  # open stderr
 from re import sub
-
+import requests             # HTTP user agent will not emit server cert warnings if verify=False
+from requests.packages.urllib3.exceptions import InsecureRequestWarning
+requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
+from requests import status_codes
 class Utility:
     def __init__(self):
         pass
@@ -136,3 +141,35 @@ def docstring_parameters(*args, **kwargs):
         obj.__doc__ = obj.__doc__.format(*args, **kwargs)
         return obj
     return dec
+
+
+RETRY_STRATEGY = Retry(
+    total=3,
+    status_forcelist=[413, 429, 503],
+    method_whitelist=["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE"],
+    backoff_factor=1
+)
+
+DEFAULT_TIMEOUT = 3#1 # seconds, Gateway Service waits 30s before responding with an error code e.g. 503 and
+# so waiting at least 31s is necessary to obtain that information
+class TimeoutHTTPAdapter(HTTPAdapter):
+    def __init__(self, *args, **kwargs):
+        self.timeout = DEFAULT_TIMEOUT
+        if "timeout" in kwargs:
+            self.timeout = kwargs["timeout"]
+            del kwargs["timeout"]
+        super().__init__(*args, **kwargs)
+
+    def send(self, request, **kwargs):
+        timeout = kwargs.get("timeout")
+        if timeout is None:
+            kwargs["timeout"] = self.timeout
+        return super().send(request, **kwargs)
+
+http = requests.Session()
+# Mount it for both http and https usage
+adapter = TimeoutHTTPAdapter(timeout=DEFAULT_TIMEOUT, max_retries=RETRY_STRATEGY)
+http.mount("https://", adapter)
+http.mount("http://", adapter)
+
+STATUS_CODES = status_codes
