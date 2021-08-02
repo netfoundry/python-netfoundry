@@ -1,19 +1,21 @@
 import json
-import re                   # regex
-from uuid import UUID       # validate UUIDv4 strings
-import time                 # enforce a timeout; sleep
+import re  # regex
 import sys
+import time  # enforce a timeout; sleep
+from uuid import UUID  # validate UUIDv4 strings
 
-from .utility import (
-    MAJOR_REGIONS, RESOURCES, HOST_PROPERTIES, EXCLUDED_PATCH_PROPERTIES, VALID_SERVICE_PROTOCOLS, VALID_SEPARATORS, STATUS_CODES,
-    eprint, plural, singular, docstring_parameters, http
-)
+from .utility import (EXCLUDED_PATCH_PROPERTIES, HOST_PROPERTIES,
+                      MAJOR_REGIONS, RESOURCES, STATUS_CODES, VALID_SEPARATORS,
+                      VALID_SERVICE_PROTOCOLS, docstring_parameters, eprint,
+                      http, plural, singular)
+
 
 class Network:
-    """describe and use a Network
-    """
+    """Describe and use a Network."""
+
     def __init__(self, NetworkGroup: object, network_id: str=None, network_name: str=None):
-        """
+        """Initialize Network.
+        
         :param obj NetworkGroup: required parent Network Group of this Network
         :param str network_name: optional name of the network to describe and use
         :param str network_id: optional UUID of the network to describe and use

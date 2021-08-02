@@ -1,13 +1,18 @@
-import unicodedata          # case insensitive compare in Utility
-import inflect              # singular and plural nouns
-import sys                  # open stderr
+import sys  # open stderr
+import unicodedata  # case insensitive compare in Utility
 from re import sub
-import requests             # HTTP user agent will not emit server cert warnings if verify=False
+
+import inflect  # singular and plural nouns
+from requests import \
+    Session  # HTTP user agent will not emit server cert warnings if verify=False
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
+
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+from requests import status_codes
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
-from requests import status_codes
+
+
 class Utility:
     def __init__(self):
         pass
@@ -166,7 +171,7 @@ class TimeoutHTTPAdapter(HTTPAdapter):
             kwargs["timeout"] = self.timeout
         return super().send(request, **kwargs)
 
-http = requests.Session()
+http = Session()
 # Mount it for both http and https usage
 adapter = TimeoutHTTPAdapter(timeout=DEFAULT_TIMEOUT, max_retries=RETRY_STRATEGY)
 http.mount("https://", adapter)

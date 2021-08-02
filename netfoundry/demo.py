@@ -4,12 +4,14 @@ Usage::
     $ python3 -m netfoundry.demo BibbidiBobbidiBoo
 """
 
-import netfoundry
-import sys
-import random
-import os
-from pathlib import Path
 import argparse
+import os
+import random
+import sys
+from pathlib import Path
+
+import netfoundry
+
 
 def main():
 
