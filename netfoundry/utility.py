@@ -5,13 +5,14 @@ from re import sub
 import inflect  # singular and plural nouns
 from requests import \
     Session  # HTTP user agent will not emit server cert warnings if verify=False
-from requests.packages.urllib3.exceptions import InsecureRequestWarning
+from urllib3.exceptions import InsecureRequestWarning
 
-requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 from requests import status_codes
 from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.retry import Retry
+from urllib3.util.retry import Retry
+from urllib3 import disable_warnings
 
+disable_warnings(InsecureRequestWarning)
 
 class Utility:
     def __init__(self):
