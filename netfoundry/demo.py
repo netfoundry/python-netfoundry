@@ -370,6 +370,7 @@ def main():
         customer_router = network.create_edge_router(
             name=customer_router_name,
             attributes=["#vmWareExitRouters"],
+            tunneler_enabled=True
         )
     else:
         customer_router = [er for er in customer_routers if er['name'] == customer_router_name][0]
