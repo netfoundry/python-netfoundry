@@ -1,14 +1,13 @@
+import json
 import os
-import json                 # 
-import requests             # HTTP user agent will not emit server cert warnings if verify=False
-from requests.packages.urllib3.exceptions import InsecureRequestWarning
-requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
-import re                   # regex
-import time                 # enforce a timeout; sleep
-import jwt                  # decode the JWT claimset
-from pathlib import Path    #
+import re  # regex
+import time  # enforce a timeout; sleep
+from pathlib import Path
 
-from .utility import RESOURCES, eprint
+import jwt  # decode the JWT claimset
+
+from .utility import RESOURCES, STATUS_CODES, eprint, http
+
 
 class Organization:
     """ Default is to use the Organization of the caller's user or API account identity
@@ -122,7 +121,7 @@ class Organization:
             }
             # request a token
             try:
-                response = requests.post(
+                response = http.post(
                     token_endpoint,
                     auth=(client_id, password),
                     data=assertion,
@@ -135,7 +134,7 @@ class Organization:
                 )
                 raise
 
-            if response_code == requests.status_codes.codes.OK:
+            if response_code == STATUS_CODES.codes.OK:
                 try:
                     token_text = json.loads(response.text)
                     self.token = token_text['access_token']
@@ -148,7 +147,7 @@ class Organization:
             else:
                 raise Exception(
                     'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                        requests.status_codes._codes[response_code][0].upper(),
+                        STATUS_CODES._codes[response_code][0].upper(),
                         response_code,
                         response.text
                     )
@@ -200,12 +199,12 @@ class Organization:
             "headers": { "authorization": "Bearer " + self.token }
         }
         try:
-            response = requests.get(**request)
+            response = http.get(**request)
             response_code = response.status_code
         except:
             raise
 
-        if response_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == STATUS_CODES.codes.OK: # HTTP 200
             try:
                 caller = json.loads(response.text)
             except ValueError as e:
@@ -214,12 +213,12 @@ class Organization:
         else:
             try:
                 request["url"] = self.audience+'identity/v1/user-identities/self'
-                response = requests.get(**request)
+                response = http.get(**request)
                 response_code = response.status_code
             except:
                 raise
 
-            if response_code == requests.status_codes.codes.OK: # HTTP 200
+            if response_code == STATUS_CODES.codes.OK: # HTTP 200
                 try:
                     caller = json.loads(response.text)
                 except ValueError as e:
@@ -228,7 +227,7 @@ class Organization:
             else:
                 raise Exception(
                     'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                        requests.status_codes._codes[response_code][0].upper(),
+                        STATUS_CODES._codes[response_code][0].upper(),
                         response_code,
                         response.text
                     )
@@ -241,7 +240,7 @@ class Organization:
         """
         try:
             headers = { "authorization": "Bearer " + self.token }
-            response = requests.get(
+            response = http.get(
                 self.audience+'identity/v1/organizations',
                 proxies=self.proxies,
                 verify=self.verify,
@@ -251,7 +250,7 @@ class Organization:
         except:
             raise
 
-        if response_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == STATUS_CODES.codes.OK: # HTTP 200
             try:
                 organizations = json.loads(response.text)
             except ValueError as e:
@@ -260,7 +259,7 @@ class Organization:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
@@ -273,7 +272,7 @@ class Organization:
         """
         try:
             headers = { "authorization": "Bearer " + self.token }
-            response = requests.get(
+            response = http.get(
                 self.audience+'identity/v1/organizations/'+id,
                 proxies=self.proxies,
                 verify=self.verify,
@@ -283,7 +282,7 @@ class Organization:
         except:
             raise
 
-        if response_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == STATUS_CODES.codes.OK: # HTTP 200
             try:
                 organization = json.loads(response.text)
             except ValueError as e:
@@ -292,7 +291,7 @@ class Organization:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
@@ -306,7 +305,7 @@ class Organization:
         try:
             # /network-groups/{id} returns a Network Group object
             headers = { "authorization": "Bearer " + self.token }
-            response = requests.get(
+            response = http.get(
                 self.audience+'rest/v1/network-groups/'+network_group_id,
                 proxies=self.proxies,
                 verify=self.verify,
@@ -316,7 +315,7 @@ class Organization:
         except:
             raise
 
-        if response_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == STATUS_CODES.codes.OK: # HTTP 200
             try:
                 network_group = json.loads(response.text)
             except ValueError as e:
@@ -325,7 +324,7 @@ class Organization:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
@@ -339,7 +338,7 @@ class Organization:
         try:
             # /networks/{id} returns a Network object
             headers = { "authorization": "Bearer " + self.token }
-            response = requests.get(
+            response = http.get(
                 self.audience+'rest/v1/networks/'+network_id,
                 proxies=self.proxies,
                 verify=self.verify,
@@ -349,7 +348,7 @@ class Organization:
         except:
             raise
 
-        if response_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == STATUS_CODES.codes.OK: # HTTP 200
             try:
                 network = json.loads(response.text)
             except ValueError as e:
@@ -358,7 +357,7 @@ class Organization:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
@@ -373,7 +372,7 @@ class Organization:
         try:
             # /network-groups returns a list of dicts (Network Group objects)
             headers = { "authorization": "Bearer " + self.token }
-            response = requests.get(
+            response = http.get(
                 self.audience+'rest/v1/network-groups',
                 proxies=self.proxies,
                 verify=self.verify,
@@ -383,7 +382,7 @@ class Organization:
         except:
             raise
 
-        if response_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == STATUS_CODES.codes.OK: # HTTP 200
             try:
                 network_groups = json.loads(response.text)['_embedded']['organizations']
             except ValueError as e:
@@ -392,7 +391,7 @@ class Organization:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
@@ -408,7 +407,7 @@ class Organization:
         try:
             # returns a list of dicts (network objects)
             headers = { "authorization": "Bearer " + self.token }
-            response = requests.get(
+            response = http.get(
                 self.audience+'core/v2/networks',
                 proxies=self.proxies,
                 verify=self.verify,
@@ -418,7 +417,7 @@ class Organization:
         except:
             raise
 
-        if response_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == STATUS_CODES.codes.OK: # HTTP 200
             try:
                 networks = json.loads(response.text)['_embedded'][RESOURCES['networks']['embedded']]
             except KeyError:
@@ -427,7 +426,7 @@ class Organization:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
@@ -446,7 +445,7 @@ class Organization:
             params = {
                 "findByNetworkGroupId": network_group_id
             }
-            response = requests.get(
+            response = http.get(
                 self.audience+'core/v2/networks',
                 proxies=self.proxies,
                 verify=self.verify,
@@ -457,7 +456,7 @@ class Organization:
         except:
             raise
 
-        if response_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == STATUS_CODES.codes.OK: # HTTP 200
             try:
                 embedded = json.loads(response.text)
                 networks = embedded['_embedded'][RESOURCES['networks']['embedded']]
@@ -467,7 +466,7 @@ class Organization:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )

@@ -4,12 +4,14 @@ Usage::
     $ python3 -m netfoundry.demo BibbidiBobbidiBoo
 """
 
-import netfoundry
-import sys
-import random
-import os
-from pathlib import Path
 import argparse
+import os
+import random
+import sys
+from pathlib import Path
+
+import netfoundry
+
 
 def main():
 
@@ -108,7 +110,7 @@ def main():
     )
 
     # create a Network
-    if network_name in network_group.networks_by_name.keys():
+    if network_name in network_group.networks_by_name().keys():
         # use the Network
         network = netfoundry.Network(network_group, network_name=network_name)
         if args.command == "create":
@@ -368,6 +370,7 @@ def main():
         customer_router = network.create_edge_router(
             name=customer_router_name,
             attributes=["#vmWareExitRouters"],
+            tunneler_enabled=True
         )
     else:
         customer_router = [er for er in customer_routers if er['name'] == customer_router_name][0]

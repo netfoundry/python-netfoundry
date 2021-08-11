@@ -1,19 +1,22 @@
 import json
-import requests             # HTTP user agent will not emit server cert warnings if verify=False
-from requests.packages.urllib3.exceptions import InsecureRequestWarning
-requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
-import re                   # regex
-from uuid import UUID       # validate UUIDv4 strings
-import time                 # enforce a timeout; sleep
+import re  # regex
 import sys
+import time
+from unicodedata import name  # enforce a timeout; sleep
+from uuid import UUID  # validate UUIDv4 strings
 
-from .utility import MAJOR_REGIONS, RESOURCES, HOST_PROPERTIES, EXCLUDED_PATCH_PROPERTIES, VALID_SERVICE_PROTOCOLS, VALID_SEPARATORS, eprint, plural, singular, docstring_parameters
+from .utility import (EXCLUDED_PATCH_PROPERTIES, HOST_PROPERTIES,
+                      MAJOR_REGIONS, RESOURCES, STATUS_CODES, VALID_SEPARATORS,
+                      VALID_SERVICE_PROTOCOLS, docstring_parameters, eprint,
+                      http, plural, singular)
+
 
 class Network:
-    """describe and use a Network
-    """
+    """Describe and use a Network."""
+
     def __init__(self, NetworkGroup: object, network_id: str=None, network_name: str=None):
-        """
+        """Initialize Network.
+        
         :param obj NetworkGroup: required parent Network Group of this Network
         :param str network_name: optional name of the network to describe and use
         :param str network_id: optional UUID of the network to describe and use
@@ -166,7 +169,7 @@ class Network:
                     params['provider'] = provider
                 else:
                     raise Exception("ERROR: unexpected cloud provider {:s}".format(provider))
-            response = requests.get(
+            response = http.get(
                 self.session.audience+'core/v2/data-centers',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -177,7 +180,7 @@ class Network:
         except:
             raise
 
-        if response_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == STATUS_CODES.codes.OK: # HTTP 200
             try:
                 data_centers = json.loads(response.text)['_embedded']['dataCenters']
             except ValueError as e:
@@ -186,7 +189,7 @@ class Network:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
@@ -213,7 +216,7 @@ class Network:
                     "id": endpoint_id
                 }
             ]
-            response = requests.post(
+            response = http.post(
                 self.session.audience+'core/v2/endpoints/share',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -224,10 +227,10 @@ class Network:
         except:
             raise
 
-        if not response_code == requests.status_codes.codes['ACCEPTED']:
+        if not response_code == STATUS_CODES.codes['ACCEPTED']:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
@@ -268,7 +271,7 @@ class Network:
             elif plural(type) == "edge-routers":
                 params['embed'] = "host"
 
-            response = requests.get(
+            response = http.get(
                 entity_url,
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -279,7 +282,7 @@ class Network:
         except:
             raise
 
-        if response_code == requests.status_codes.codes.OK:
+        if response_code == STATUS_CODES.codes.OK:
             try:
                 entity = json.loads(response.text)
             except:
@@ -337,7 +340,7 @@ class Network:
             elif type == "edge-routers":
                 params['embed'] = "host"
 
-            response = requests.get(
+            response = http.get(
                 self.session.audience+'core/v2/'+type,
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -348,7 +351,7 @@ class Network:
         except:
             raise
 
-        if response_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == STATUS_CODES.codes.OK: # HTTP 200
             try:
                 resources = json.loads(response.text)
             except ValueError as e:
@@ -357,7 +360,7 @@ class Network:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
@@ -379,7 +382,7 @@ class Network:
             for page in range(1,total_pages):
                 try:
                     params["page"] = page
-                    response = requests.get(
+                    response = http.get(
                         self.session.audience+'core/v2/'+type,
                         proxies=self.session.proxies,
                         verify=self.session.verify,
@@ -390,7 +393,7 @@ class Network:
                 except:
                     raise
 
-                if response_code == requests.status_codes.codes.OK: # HTTP 200
+                if response_code == STATUS_CODES.codes.OK: # HTTP 200
                     try:
                         resources = json.loads(response.text)
                         all_entities.extend(resources['_embedded'][RESOURCES[type]['embedded']])
@@ -400,7 +403,7 @@ class Network:
                 else:
                     raise Exception(
                         'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                            requests.status_codes._codes[response_code][0].upper(),
+                            STATUS_CODES._codes[response_code][0].upper(),
                             response_code,
                             response.text
                         )
@@ -433,7 +436,7 @@ class Network:
 
         headers = {
             "authorization": "Bearer " + self.session.token,
-            "content-type": "application/json;as=create"
+            "content-type": "application/json"
         }
 
         self_link = patch['_links']['self']['href']
@@ -443,7 +446,7 @@ class Network:
                 type, 
                 self_link))
         try:
-            before_response = requests.get(
+            before_response = http.get(
                 self_link,
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -453,7 +456,7 @@ class Network:
         except:
             raise
 
-        if before_response_code in [requests.status_codes.codes.OK]: # HTTP 200
+        if before_response_code in [STATUS_CODES.codes.OK]: # HTTP 200
             try:
                 before_resource = json.loads(before_response.text)
             except ValueError as e:
@@ -463,7 +466,7 @@ class Network:
             json_formatted = json.dumps(patch, indent=2)
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s} for GET {:s}'.format(
-                    requests.status_codes._codes[before_response_code][0].upper(),
+                    STATUS_CODES._codes[before_response_code][0].upper(),
                     before_response_code,
                     before_response.text,
                     json_formatted
@@ -487,7 +490,7 @@ class Network:
             if type == "services" and not "modelType" in pruned_patch.keys() and "model" in pruned_patch.keys():
                 pruned_patch["modelType"] = before_resource["modelType"]
             try:
-                after_response = requests.patch(
+                after_response = http.patch(
                     patch['_links']['self']['href'],
                     proxies=self.session.proxies,
                     verify=self.session.verify,
@@ -497,7 +500,7 @@ class Network:
                 after_response_code = after_response.status_code
             except:
                 raise
-            if after_response_code in [requests.status_codes.codes.OK, requests.status_codes.codes.ACCEPTED]: # HTTP 202
+            if after_response_code in [STATUS_CODES.codes.OK, STATUS_CODES.codes.ACCEPTED]: # HTTP 202
                 try:
                     after_resource = json.loads(after_response.text)
                 except ValueError as e:
@@ -507,7 +510,7 @@ class Network:
                 json_formatted = json.dumps(patch, indent=2)
                 raise Exception(
                     'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s} for PATCH update {:s}'.format(
-                        requests.status_codes._codes[after_response_code][0].upper(),
+                        STATUS_CODES._codes[after_response_code][0].upper(),
                         after_response_code,
                         after_response.text,
                         json_formatted
@@ -525,7 +528,7 @@ class Network:
             headers = {
                 "authorization": "Bearer " + self.session.token 
             }
-            response = requests.put(
+            response = http.put(
                 put['_links']['self']['href'],
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -536,7 +539,7 @@ class Network:
         except:
             raise
 
-        if response_code in [requests.status_codes.codes.OK, requests.status_codes.codes.ACCEPTED]: # HTTP 202
+        if response_code in [STATUS_CODES.codes.OK, STATUS_CODES.codes.ACCEPTED]: # HTTP 202
             try:
                 resource = json.loads(response.text)
             except ValueError as e:
@@ -546,7 +549,7 @@ class Network:
             json_formatted = json.dumps(put, indent=2)
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s} for PUT update {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text,
                     json_formatted
@@ -578,7 +581,7 @@ class Network:
             if session_identity:
                 body['sessionIdentityId'] = session_identity
 
-            response = requests.post(
+            response = http.post(
                 self.session.audience+'core/v2/endpoints',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -591,20 +594,20 @@ class Network:
 
         endpoint = None
         any_in = lambda a, b: any(i in b for i in a)
-        response_code_symbols = [s.upper() for s in requests.status_codes._codes[response_code]]
+        response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['endpoints']['create_responses']):
             try:
                 endpoint = json.loads(response.text)
             except ValueError as e:
                 raise e('ERROR: failed to load endpoint JSON, got HTTP code {:s} ({:d}) with body {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text)
                 )
                     
         else:
             raise Exception('ERROR: got unexpected HTTP code {:s} ({:d}) with body {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text)
             )
@@ -613,7 +616,7 @@ class Network:
             endpoint = self.wait_for_property_defined(property_name="jwt", property_type=str, entity_type="endpoint", id=endpoint['id'], wait=wait, sleep=sleep, progress=progress)
         return(endpoint)
 
-    def create_edge_router(self, name: str, attributes: list=[], link_listener: bool=False, data_center_id: str=None, tunneler_enabled: bool=False):
+    def create_edge_router(self, name: str, attributes: list=[], link_listener: bool=False, data_center_id: str=None, tunneler_enabled: bool=False, wait: int=30):
         """create an Edge Router
         """
         try:
@@ -633,7 +636,7 @@ class Network:
             if data_center_id:
                 body['dataCenterId'] = data_center_id
                 body['linkListener'] = True
-            response = requests.post(
+            response = http.post(
                 self.session.audience+'core/v2/edge-routers',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -644,7 +647,7 @@ class Network:
         except:
             raise
         any_in = lambda a, b: any(i in b for i in a)
-        response_code_symbols = [s.upper() for s in requests.status_codes._codes[response_code]]
+        response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['edge-routers']['create_responses']):
             try:
                 router = json.loads(response.text)
@@ -657,15 +660,21 @@ class Network:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
             )
 
-        return(router)
+        if wait:
+            router_complete = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="edge-router", id=router['id'], wait=wait)
+            if tunneler_enabled:
+                router_endpoint = self.wait_for_entity_name_exists(entity_name=name, entity_type="endpoint", wait=wait)
+            return(router_complete)
+        else:
+            return(router)
 
-    def create_edge_router_policy(self, name, endpoint_attributes=[], edge_router_attributes=[]):
+    def create_edge_router_policy(self, name: str, endpoint_attributes: list=[], edge_router_attributes: list=[], wait: int=30):
         """create an Edge Router Policy
         """
         try:
@@ -681,7 +690,7 @@ class Network:
                 "endpointAttributes": endpoint_attributes,
                 "edgeRouterAttributes": edge_router_attributes
             }
-            response = requests.post(
+            response = http.post(
                 self.session.audience+'core/v2/edge-router-policies',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -692,7 +701,7 @@ class Network:
         except:
             raise
         any_in = lambda a, b: any(i in b for i in a)
-        response_code_symbols = [s.upper() for s in requests.status_codes._codes[response_code]]
+        response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['edge-router-policies']['create_responses']):
             try:
                 policy = json.loads(response.text)
@@ -702,18 +711,22 @@ class Network:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
             )
 
-        return(policy)
+        if wait:
+            policy_complete = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="edge-router-policy", id=policy['id'], wait=wait)
+            return(policy_complete)
+        else:
+            return(policy)
 
     @docstring_parameters(valid_service_protocols=VALID_SERVICE_PROTOCOLS)
     def create_service_simple(self, name: str, client_host_name: str, client_port: int, server_host_name: str=None, 
         server_port: int=None, server_protocol: str="tcp", attributes: list=[], edge_router_attributes: list=["#all"], 
-        egress_router_id: str=None, endpoints: list=[], encryption_required: bool=True):
+        egress_router_id: str=None, endpoints: list=[], encryption_required: bool=True, wait: int=30):
         """create a service that is compatible with broadly-compatible Ziti config types ziti-tunneler-client.v1, ziti-tunneler-server.v1
 
         There are three hosting strategies for a service: SDK, Tunneler, or Router.
@@ -832,7 +845,7 @@ class Network:
             #     "beta": ''
             # }
 
-            response = requests.post(
+            response = http.post(
                 self.session.audience+'core/v2/services',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -844,7 +857,7 @@ class Network:
         except:
             raise
         any_in = lambda a, b: any(i in b for i in a)
-        response_code_symbols = [s.upper() for s in requests.status_codes._codes[response_code]]
+        response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['services']['create_responses']):
             try:
                 service = json.loads(response.text)
@@ -854,18 +867,22 @@ class Network:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
             )
 
-        return(service)
+        if wait:
+            service_complete = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service", id=service['id'], wait=wait)
+            return(service_complete)
+        else:
+            return(service)
 
     # the above method was renamed to follow the development of PSM-based services (platform service models)
     create_service = create_service_simple
 
-    def create_service_policy(self, name: str, services: list, endpoints: list, type: str="Bind", semantic: str="AnyOf", posture_checks: list=[], dry_run: bool=False):
+    def create_service_policy(self, name: str, services: list, endpoints: list, type: str="Bind", semantic: str="AnyOf", posture_checks: list=[], dry_run: bool=False, wait: int=30):
         """
         Create a generic Ziti service policy. AppWANs are Dial-type service policies.
 
@@ -903,7 +920,7 @@ class Network:
             if dry_run:
                 return(body)
 
-            response = requests.post(
+            response = http.post(
                 self.session.audience+'core/v2/service-policies',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -916,7 +933,7 @@ class Network:
             raise
 
         any_in = lambda a, b: any(i in b for i in a)
-        response_code_symbols = [s.upper() for s in requests.status_codes._codes[response_code]]
+        response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['service-policies']['create_responses']):
             try:
                 service_policy = json.loads(response.text)
@@ -926,15 +943,20 @@ class Network:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
             )
 
-        return(service_policy)
+        if wait:
+            service_policy_complete = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service-policy", id=service_policy['id'], wait=wait)
+            return(service_policy_complete)
+        else:
+            return(service_policy)
 
-    def create_service_edge_router_policy(self, name: str, services: list, edge_routers: list, semantic: str="AnyOf", dry_run: bool=False):
+
+    def create_service_edge_router_policy(self, name: str, services: list, edge_routers: list, semantic: str="AnyOf", dry_run: bool=False, wait: int=30):
         """
         Create a generic Ziti service edge router policy (SERP). Model-based services auto-create a SERP.
 
@@ -966,7 +988,7 @@ class Network:
             if dry_run:
                 return(body)
 
-            response = requests.post(
+            response = http.post(
                 self.session.audience+'core/v2/service-edge-router-policies',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -979,7 +1001,7 @@ class Network:
             raise
 
         any_in = lambda a, b: any(i in b for i in a)
-        response_code_symbols = [s.upper() for s in requests.status_codes._codes[response_code]]
+        response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['service-edge-router-policies']['create_responses']):
             try:
                 service_edge_router_policy = json.loads(response.text)
@@ -989,15 +1011,20 @@ class Network:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
             )
-        return(service_edge_router_policy)
+
+        if wait:
+            service_edge_router_policy_complete = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service-edge-router-policy", id=service_edge_router_policy['id'], wait=wait)
+            return(service_edge_router_policy_complete)
+        else:
+            return(service_edge_router_policy)
 
     def create_service_with_configs(self, name: str, intercept_config_data: dict, host_config_data: dict, attributes: list=[],
-        encryption_required: bool=True, dry_run: bool=False):
+        encryption_required: bool=True, dry_run: bool=False, wait: int=30):
         """create an endpoint-hosted service by providing the raw config data for intercept.v1, host.v1.
 
         :param: name is required string
@@ -1045,7 +1072,7 @@ class Network:
             if dry_run:
                 return(body)
 
-            response = requests.post(
+            response = http.post(
                 self.session.audience+'core/v2/services',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -1058,7 +1085,7 @@ class Network:
             raise
 
         any_in = lambda a, b: any(i in b for i in a)
-        response_code_symbols = [s.upper() for s in requests.status_codes._codes[response_code]]
+        response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['services']['create_responses']):
             try:
                 service = json.loads(response.text)
@@ -1068,13 +1095,17 @@ class Network:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
             )
 
-        return(service)
+        if wait:
+            service_complete = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service", id=service['id'], wait=wait)
+            return(service_complete)
+        else:
+            return(service)
 
     @docstring_parameters(valid_service_protocols=VALID_SERVICE_PROTOCOLS)
     def create_service_transparent(self, name: str, client_hosts: list, client_ports: list, transparent_hosts: list, client_protocols: list=["tcp"], attributes: list=[],
@@ -1205,7 +1236,7 @@ class Network:
     @docstring_parameters(valid_service_protocols=VALID_SERVICE_PROTOCOLS)
     def create_service_advanced(self, name: str, endpoints: list, client_hosts: list, client_ports: list, client_protocols: list=["tcp"], 
         server_hosts: list=[], server_ports: list=[], server_protocols: list=[], attributes: list=[], 
-        edge_router_attributes: list=["#all"], encryption_required: bool=True, dry_run: bool=False):
+        edge_router_attributes: list=["#all"], encryption_required: bool=True, dry_run: bool=False, wait: int=30):
         """create an "advanced" PSM-based (platform service model) endpoint-hosted service.
 
         Multiple client intercepts may be specified i.e. lists of domain names or IP addresses, ports, and protocols. If alternative 
@@ -1342,7 +1373,7 @@ class Network:
             if dry_run:
                 return(body)
 
-            response = requests.post(
+            response = http.post(
                 self.session.audience+'core/v2/services',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -1355,7 +1386,7 @@ class Network:
             raise
 
         any_in = lambda a, b: any(i in b for i in a)
-        response_code_symbols = [s.upper() for s in requests.status_codes._codes[response_code]]
+        response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['services']['create_responses']):
             try:
                 service = json.loads(response.text)
@@ -1365,13 +1396,17 @@ class Network:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
             )
 
-        return(service)
+        if wait:
+            service_complete = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service", id=service['id'], wait=wait)
+            return(service_complete)
+        else:
+            return(service)
 
     # the above method was renamed to follow the development of PSM-based services (platform service models)
     create_endpoint_service = create_service_advanced
@@ -1394,7 +1429,7 @@ class Network:
                 "postureCheckAttributes": posture_check_attributes
             }
 
-            response = requests.post(
+            response = http.post(
                 self.session.audience+'core/v2/app-wans',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -1405,7 +1440,7 @@ class Network:
         except:
             raise
         any_in = lambda a, b: any(i in b for i in a)
-        response_code_symbols = [s.upper() for s in requests.status_codes._codes[response_code]]
+        response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['app-wans']['create_responses']):
             try:
                 app_wan = json.loads(response.text)
@@ -1415,7 +1450,7 @@ class Network:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
@@ -1438,7 +1473,7 @@ class Network:
             if group is not None:
                 params['findByNetworkGroupId'] = group
 
-            response = requests.get(
+            response = http.get(
                 self.session.audience+'core/v2/networks',
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -1449,7 +1484,7 @@ class Network:
         except:
             raise
 
-        if response_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == STATUS_CODES.codes.OK: # HTTP 200
             try:
                 networks = json.loads(response.text)
             except ValueError as e:
@@ -1458,7 +1493,7 @@ class Network:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
@@ -1478,7 +1513,7 @@ class Network:
             headers = { 
                 "authorization": "Bearer " + self.session.token 
             }
-            response = requests.get(
+            response = http.get(
                 self.session.audience+'core/v2/networks/'+network_id,
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -1488,7 +1523,7 @@ class Network:
         except:
             raise
 
-        if response_code == requests.status_codes.codes.OK: # HTTP 200
+        if response_code == STATUS_CODES.codes.OK: # HTTP 200
             try:
                 network = json.loads(response.text)
             except ValueError as e:
@@ -1497,7 +1532,7 @@ class Network:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
@@ -1582,6 +1617,79 @@ class Network:
                     str(property_type),
                 )
             )
+
+    @docstring_parameters(resource_entity_types=str(RESOURCES.keys()))
+    def wait_for_entity_name_exists(self, entity_name: str, entity_type: str, wait: int=60, sleep: int=3, progress: bool=False):
+        """Continuously poll until expiry for the expected entity name to exist.
+
+        :param: entity_name
+        :param: entity_type is singular or plural form, any of {resource_entity_types}
+        :param: wait optional SECONDS after which to raise an exception defaults to five minutes (300)
+        :param: sleep SECONDS polling interval
+        :param: progress print a horizontal progress meter as dots, default false
+        """
+
+        now = time.time()
+
+        if not wait >= sleep:
+            raise Exception(
+                "ERROR: wait duration ({:d}) must be greater than or equal to polling interval ({:d})".format(
+                    wait, sleep
+                )
+            )
+
+        if not plural(entity_type) in RESOURCES.keys():
+            raise Exception("ERROR: unknown type \"{type}\". Choices: {choices}".format(
+                type=entity_type,
+                choices=str(RESOURCES.keys())
+            ))
+
+        # poll for status until expiry
+        if progress:
+            sys.stdout.write(
+                '\twaiting for entity {:s} ({:s}) or until {:s}.'.format(
+                    entity_name,
+                    str(entity_type),
+                    time.ctime(now+wait)
+                )
+            )
+
+        found_entities = []
+        while time.time() < now+wait:
+            if progress:
+                sys.stdout.write('.') # print a stop each iteration to imply progress
+                sys.stdout.flush()
+
+            try:
+                found_entities = self.get_resources(type=plural(entity_type), name=entity_name)
+            except:
+                raise
+
+            # if expected entity exists then verify name, else sleep
+            if len(found_entities) > 1:
+                if progress:
+                    print() # newline terminates progress meter
+                raise Exception(
+                    'ERROR: Found more than one {type} named "{name}".'.format(
+                        type=singular(entity_type), name=entity_name
+                    )
+                )
+            elif len(found_entities) == 1:
+                if progress:
+                    print() # newline terminates progress meter
+                return(found_entities[0])
+            else:
+                if progress:
+                    sys.stdout.write('\n{:^19s}:{:^19s} ({:s}):'.format("fetching",entity_name, singular(entity_type)))
+                time.sleep(sleep)
+
+        if progress:
+            print() # newline terminates progress meter
+
+        raise Exception('ERROR: failed to find one {type} named "{name}".'.format(
+                type=singular(entity_type), name=entity_name
+            )
+        )
 
     def wait_for_status(self, expect: str="PROVISIONED", type: str="network", wait: int=300, sleep: int=20, id: str=None, progress: bool=False):
         """continuously poll for the expected status until expiry
@@ -1756,7 +1864,7 @@ class Network:
             else:
                 entity_url += type+'s/'+id
 
-            response = requests.get(
+            response = http.get(
                 entity_url,
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -1767,7 +1875,7 @@ class Network:
         except:
             raise
 
-        if response_code == requests.status_codes.codes.OK:
+        if response_code == STATUS_CODES.codes.OK:
             try:
                 status = json.loads(response.text)['status']
                 name = json.loads(response.text)['name']
@@ -1776,14 +1884,14 @@ class Network:
                 raise
             else:
                 return {
-                    'http_status': requests.status_codes._codes[response_code][0].upper(),
+                    'http_status': STATUS_CODES._codes[response_code][0].upper(),
                     'response_code': response_code,
                     'status': status,
                     'name': name
                 }
         else:
             return {
-                'http_status': requests.status_codes._codes[response_code][0].upper(),
+                'http_status': STATUS_CODES._codes[response_code][0].upper(),
                 'response_code': response_code
             }
 
@@ -1795,7 +1903,7 @@ class Network:
         try:
             headers = { "authorization": "Bearer " + self.session.token }
             entity_url = self.session.audience+'core/v2/edge-routers/'+id+'/registration-key'
-            response = requests.post(
+            response = http.post(
                 entity_url,
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -1805,7 +1913,7 @@ class Network:
         except:
             raise
 
-        if response_code == requests.status_codes.codes.OK:
+        if response_code == STATUS_CODES.codes.OK:
             try:
                 registration_object = json.loads(response.text)
             except:
@@ -1815,7 +1923,7 @@ class Network:
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
@@ -1834,8 +1942,8 @@ class Network:
             headers = { "authorization": "Bearer " + self.session.token }
             entity_url = self.session.audience+'core/v2/networks/'+self.id
             expected_responses = [
-                requests.status_codes.codes.ACCEPTED,
-                requests.status_codes.codes.OK
+                STATUS_CODES.codes.ACCEPTED,
+                STATUS_CODES.codes.OK
             ]
             if not type == 'network':
                 if id is None:
@@ -1846,7 +1954,7 @@ class Network:
             # if type == "service":
             #     params["beta"] = ''
 
-            response = requests.delete(
+            response = http.delete(
                 entity_url,
                 proxies=self.session.proxies,
                 verify=self.session.verify,
@@ -1860,7 +1968,7 @@ class Network:
         if not response_code in expected_responses:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    requests.status_codes._codes[response_code][0].upper(),
+                    STATUS_CODES._codes[response_code][0].upper(),
                     response_code,
                     response.text
                 )
