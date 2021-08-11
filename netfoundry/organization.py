@@ -1,14 +1,13 @@
+import json
 import os
-import json                 # 
-import re                   # regex
-import time                 # enforce a timeout; sleep
-import jwt                  # decode the JWT claimset
-from pathlib import Path    #
+import re  # regex
+import time  # enforce a timeout; sleep
+from pathlib import Path
 
-from .utility import (
-    RESOURCES, STATUS_CODES,
-    eprint, http,
-)
+import jwt  # decode the JWT claimset
+
+from .utility import RESOURCES, STATUS_CODES, eprint, http
+
 
 class Organization:
     """ Default is to use the Organization of the caller's user or API account identity

@@ -5,9 +5,11 @@ Usage::
 
 PYTHON_ARGCOMPLETE_OK
 """
-from milc import cli
 import pkg_resources  # part of setuptools
+from milc import cli
+
 import netfoundry
+
 
 @cli.argument('-c', '--credentials', help='API account JSON file from web console', default='credentials.json')
 @cli.argument('-p', '--proxy', help='HTTP proxy URL e.g. http://locahost:8888', default=None)

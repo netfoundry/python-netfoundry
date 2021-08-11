@@ -1,19 +1,22 @@
 import json
-import re                   # regex
-from uuid import UUID       # validate UUIDv4 strings
-import time                 # enforce a timeout; sleep
+import re  # regex
 import sys
+import time
+from unicodedata import name  # enforce a timeout; sleep
+from uuid import UUID  # validate UUIDv4 strings
 
-from .utility import (
-    MAJOR_REGIONS, RESOURCES, HOST_PROPERTIES, EXCLUDED_PATCH_PROPERTIES, VALID_SERVICE_PROTOCOLS, VALID_SEPARATORS, STATUS_CODES,
-    eprint, plural, singular, docstring_parameters, http
-)
+from .utility import (EXCLUDED_PATCH_PROPERTIES, HOST_PROPERTIES,
+                      MAJOR_REGIONS, RESOURCES, STATUS_CODES, VALID_SEPARATORS,
+                      VALID_SERVICE_PROTOCOLS, docstring_parameters, eprint,
+                      http, plural, singular)
+
 
 class Network:
-    """describe and use a Network
-    """
+    """Describe and use a Network."""
+
     def __init__(self, NetworkGroup: object, network_id: str=None, network_name: str=None):
-        """
+        """Initialize Network.
+        
         :param obj NetworkGroup: required parent Network Group of this Network
         :param str network_name: optional name of the network to describe and use
         :param str network_id: optional UUID of the network to describe and use
@@ -433,7 +436,7 @@ class Network:
 
         headers = {
             "authorization": "Bearer " + self.session.token,
-            "content-type": "application/json;as=create"
+            "content-type": "application/json"
         }
 
         self_link = patch['_links']['self']['href']
@@ -665,6 +668,8 @@ class Network:
 
         if wait:
             router_complete = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="edge-router", id=router['id'], wait=wait)
+            if tunneler_enabled:
+                router_endpoint = self.wait_for_entity_name_exists(entity_name=name, entity_type="endpoint", wait=wait)
             return(router_complete)
         else:
             return(router)
@@ -1612,6 +1617,79 @@ class Network:
                     str(property_type),
                 )
             )
+
+    @docstring_parameters(resource_entity_types=str(RESOURCES.keys()))
+    def wait_for_entity_name_exists(self, entity_name: str, entity_type: str, wait: int=60, sleep: int=3, progress: bool=False):
+        """Continuously poll until expiry for the expected entity name to exist.
+
+        :param: entity_name
+        :param: entity_type is singular or plural form, any of {resource_entity_types}
+        :param: wait optional SECONDS after which to raise an exception defaults to five minutes (300)
+        :param: sleep SECONDS polling interval
+        :param: progress print a horizontal progress meter as dots, default false
+        """
+
+        now = time.time()
+
+        if not wait >= sleep:
+            raise Exception(
+                "ERROR: wait duration ({:d}) must be greater than or equal to polling interval ({:d})".format(
+                    wait, sleep
+                )
+            )
+
+        if not plural(entity_type) in RESOURCES.keys():
+            raise Exception("ERROR: unknown type \"{type}\". Choices: {choices}".format(
+                type=entity_type,
+                choices=str(RESOURCES.keys())
+            ))
+
+        # poll for status until expiry
+        if progress:
+            sys.stdout.write(
+                '\twaiting for entity {:s} ({:s}) or until {:s}.'.format(
+                    entity_name,
+                    str(entity_type),
+                    time.ctime(now+wait)
+                )
+            )
+
+        found_entities = []
+        while time.time() < now+wait:
+            if progress:
+                sys.stdout.write('.') # print a stop each iteration to imply progress
+                sys.stdout.flush()
+
+            try:
+                found_entities = self.get_resources(type=plural(entity_type), name=entity_name)
+            except:
+                raise
+
+            # if expected entity exists then verify name, else sleep
+            if len(found_entities) > 1:
+                if progress:
+                    print() # newline terminates progress meter
+                raise Exception(
+                    'ERROR: Found more than one {type} named "{name}".'.format(
+                        type=singular(entity_type), name=entity_name
+                    )
+                )
+            elif len(found_entities) == 1:
+                if progress:
+                    print() # newline terminates progress meter
+                return(found_entities[0])
+            else:
+                if progress:
+                    sys.stdout.write('\n{:^19s}:{:^19s} ({:s}):'.format("fetching",entity_name, singular(entity_type)))
+                time.sleep(sleep)
+
+        if progress:
+            print() # newline terminates progress meter
+
+        raise Exception('ERROR: failed to find one {type} named "{name}".'.format(
+                type=singular(entity_type), name=entity_name
+            )
+        )
 
     def wait_for_status(self, expect: str="PROVISIONED", type: str="network", wait: int=300, sleep: int=20, id: str=None, progress: bool=False):
         """continuously poll for the expected status until expiry

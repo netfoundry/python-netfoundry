@@ -1,9 +1,7 @@
-import json                 # 
+import json
 
-from .utility import (
-    RESOURCES, STATUS_CODES,
-    eprint, http, 
-)
+from .utility import RESOURCES, STATUS_CODES, eprint, http
+
 
 class NetworkGroup:
     """use a Network Group by name or ID or the first group in the organization
