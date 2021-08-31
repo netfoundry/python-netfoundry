@@ -49,7 +49,6 @@ class Network:
 
     def endpoints(self, typeId: str=None):
         if typeId is not None:
-#            import epdb; epdb.serve()
             return(self.get_resources(type="endpoints", typeId=typeId))
         else:
             return(self.get_resources(type="endpoints"))
@@ -475,9 +474,13 @@ class Network:
         # compare the patch to the discovered, current state, adding new or updated keys to pruned_patch
         pruned_patch = dict()
         for k in patch.keys():
-            if k not in EXCLUDED_PATCH_PROPERTIES[type] and k in before_resource.keys() and not before_resource[k] == patch[k]:
-                pruned_patch[k] = patch[k]
-
+            if k not in EXCLUDED_PATCH_PROPERTIES[type] and k in before_resource.keys():
+                if isinstance(patch[k], list):
+                    if not set(before_resource[k]) == set(patch[k]):
+                        pruned_patch[k] = list(set(patch[k]))
+                else:
+                    if not before_resource[k] == patch[k]:
+                        pruned_patch[k] = patch[k]
         headers = {
             "authorization": "Bearer " + self.session.token
         }
@@ -490,6 +493,8 @@ class Network:
             if type == "services" and not "modelType" in pruned_patch.keys() and "model" in pruned_patch.keys():
                 pruned_patch["modelType"] = before_resource["modelType"]
             try:
+                # if type == "app-wans":
+                #     import epdb; epdb.serve()
                 after_response = http.patch(
                     patch['_links']['self']['href'],
                     proxies=self.session.proxies,
@@ -786,38 +791,7 @@ class Network:
                 }            
                 if endpoints and not egress_router_id:
                     body['modelType'] = "TunnelerToEndpoint"
-                    # parse out the elements in the list of endpoints as one of #attribute, UUID, or resolvable Endoint name
-                    bind_endpoints = list()
-                    for endpoint in endpoints:
-                        if endpoint[0:1] == '#':
-                            bind_endpoints += [endpoint]
-                        else:
-                            # strip leading @ if present and re-add later after verifying the named endpoint exists
-                            if endpoint[0:1] == '@':
-                                endpoint = endpoint[1:]
-
-                            # if UUIDv4 then resolve to name, else verify the named endpoint exists 
-                            try:
-                                UUID(endpoint, version=4) # assigned below under "else" if already a UUID
-                            except ValueError:
-                                # else assume is a name and resolve to ID
-                                try: 
-                                    name_lookup = self.get_resources(type="endpoints",name=endpoint)[0]
-                                    endpoint_name = name_lookup['name']
-                                except Exception as e:
-                                    raise Exception('ERROR: Failed to find exactly one hosting endpoint named "{}". Caught exception: {}'.format(endpoint, e))
-                                # append to list after successfully resolving name to ID
-                                else: bind_endpoints += ['@'+endpoint_name] 
-                            else:
-                                try:
-                                    name_lookup = self.get_resource(type="endpoint",id=endpoint)
-                                    endpoint_name = name_lookup['name']
-                                except Exception as e:
-                                    raise Exception('ERROR: Failed to find exactly one hosting endpoint with ID "{}". Caught exception: {}'.format(endpoint, e))
-                                else: bind_endpoints += ['@'+endpoint_name] 
-                    body['model']['bindEndpointAttributes'] = bind_endpoints
                     body['model']['serverEgress'] = server_egress
-
                 elif egress_router_id and not endpoints:
                     body['modelType'] = "TunnelerToEdgeRouter"
                     # check if UUIDv4
@@ -840,6 +814,39 @@ class Network:
             if edge_router_attributes and not edge_router_attributes == ['#all']:
                 eprint("WARN: overriding default service Edge Router Policy #all for new service {:s}".format(name))
                 body['edgeRouterAttributes'] = edge_router_attributes
+
+            if body['modelType'] in ["TunnelerToSdk","TunnelerToEndpoint"]:
+                # parse out the elements in the list of endpoints as one of #attribute, UUID, or resolvable Endoint name
+                bind_endpoints = list()
+                for endpoint in endpoints:
+                    if endpoint[0:1] == '#':
+                        bind_endpoints += [endpoint]
+                    else:
+                        # strip leading @ if present and re-add later after verifying the named endpoint exists
+                        if endpoint[0:1] == '@':
+                            endpoint = endpoint[1:]
+
+                        # if UUIDv4 then resolve to name, else verify the named endpoint exists 
+                        try:
+                            UUID(endpoint, version=4) # assigned below under "else" if already a UUID
+                        except ValueError:
+                            # else assume is a name and resolve to ID
+                            try: 
+                                name_lookup = self.get_resources(type="endpoints",name=endpoint)[0]
+                                endpoint_name = name_lookup['name']
+                            except Exception as e:
+                                raise Exception('ERROR: Failed to find exactly one hosting endpoint named "{}". Caught exception: {}'.format(endpoint, e))
+                            # append to list after successfully resolving name to ID
+                            else: bind_endpoints += ['@'+endpoint_name] 
+                        else:
+                            try:
+                                name_lookup = self.get_resource(type="endpoint",id=endpoint)
+                                endpoint_name = name_lookup['name']
+                            except Exception as e:
+                                raise Exception('ERROR: Failed to find exactly one hosting endpoint with ID "{}". Caught exception: {}'.format(endpoint, e))
+                            else: bind_endpoints += ['@'+endpoint_name] 
+                body['model']['bindEndpointAttributes'] = bind_endpoints
+
             params = dict()
             # params = {
             #     "beta": ''
