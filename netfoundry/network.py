@@ -164,7 +164,7 @@ class Network:
                 "hostType": "ER"
             }
             if provider is not None:
-                if provider in ["AWS", "AZURE", "GCP", "ALICLOUD", "NETFOUNDRY", "OCP"]:
+                if provider in ["AWS", "AZURE", "GCP", "OCP"]:
                     params['provider'] = provider
                 else:
                     raise Exception("ERROR: unexpected cloud provider {:s}".format(provider))
