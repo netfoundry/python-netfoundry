@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-r"""Example script to create a NetFoundry Network
+r"""Use this script to create a NetFoundry network.
 Usage::
     $ python3 -m netfoundry.demo BibbidiBobbidiBoo
 """
@@ -14,7 +14,7 @@ import netfoundry
 
 
 def main():
-
+    """Run the demo script."""
     print("DEBUG: running demo script in \"{:s}\"".format(sys.argv[0]))
 
     parser = argparse.ArgumentParser()

@@ -563,7 +563,8 @@ class Network:
         return(resource)
 
     def create_endpoint(self, name: str, attributes: list=[], session_identity: str=None, wait: int=30, sleep: int=2, progress: bool=False):
-        """create an endpoint
+        """Create an endpoint.
+
         :param: name is required string on which to key future operations for this endpoint
         :param: attributes is an optional list of endpoint roles of which this endpoint is a member
         :param: session_identity is optional string UUID of the identity in the NF Organization for
@@ -597,12 +598,12 @@ class Network:
         except:
             raise
 
-        endpoint = None
+        started = None
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['endpoints']['create_responses']):
             try:
-                endpoint = json.loads(response.text)
+                started = json.loads(response.text)
             except ValueError as e:
                 raise e('ERROR: failed to load endpoint JSON, got HTTP code {:s} ({:d}) with body {:s}'.format(
                     STATUS_CODES._codes[response_code][0].upper(),
@@ -616,13 +617,41 @@ class Network:
                     response_code,
                     response.text)
             )
+        # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
+        process_id = started['_links']['process']['href'].split('/')[6]
 
+        # a non-zero integer value for 'wait' guarantees that the method returns the fully-provisioned entity's object or times out
+        #  with an exception, and a zero value guarantees only that the async create process started successfully within a short time
+        # frame
         if wait:
-            endpoint = self.wait_for_property_defined(property_name="jwt", property_type=str, entity_type="endpoint", id=endpoint['id'], wait=wait, sleep=sleep, progress=progress)
-        return(endpoint)
+            try:
+                self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait) # sleep=sleep, progress=progress
+            except:
+                raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
+            try:
+                # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
+                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
+                finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="endpoint", 
+                                                            id=started['id'], wait=3, sleep=1)
+            except:
+                raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
+            return(finished)
+        else:
+            try:
+                self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2) # sleep=sleep, progress=progress
+            except:
+                raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
+            return(started)
 
     def create_edge_router(self, name: str, attributes: list=[], link_listener: bool=False, data_center_id: str=None, tunneler_enabled: bool=False, wait: int=30):
-        """create an Edge Router
+        """Create an Edge Router.
+
+        :param name:              a meaningful, unique name
+        :param attributes:        a list of hashtag role attributes
+        :param link_listener:     true if router should listen for other routers' links on 80/tcp
+        :param data_center_id:    the UUIDv4 of a data center location that can host edge routers
+        :param tunneler_enabled:  true if the built-in tunneler features should be enabled for hosting or interception or both
+        :param wait:              seconds to wait for async create to succeed
         """
         try:
             headers = { 
@@ -655,7 +684,7 @@ class Network:
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['edge-routers']['create_responses']):
             try:
-                router = json.loads(response.text)
+                started = json.loads(response.text)
             except ValueError as e:
                 eprint('ERROR: failed to load {:s} object from POST response'.format("Edge Router"))
                 raise(e)
@@ -671,13 +700,33 @@ class Network:
                 )
             )
 
+        # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
+        process_id = started['_links']['process']['href'].split('/')[6]
+
+        # a non-zero integer value for 'wait' guarantees that the method returns the fully-provisioned entity's object or times out
+        #  with an exception, and a zero value guarantees only that the async create process started successfully within a short time
+        # frame
         if wait:
-            router_complete = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="edge-router", id=router['id'], wait=wait)
+            try:
+                self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait) # sleep=sleep, progress=progress
+            except:
+                raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
+            try:
+                # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
+                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
+                finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="edge-router", 
+                                                            id=started['id'], wait=3, sleep=1)
+            except:
+                raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
             if tunneler_enabled:
                 router_endpoint = self.wait_for_entity_name_exists(entity_name=name, entity_type="endpoint", wait=wait)
-            return(router_complete)
+            return(finished)
         else:
-            return(router)
+            try:
+                self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2) # sleep=sleep, progress=progress
+            except:
+                raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
+            return(started)
 
     def create_edge_router_policy(self, name: str, endpoint_attributes: list=[], edge_router_attributes: list=[], wait: int=30):
         """create an Edge Router Policy
@@ -709,7 +758,7 @@ class Network:
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['edge-router-policies']['create_responses']):
             try:
-                policy = json.loads(response.text)
+                started = json.loads(response.text)
             except ValueError as e:
                 eprint('ERROR: failed to load {:s} object from POST response'.format("Edge Router Policy"))
                 raise(e)
@@ -722,17 +771,37 @@ class Network:
                 )
             )
 
+        # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
+        process_id = started['_links']['process']['href'].split('/')[6]
+
+        # a non-zero integer value for 'wait' guarantees that the method returns the fully-provisioned entity's object or times out
+        #  with an exception, and a zero value guarantees only that the async create process started successfully within a short time
+        # frame
         if wait:
-            policy_complete = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="edge-router-policy", id=policy['id'], wait=wait)
-            return(policy_complete)
+            try:
+                self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait) # sleep=sleep, progress=progress
+            except:
+                raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
+            try:
+                # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
+                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
+                finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="edge-router-policy", 
+                                                            id=started['id'], wait=3, sleep=1)
+            except:
+                raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
+            return(finished)
         else:
-            return(policy)
+            try:
+                self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2) # sleep=sleep, progress=progress
+            except:
+                raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
+            return(started)
 
     @docstring_parameters(valid_service_protocols=VALID_SERVICE_PROTOCOLS)
     def create_service_simple(self, name: str, client_host_name: str, client_port: int, server_host_name: str=None, 
         server_port: int=None, server_protocol: str="tcp", attributes: list=[], edge_router_attributes: list=["#all"], 
         egress_router_id: str=None, endpoints: list=[], encryption_required: bool=True, wait: int=30):
-        """create a service that is compatible with broadly-compatible Ziti config types ziti-tunneler-client.v1, ziti-tunneler-server.v1
+        """Create a service that is compatible with broadly-compatible Ziti config types ziti-tunneler-client.v1, ziti-tunneler-server.v1.
 
         There are three hosting strategies for a service: SDK, Tunneler, or Router.
 
@@ -757,7 +826,6 @@ class Network:
         :param: endpoints is optional list of strings of hosting endpoints. Selects endpoint-hosting strategy.
         :param: encryption_required is optional Boolean. Default is to enable edge-to-edge encryption.
         """
-
         try:
             headers = { 
                 "authorization": "Bearer " + self.session.token 
@@ -867,7 +935,7 @@ class Network:
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['services']['create_responses']):
             try:
-                service = json.loads(response.text)
+                started = json.loads(response.text)
             except ValueError as e:
                 eprint('ERROR: failed to load {:s} object from POST response'.format("service"))
                 raise(e)
@@ -880,11 +948,31 @@ class Network:
                 )
             )
 
+        # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
+        process_id = started['_links']['process']['href'].split('/')[6]
+
+        # a non-zero integer value for 'wait' guarantees that the method returns the fully-provisioned entity's object or times out
+        #  with an exception, and a zero value guarantees only that the async create process started successfully within a short time
+        # frame
         if wait:
-            service_complete = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service", id=service['id'], wait=wait)
-            return(service_complete)
+            try:
+                self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait) # sleep=sleep, progress=progress
+            except:
+                raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
+            try:
+                # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
+                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
+                finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service", 
+                                                            id=started['id'], wait=3, sleep=1)
+            except:
+                raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
+            return(finished)
         else:
-            return(service)
+            try:
+                self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2) # sleep=sleep, progress=progress
+            except:
+                raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
+            return(started)
 
     # the above method was renamed to follow the development of PSM-based services (platform service models)
     create_service = create_service_simple
@@ -943,7 +1031,7 @@ class Network:
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['service-policies']['create_responses']):
             try:
-                service_policy = json.loads(response.text)
+                started = json.loads(response.text)
             except ValueError as e:
                 eprint('ERROR: failed to load {:s} object from POST response'.format("service policy"))
                 raise(e)
@@ -956,11 +1044,31 @@ class Network:
                 )
             )
 
+        # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
+        process_id = started['_links']['process']['href'].split('/')[6]
+
+        # a non-zero integer value for 'wait' guarantees that the method returns the fully-provisioned entity's object or times out
+        #  with an exception, and a zero value guarantees only that the async create process started successfully within a short time
+        # frame
         if wait:
-            service_policy_complete = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service-policy", id=service_policy['id'], wait=wait)
-            return(service_policy_complete)
+            try:
+                self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait) # sleep=sleep, progress=progress
+            except:
+                raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
+            try:
+                # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
+                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
+                finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service-policy", 
+                                                            id=started['id'], wait=3, sleep=1)
+            except:
+                raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
+            return(finished)
         else:
-            return(service_policy)
+            try:
+                self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2) # sleep=sleep, progress=progress
+            except:
+                raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
+            return(started)
 
 
     def create_service_edge_router_policy(self, name: str, services: list, edge_routers: list, semantic: str="AnyOf", dry_run: bool=False, wait: int=30):
@@ -1011,7 +1119,7 @@ class Network:
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['service-edge-router-policies']['create_responses']):
             try:
-                service_edge_router_policy = json.loads(response.text)
+                started = json.loads(response.text)
             except ValueError as e:
                 eprint('ERROR: failed to load {:s} object from POST response'.format("service edge router policy"))
                 raise(e)
@@ -1024,11 +1132,31 @@ class Network:
                 )
             )
 
+        # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
+        process_id = started['_links']['process']['href'].split('/')[6]
+
+        # a non-zero integer value for 'wait' guarantees that the method returns the fully-provisioned entity's object or times out
+        #  with an exception, and a zero value guarantees only that the async create process started successfully within a short time
+        # frame
         if wait:
-            service_edge_router_policy_complete = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service-edge-router-policy", id=service_edge_router_policy['id'], wait=wait)
-            return(service_edge_router_policy_complete)
+            try:
+                self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait) # sleep=sleep, progress=progress
+            except:
+                raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
+            try:
+                # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
+                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
+                finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service-edge-router-policy", 
+                                                            id=started['id'], wait=3, sleep=1)
+            except:
+                raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
+            return(finished)
         else:
-            return(service_edge_router_policy)
+            try:
+                self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2) # sleep=sleep, progress=progress
+            except:
+                raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
+            return(started)
 
     def create_service_with_configs(self, name: str, intercept_config_data: dict, host_config_data: dict, attributes: list=[],
         encryption_required: bool=True, dry_run: bool=False, wait: int=30):
@@ -1095,7 +1223,7 @@ class Network:
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['services']['create_responses']):
             try:
-                service = json.loads(response.text)
+                started = json.loads(response.text)
             except ValueError as e:
                 eprint('ERROR: failed to load {:s} object from POST response'.format("service"))
                 raise(e)
@@ -1108,11 +1236,31 @@ class Network:
                 )
             )
 
+        # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
+        process_id = started['_links']['process']['href'].split('/')[6]
+
+        # a non-zero integer value for 'wait' guarantees that the method returns the fully-provisioned entity's object or times out
+        #  with an exception, and a zero value guarantees only that the async create process started successfully within a short time
+        # frame
         if wait:
-            service_complete = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service", id=service['id'], wait=wait)
-            return(service_complete)
+            try:
+                self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait) # sleep=sleep, progress=progress
+            except:
+                raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
+            try:
+                # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
+                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
+                finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service", 
+                                                            id=started['id'], wait=3, sleep=1)
+            except:
+                raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
+            return(finished)
         else:
-            return(service)
+            try:
+                self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2) # sleep=sleep, progress=progress
+            except:
+                raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
+            return(started)
 
     @docstring_parameters(valid_service_protocols=VALID_SERVICE_PROTOCOLS)
     def create_service_transparent(self, name: str, client_hosts: list, client_ports: list, transparent_hosts: list, client_protocols: list=["tcp"], attributes: list=[],
@@ -1396,7 +1544,7 @@ class Network:
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['services']['create_responses']):
             try:
-                service = json.loads(response.text)
+                started = json.loads(response.text)
             except ValueError as e:
                 eprint('ERROR: failed to load {:s} object from POST response'.format("service"))
                 raise(e)
@@ -1409,11 +1557,31 @@ class Network:
                 )
             )
 
+        # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
+        process_id = started['_links']['process']['href'].split('/')[6]
+
+        # a non-zero integer value for 'wait' guarantees that the method returns the fully-provisioned entity's object or times out
+        #  with an exception, and a zero value guarantees only that the async create process started successfully within a short time
+        # frame
         if wait:
-            service_complete = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service", id=service['id'], wait=wait)
-            return(service_complete)
+            try:
+                self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait) # sleep=sleep, progress=progress
+            except:
+                raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
+            try:
+                # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
+                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
+                finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service", 
+                                                            id=started['id'], wait=3, sleep=1)
+            except:
+                raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
+            return(finished)
         else:
-            return(service)
+            try:
+                self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2) # sleep=sleep, progress=progress
+            except:
+                raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
+            return(started)
 
     # the above method was renamed to follow the development of PSM-based services (platform service models)
     create_endpoint_service = create_service_advanced
@@ -1513,7 +1681,8 @@ class Network:
             raise Exception("ERROR: failed to find exactly one match for {}".format(name))
 
     def get_network_by_id(self,network_id):
-        """return the network object for a particular UUID
+        """Return the network object for a particular UUID.
+
             :network_id [required] the UUID of the network
         """
         try:
@@ -1699,14 +1868,14 @@ class Network:
         )
 
     def wait_for_status(self, expect: str="PROVISIONED", type: str="network", wait: int=300, sleep: int=20, id: str=None, progress: bool=False):
-        """continuously poll for the expected status until expiry
+        """Continuously poll for the expected status until return Boolean true or raise exception.
+
         :param expect: the expected status symbol e.g. PROVISIONED
         :param id: the UUID of the entity having a status if entity is not a network
         :param type: optional type of entity e.g. network (default), endpoint, service, edge-router
         :param wait: optional SECONDS after which to raise an exception defaults to five minutes (300)
         :param sleep: SECONDS polling interval
         """
-
         # use the id of this instance's Network unless another one is specified
         if type == "network" and not id:
             id = self.id
@@ -1737,23 +1906,24 @@ class Network:
                 sys.stdout.flush()
 
             try:
-                entity = self.get_resource_status(type=type, id=id)
+                entity_status = self.get_resource_status(type=type, id=id)
             except:
                 raise
 
-            if entity['status']: # attribute is not None if HTTP OK
+            if entity_status['status']: # attribute is not None if HTTP OK
                 if not status or ( # print the starting status
-                    status and not entity['status'] == status # print on subsequent changes
+                    status and not entity_status['status'] == status # print on subsequent changes
                 ):
                     if progress:
-                        sys.stdout.write('\n{:^19s}:{:^19s}:'.format(entity['name'],entity['status']))
-                status = entity['status']
+                        sys.stdout.write('\n{:^19s}:{:^19s}:'.format(entity_status['name'],entity_status['status']))
+                status = entity_status['status']
             else:
-                response_code = entity['response_code']
+                response_code = entity_status['response_code']
 
             if not expect == status:
                 time.sleep(sleep)
-        print() # newline terminates progress meter
+        if progress:
+            print() # newline terminates progress meter
 
         if status == expect:
             return(True)
@@ -1761,8 +1931,8 @@ class Network:
             raise Exception(
                 'failed to read status while waiting for {:s}; got {} ({:d})'.format(
                     expect,
-                    entity['http_status'],
-                    entity['response_code']
+                    entity_status['http_status'],
+                    entity_status['response_code']
                 )
             )
         else:
@@ -1774,14 +1944,14 @@ class Network:
             )
 
     def wait_for_statuses(self, expected_statuses: list, type: str="network", wait: int=300, sleep: int=20, id: str=None, progress: bool=False):
-        """continuously poll for the expected statuses until expiry
+        """Continuously poll for the expected statuses until expiry.
+
         :param expected_statuses: list of strings as expected status symbol(s) e.g. ["PROVISIONING","PROVISIONED"]
         :param id: the UUID of the entity having a status if entity is not a network
         :param type: optional type of entity e.g. network (default), endpoint, service, edge-router
         :param wait: optional SECONDS after which to raise an exception defaults to five minutes (300)
         :param sleep: SECONDS polling interval
         """
-
         # use the id of this instance's Network unless another one is specified
         if type == "network" and not id:
             id = self.id
@@ -1812,23 +1982,24 @@ class Network:
                 sys.stdout.flush()
 
             try:
-                entity = self.get_resource_status(type=type, id=id)
+                entity_status = self.get_resource_status(type=type, id=id)
             except:
                 raise
 
-            if entity['status']: # attribute is not None if HTTP OK
+            if entity_status['status']: # attribute is not None if HTTP OK
                 if not status or ( # print the starting status
-                    status and not entity['status'] == status # print on subsequent changes
+                    status and not entity_status['status'] == status # print on subsequent changes
                 ):
                     if progress:
-                        sys.stdout.write('\n{:^19s}:{:^19s}:'.format(entity['name'],entity['status']))
-                status = entity['status']
+                        sys.stdout.write('\n{:^19s}:{:^19s}:'.format(entity_status['name'],entity_status['status']))
+                status = entity_status['status']
             else:
-                response_code = entity['response_code']
+                response_code = entity_status['response_code']
 
             if not status in expected_statuses:
                 time.sleep(sleep)
-        print() # newline terminates progress meter
+        if progress:
+            print() # newline terminates progress meter
 
         if status in expected_statuses:
             return(True)
@@ -1836,8 +2007,8 @@ class Network:
             raise Exception(
                 'failed to read status while waiting for any status in {}; got {} ({:d})'.format(
                     expected_statuses,
-                    entity['http_status'],
-                    entity['response_code']
+                    entity_status['http_status'],
+                    entity_status['response_code']
                 )
             )
         else:
@@ -1849,11 +2020,11 @@ class Network:
             )
 
     def get_resource_status(self, type: str, id: str):
-        """return an object describing an entity's API status or the symbolic HTTP code
+        """Return an object describing an entity's API status or the symbolic HTTP code.
+        
         :param type: the type of entity e.g. network, endpoint, service, edge-router, edge-router-policy, posture-check
         :param id: the UUID of the entity having a status if not a network
         """
-
         try:
             headers = { "authorization": "Bearer " + self.session.token }
 
@@ -1866,10 +2037,12 @@ class Network:
             entity_url = self.session.audience+'core/v2/'
             if type == 'network':
                 entity_url += 'networks/'+self.id
+            elif type == 'process':
+                entity_url += 'process/'+id
             elif id is None:
                 raise Exception("ERROR: entity UUID must be specified if not a network")
             else:
-                entity_url += type+'s/'+id
+                entity_url += plural(type)+'/'+id
 
             response = http.get(
                 entity_url,
@@ -1884,8 +2057,14 @@ class Network:
 
         if response_code == STATUS_CODES.codes.OK:
             try:
-                status = json.loads(response.text)['status']
-                name = json.loads(response.text)['name']
+                object = json.loads(response.text)
+                status = object['status']
+                if 'name' in object.keys():
+                    name = object['name']
+                elif 'processorName' in object.keys():
+                    name = object['processorName']
+                else:
+                    eprint('WARN: no "name" property found')
             except:
                 eprint('ERROR parsing entity object in response')
                 raise
@@ -1894,7 +2073,7 @@ class Network:
                     'http_status': STATUS_CODES._codes[response_code][0].upper(),
                     'response_code': response_code,
                     'status': status,
-                    'name': name
+                    'name': name if name else "NONAME"
                 }
         else:
             return {
@@ -1903,10 +2082,10 @@ class Network:
             }
 
     def rotate_edge_router_registration(self, id: str):
-        """rotate and return the registration key like {"registrationKey": str, "expiresAt": date}
+        """Rotate and return the registration key like {"registrationKey": str, "expiresAt": date}.
+
         :param id: the UUID of the edge router
         """
-
         try:
             headers = { "authorization": "Bearer " + self.session.token }
             entity_url = self.session.audience+'core/v2/edge-routers/'+id+'/registration-key'
@@ -1939,8 +2118,8 @@ class Network:
     get_edge_router_registration = rotate_edge_router_registration
 
     def delete_resource(self, type, id=None, wait=int(0), progress=False):
-        """
-        delete a resource
+        """Delete a resource.
+
         :param type: required entity type to delete i.e. network, endpoint, service, edge-router
         :param id: required entity UUID to delete
         :param wait: optional seconds to wait for entity destruction
