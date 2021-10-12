@@ -771,24 +771,8 @@ class Network:
                 )
             )
 
-        # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
-        process_id = started['_links']['process']['href'].split('/')[6]
-
-        # a non-zero integer value for 'wait' guarantees that the method returns the fully-provisioned entity's object or times out
-        #  with an exception, and a zero value guarantees only that the async create process started successfully within a short time
-        # frame
         if wait:
-            try:
-                self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait) # sleep=sleep, progress=progress
-            except:
-                raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
-            try:
-                # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
-                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
-                finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="edge-router-policy", 
-                                                            id=started['id'], wait=3, sleep=1)
-            except:
-                raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
+            finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="edge-router-policy", id=started['id'], wait=wait)
             return(finished)
         else:
             try:
