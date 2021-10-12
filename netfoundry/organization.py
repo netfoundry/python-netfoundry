@@ -86,7 +86,7 @@ class Organization:
                 for link in default_creds_chain:
                     candidate = link['base']+"/"+self.credentials
                     if os.path.exists(candidate):
-                        print("INFO: using default {scope} credentials in {path}".format(
+                        print("INFO: using credentials in {path} (found in {scope}-default directory)".format(
                             scope=link['scope'],
                             path=candidate
                         ))
