@@ -777,7 +777,8 @@ class Network:
                 )
             )
 
-        if wait:
+        # ERPs are created in a blocking, synchronous manner, and so zitiId should be defined
+        if wait and not started['zitiId']:
             finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="edge-router-policy", id=started['id'], wait=wait)
             return(finished)
         else:
@@ -1148,7 +1149,7 @@ class Network:
 
     def create_service_with_configs(self, name: str, intercept_config_data: dict, host_config_data: dict, attributes: list=[],
         encryption_required: bool=True, dry_run: bool=False, wait: int=60, sleep: int=10, progress: bool=False):
-        """create an endpoint-hosted service by providing the raw config data for intercept.v1, host.v1.
+        """Create an endpoint-hosted service by providing the raw config data for intercept.v1, host.v1.
 
         :param: name is required string
         :param: intercept_config_data is a required dict that is the value of the 'data' property for the intercept.v1 config
@@ -1575,8 +1576,14 @@ class Network:
     # the above method was renamed to follow the development of PSM-based services (platform service models)
     create_endpoint_service = create_service_advanced
 
-    def create_app_wan(self, name: str, endpoint_attributes: list=[], service_attributes: list=[], posture_check_attributes: list=[]):
-        """create an AppWAN
+    def create_app_wan(self, name: str, endpoint_attributes: list=[], service_attributes: list=[], posture_check_attributes: list=[],
+                        wait: int=10):
+        """Create an AppWAN.
+
+        :param name:                        a meaningful, unique name
+        :param endpoint_attributes:         a list of endpoint hashtag role attributes and endpoint names
+        :param service_attributes:          a list of service hashtag role attributes and service names
+        :param posture_check_attributes:    a list of posture hashtag role attributes and posture names
         """
         try:
             headers = { 
@@ -1607,7 +1614,7 @@ class Network:
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['app-wans']['create_responses']):
             try:
-                app_wan = json.loads(response.text)
+                started = json.loads(response.text)
             except ValueError as e:
                 eprint('ERROR: failed to load {:s} object from POST response'.format("AppWAN"))
                 raise(e)
@@ -1620,7 +1627,12 @@ class Network:
                 )
             )
 
-        return(app_wan)
+        # AppWANs are created in a blocking, synchronous manner, and so zitiId should be defined
+        if wait and not started['zitiId']:
+            finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="app-wan", id=started['id'], wait=wait)
+            return(finished)
+        else:
+            return(started)
 
     def get_network_by_name(self,name: str,group: str=None):
         """return exactly one network object

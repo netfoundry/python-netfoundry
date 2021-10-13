@@ -94,7 +94,7 @@ RESOURCES = {
     },
     'edge-router-policies': {
         'embedded': "edgeRouterPolicyList",
-        'create_responses': ["ACCEPTED"]
+        'create_responses': ["OK", "ACCEPTED"]
     },
     'app-wans': {
         'embedded': "appWanList",
