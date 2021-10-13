@@ -86,7 +86,7 @@ RESOURCES = {
     },
     'endpoints': {
         'embedded': "endpointList",
-        'create_responses': ["OK", "ACCEPTED"]
+        'create_responses': ["ACCEPTED"]
     },
     'edge-routers': {
         'embedded': "edgeRouterList",
