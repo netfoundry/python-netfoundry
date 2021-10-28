@@ -174,7 +174,16 @@ class Organization:
             self.organizations_by_label = dict()
             for org in self.get_organizations():
                 self.organizations_by_label[org['label']] = org['id']
-            self.describe = self.get_organization(id=self.organizations_by_label[organization_label])
+            if organization_label in self.organizations_by_label.keys():
+                self.describe = self.get_organization(id=self.organizations_by_label[organization_label])
+            else:
+                raise Exception(
+                    'ERROR: failed to find org label {:s} in the list of orgs {:s}'.format(
+                        organization_label,
+                        str(self.organizations_by_label.keys())
+                    )
+                )
+
         else:
             self.describe = self.get_organization(id=self.caller['organizationId'])
 
