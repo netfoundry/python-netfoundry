@@ -78,9 +78,41 @@ class Network:
     def posture_checks(self):
         return(self.get_resources("posture-checks"))
 
-    def delete_network(self,wait=300,progress=True):
+    def delete_network(self,wait=300,progress=False):
+        """Delete the network for which this class instance was created."""
         self.delete_resource(type="network",wait=wait,progress=progress)
-#        raise Exception("ERROR: failed to delete Network {:s}".format(self.name))
+
+    def delete_endpoint(self,id: str, wait: int=300,progress: bool=False):
+        """Delete an endpoint by ID."""
+        self.delete_resource(id=id, type="endpoint",wait=wait,progress=progress)
+
+    def delete_service(self,id: str, wait: int=300,progress: bool=False):
+        """Delete a service by ID."""
+        self.delete_resource(id=id, type="service",wait=wait,progress=progress)
+
+    def delete_edge_router(self,id: str, wait: int=300,progress: bool=False):
+        """Delete an edge router by ID."""
+        self.delete_resource(id=id, type="edge-router",wait=wait,progress=progress)
+
+    def delete_edge_router_policy(self,id: str, wait: int=300,progress: bool=False):
+        """Delete an edge router policy by ID."""
+        self.delete_resource(id=id, type="endpoint",wait=wait,progress=progress)
+
+    def delete_app_wan(self,id: str, wait: int=300,progress: bool=False):
+        """Delete an app-wan by ID."""
+        self.delete_resource(id=id, type="app-wan",wait=wait,progress=progress)
+
+    def delete_service_policy(self,id: str, wait: int=300,progress: bool=False):
+        """Delete a service policy by ID."""
+        self.delete_resource(id=id, type="service-policy",wait=wait,progress=progress)
+
+    def delete_service_edge_router_policy(self,id: str, wait: int=300,progress: bool=False):
+        """Delete a service edge router policy by ID."""
+        self.delete_resource(id=id, type="service-edge-router-policy",wait=wait,progress=progress)
+
+    def delete_posture_check(self,id: str, wait: int=300,progress: bool=False):
+        """Delete a posture check by ID."""
+        self.delete_resource(id=id, type="posture-check",wait=wait,progress=progress)
 
     @docstring_parameters(valid_separators=VALID_SEPARATORS)
     def validate_port_ranges(self, ports: list):
