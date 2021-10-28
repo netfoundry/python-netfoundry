@@ -48,12 +48,20 @@ class Network:
             self.aws_geo_regions[geo] = [dc for dc in self.get_edge_router_data_centers(provider="AWS") if dc['locationName'] in MAJOR_REGIONS['AWS'][geo]]
 
     def endpoints(self, typeId: str=None):
+        """Find all endpoints, optionally filtered by type.
+
+        :param str typeId: filter results by typeId e.g. "Device" or "Router"
+        """
         if typeId is not None:
             return(self.get_resources(type="endpoints", typeId=typeId))
         else:
             return(self.get_resources(type="endpoints"))
 
     def edge_routers(self, only_hosted: bool=False, only_customer: bool=False):
+        """Find all edge routers, optionally filtered by hosting strategy.
+        
+        :param bool only_customer: only find routers that are customer-hosted, ignoring netfoundry-hosted
+        """
         all_edge_routers = self.get_resources("edge-routers")
         if only_hosted and only_customer:
             raise Exception("ERROR: specify only one of only_hosted or only_customer")
@@ -67,15 +75,19 @@ class Network:
             return(all_edge_routers)
 
     def services(self):
+        """Find all services."""
         return(self.get_resources("services"))
 
     def edge_router_policies(self):
+        """Find all edge router policies."""
         return(self.get_resources("edge-router-policies"))
 
     def app_wans(self):
+        """Find all app-wans."""
         return(self.get_resources("app-wans"))
 
     def posture_checks(self):
+        """Find all posture checks."""
         return(self.get_resources("posture-checks"))
 
     def delete_network(self,wait=300,progress=False):
@@ -116,14 +128,12 @@ class Network:
 
     @docstring_parameters(valid_separators=VALID_SEPARATORS)
     def validate_port_ranges(self, ports: list):
+        """Return a validated list of low, high port ranges.
+
+        The validated ranges will matching the expected format when supplied a list of candidate ports and ranges
+        like [80, "8000:8002", "8443-8444"].
+        :param list ports: required list of integers or strings that are each a single port (int or str) or low:high range of ports separated by a character matching regex /{valid_separators}
         """
-        return a validated list of low, high ranges matching the expected format when supplied a list of candidate ports and ranges
-        like [80, "8000:8002", "8443-8444"]
-
-        :param list ports: required list of integers or strings that are each a single port (int or str) or low:high range of ports separated by a character matching regex /{valid_separators}/
-
-        """
-
         # these elements could be a single port as integer or a string with one or two ports separated by a valid separator character
         separators = re.compile(VALID_SEPARATORS)
         valid_range = re.compile('^\d+'+VALID_SEPARATORS+'\d+$')
@@ -147,13 +157,15 @@ class Network:
 
     @docstring_parameters(resource_entity_types=str(RESOURCES.keys()))
     def validate_entity_roles(self, entities: list, type: str):
-        """
-        return a list of valid, existing entities and hashtag role attributes when supplied a list of candidate hashtag role attributes or existing entity identitifiers 
-        and use the validated list anywhere that Ziti entity roles are used e.g. list of endpoints in an AppWAN, list of routers in an ERP
+        """Return a list of valid, existing entities and hashtag role attributes.
+        
+        Input is a list of candidate hashtag role attributes or existing entity
+        identitifiers and use the validated list anywhere that Ziti entity
+        roles are used e.g. list of endpoints in an AppWAN, list of routers in
+        an ERP.
 
         :param list entities: required hashtag role attributes, existing entity @names, or existing entity UUIDs
         :param str type: required type of entity: one of {resource_entity_types}
-
         """
         valid_entities = list()
         for entity in entities:
@@ -1365,11 +1377,10 @@ class Network:
         return(transparent_service)
 
     def delete_service_transparent(self, name: str):
-        """delete a transparent service and its associated bind service policy and service edge router policy.
+        """Delete a transparent service and its associated bind service policy and service edge router policy.
 
         :param str name: name of transparent service to delete
         """
-        
         try:
 
             service_policy_name = name+"-BindServicePolicy"

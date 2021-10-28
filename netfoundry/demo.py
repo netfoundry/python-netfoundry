@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-r"""Use this script to create a NetFoundry network.
+r"""Use this script to create a network with functioning services and demonstrate the NetFoundry Python module.
+
 Usage::
-    $ python3 -m netfoundry.demo BibbidiBobbidiBoo
+    $ python3 -m netfoundry.demo --network BibbidiBobbidiBoo
 """
 
 import argparse
@@ -31,7 +32,7 @@ def main():
     )
     parser.add_argument(
         "-o", "--organization",
-        help="The label of an alternative Organization (default is Org of caller)"
+        help="The label of an alternative organization (default is Org of caller)"
     )
     parser.add_argument(
         "-g", "--network-group",
@@ -96,8 +97,8 @@ def main():
 
     network_name = args.network
     
-    # use the session with some Organization, default is to use the first and there's typically only one
-    Organization = netfoundry.Organization(
+    # use the session with some organization, default is to use the first and there's typically only one
+    organization = netfoundry.Organization(
         credentials=args.credentials if 'credentials' in args else None,
         organization_label=args.organization if 'organization' in args else None,
         proxy=args.proxy
@@ -105,7 +106,7 @@ def main():
 
     # use some Network Group, default is to use the first and there's typically only one
     network_group = netfoundry.NetworkGroup(
-        Organization,
+        organization,
         network_group_name=args.network_group if 'network_group' in args else None
     )
 
