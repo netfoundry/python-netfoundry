@@ -2161,7 +2161,7 @@ class Network:
 
     get_edge_router_registration = rotate_edge_router_registration
 
-    def delete_resource(self, type, id=None, wait=int(0), progress=False):
+    def delete_resource(self, type: str, id: str=None, wait: int=0, progress: bool=False):
         """Delete a resource.
 
         :param type: required entity type to delete i.e. network, endpoint, service, edge-router
