@@ -2206,11 +2206,13 @@ class Network:
 
         if not wait == 0:
             try:
-                self.wait_for_status(
-                    expect='DELETED',
-                    type=type,
+                self.wait_for_property_defined(
+                    property_name="deletedAt",
+                    property_type=str,
+                    entity_type=type,
                     id=self.id if type == 'network' else id,
                     wait=wait,
+                    sleep=1,
                     progress=progress
                 )
             except:
