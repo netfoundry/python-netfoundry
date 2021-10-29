@@ -669,12 +669,12 @@ class Network:
         # frame
         if wait:
             try:
-                self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait, sleep=sleep, progress=progress)
+                self.wait_for_status(expect="SUCCESS",type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
             except:
-                raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
+                raise Exception("ERROR: timed out waiting for process status 'SUCCESS'")
             try:
                 # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
-                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
+                #  and may still serve as insurance that the zitiId is in fact defined when process status is SUCCESS
                 finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="endpoint", 
                                                             id=started['id'], wait=3, sleep=1)
             except:
@@ -682,9 +682,9 @@ class Network:
             return(finished)
         else:
             try:
-                self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2, progress=progress)
+                self.wait_for_statuses(expected_statuses=["RUNNING","SUCCESS"],type="process-executions", id=process_id, wait=5, sleep=2, progress=progress)
             except:
-                raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
+                raise Exception("ERROR: timed out waiting for process status 'RUNNING' or 'SUCCESS'")
             return(started)
 
     def create_edge_router(self, name: str, attributes: list=[], link_listener: bool=False, data_center_id: str=None, 
@@ -753,12 +753,12 @@ class Network:
         # frame
         if wait:
             try:
-                self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait, sleep=sleep, progress=progress)
+                self.wait_for_status(expect="SUCCESS",type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
             except:
-                raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
+                raise Exception("ERROR: timed out waiting for process status 'SUCCESS'")
             try:
                 # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
-                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
+                #  and may still serve as insurance that the zitiId is in fact defined when process status is SUCCESS
                 finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="edge-router", 
                                                             id=started['id'], wait=3, sleep=1)
             except:
@@ -768,9 +768,9 @@ class Network:
             return(finished)
         else:
             try:
-                self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2, progress=progress)
+                self.wait_for_statuses(expected_statuses=["RUNNING","SUCCESS"],type="process-executions", id=process_id, wait=5, sleep=2, progress=progress)
             except:
-                raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
+                raise Exception("ERROR: timed out waiting for process status 'RUNNING' or 'SUCCESS'")
             return(started)
 
     def create_edge_router_policy(self, name: str, endpoint_attributes: list=[], edge_router_attributes: list=[], wait: int=30):
@@ -987,12 +987,12 @@ class Network:
         # frame
         if wait:
             try:
-                self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait, sleep=sleep, progress=progress)
+                self.wait_for_status(expect="SUCCESS",type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
             except:
-                raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
+                raise Exception("ERROR: timed out waiting for process status 'SUCCESS'")
             try:
                 # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
-                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
+                #  and may still serve as insurance that the zitiId is in fact defined when process status is SUCCESS
                 finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service", 
                                                             id=started['id'], wait=3, sleep=1)
             except:
@@ -1000,9 +1000,9 @@ class Network:
             return(finished)
         else:
             try:
-                self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2, progress=progress)
+                self.wait_for_statuses(expected_statuses=["RUNNING","SUCCESS"],type="process-executions", id=process_id, wait=5, sleep=2, progress=progress)
             except:
-                raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
+                raise Exception("ERROR: timed out waiting for process status 'RUNNING' or 'SUCCESS'")
             return(started)
 
     # the above method was renamed to follow the development of PSM-based services (platform service models)
@@ -1084,12 +1084,12 @@ class Network:
         # frame
         if wait:
             try:
-                self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait, sleep=sleep, progress=progress)
+                self.wait_for_status(expect="SUCCESS",type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
             except:
-                raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
+                raise Exception("ERROR: timed out waiting for process status 'SUCCESS'")
             try:
                 # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
-                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
+                #  and may still serve as insurance that the zitiId is in fact defined when process status is SUCCESS
                 finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service-policy", 
                                                             id=started['id'], wait=3, sleep=1)
             except:
@@ -1097,9 +1097,9 @@ class Network:
             return(finished)
         else:
             try:
-                self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2, progress=progress)
+                self.wait_for_statuses(expected_statuses=["RUNNING","SUCCESS"],type="process-executions", id=process_id, wait=5, sleep=2, progress=progress)
             except:
-                raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
+                raise Exception("ERROR: timed out waiting for process status 'RUNNING' or 'SUCCESS'")
             return(started)
 
 
@@ -1173,12 +1173,12 @@ class Network:
         # frame
         if wait:
             try:
-                self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait, sleep=sleep, progress=progress)
+                self.wait_for_status(expect="SUCCESS",type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
             except:
-                raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
+                raise Exception("ERROR: timed out waiting for process status 'SUCCESS'")
             try:
                 # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
-                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
+                #  and may still serve as insurance that the zitiId is in fact defined when process status is SUCCESS
                 finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service-edge-router-policy", 
                                                             id=started['id'], wait=3, sleep=1)
             except:
@@ -1186,9 +1186,9 @@ class Network:
             return(finished)
         else:
             try:
-                self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2, progress=progress)
+                self.wait_for_statuses(expected_statuses=["RUNNING","SUCCESS"],type="process-executions", id=process_id, wait=5, sleep=2, progress=progress)
             except:
-                raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
+                raise Exception("ERROR: timed out waiting for process status 'RUNNING' or 'SUCCESS'")
             return(started)
 
     def create_service_with_configs(self, name: str, intercept_config_data: dict, host_config_data: dict, attributes: list=[],
@@ -1277,12 +1277,12 @@ class Network:
         # frame
         if wait:
             try:
-                self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait, sleep=sleep, progress=progress)
+                self.wait_for_status(expect="SUCCESS",type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
             except:
-                raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
+                raise Exception("ERROR: timed out waiting for process status 'SUCCESS'")
             try:
                 # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
-                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
+                #  and may still serve as insurance that the zitiId is in fact defined when process status is SUCCESS
                 finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service", 
                                                             id=started['id'], wait=3, sleep=1)
             except:
@@ -1290,9 +1290,9 @@ class Network:
             return(finished)
         else:
             try:
-                self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2, progress=progress)
+                self.wait_for_statuses(expected_statuses=["RUNNING","SUCCESS"],type="process-executions", id=process_id, wait=5, sleep=2, progress=progress)
             except:
-                raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
+                raise Exception("ERROR: timed out waiting for process status 'RUNNING' or 'SUCCESS'")
             return(started)
 
     @docstring_parameters(valid_service_protocols=VALID_SERVICE_PROTOCOLS)
@@ -1598,12 +1598,12 @@ class Network:
         # frame
         if wait:
             try:
-                self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait, sleep=sleep, progress=progress)
+                self.wait_for_status(expect="SUCCESS",type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
             except:
-                raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
+                raise Exception("ERROR: timed out waiting for process status 'SUCCESS'")
             try:
                 # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
-                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
+                #  and may still serve as insurance that the zitiId is in fact defined when process status is SUCCESS
                 finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service", 
                                                             id=started['id'], wait=3, sleep=1)
             except:
@@ -1611,9 +1611,9 @@ class Network:
             return(finished)
         else:
             try:
-                self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2, progress=progress)
+                self.wait_for_statuses(expected_statuses=["RUNNING","SUCCESS"],type="process-executions", id=process_id, wait=5, sleep=2, progress=progress)
             except:
-                raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
+                raise Exception("ERROR: timed out waiting for process status 'RUNNING' or 'SUCCESS'")
             return(started)
 
     # the above method was renamed to follow the development of PSM-based services (platform service models)
