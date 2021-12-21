@@ -3,6 +3,13 @@
 
 [Python module guide](https://developer.netfoundry.io/guides/python/)
 
+## Find the Version
+
+```bash
+$ python3 -m netfoundry.version
+v5.2.0
+```
+
 ## Play the demo
 
 This creates a demo network named "BibbidiBobbidiBoo" with your API account stored in ~/.netfoundry/credentials.json
