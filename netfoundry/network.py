@@ -472,22 +472,32 @@ class Network:
         else:
             return(all_entities)
 
-    def patch_resource(self,patch):
-        """returns a resource
-            :patch: required dictionary with changed properties and _links.self.href
-        """
+    def patch_resource(self, patch: dict, type: str=None, id: str=None, wait: int=0, sleep: int=2, progress: bool=False):
+        """Diff existing and expected properties and send a patch request with changed values.
 
+        Returns the response object for the patched entity if at least one change, else the existing entity.
+            :patch: required dictionary with changed properties and _links.self.href
+            :param type: optional entity type, needed if put object lacks a self link, ignored if self link present
+            :param id: optional entity ID, needed if put object lacks a self link, ignored if self link present
+        """
         headers = {
             "authorization": "Bearer " + self.session.token,
             "content-type": "application/json"
         }
 
-        self_link = patch['_links']['self']['href']
-        type = self_link.split('/')[5]
+        # prefer the self link if present, else require type and id to compose the self link
+        try: 
+            self_link = patch['_links']['self']['href']
+        except KeyError:
+            try: self_link = self.session.audience+'core/v2/'+plural(type)+'/'+id
+            except NameError as e:
+                raise(e)
+        else: type = self_link.split('/')[5] # e.g. endpoints, app-wans, edge-routers, etc...
         if not type in EXCLUDED_PATCH_PROPERTIES.keys():
-            raise Exception("ERROR: got unexpected type {:s} for patch request from self URL {:s}".format(
+            raise Exception("ERROR: got unexpected type {:s} for patch request to {:s}".format(
                 type, 
-                self_link))
+                self_link)
+            )
         try:
             before_response = http.get(
                 self_link,
@@ -565,20 +575,58 @@ class Network:
                         json_formatted
                     )
                 )
+
+            # if API responded with async promise then parse the expected process execution ID
+            if wait and after_response_code == STATUS_CODES.codes.ACCEPTED: # HTTP 202
+                # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
+                process_id = after_resource['_links']['process']['href'].split('/')[6]
+
+                # monitor async process
+                if wait:
+                    try:
+                        self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait, sleep=sleep, progress=progress)
+                    except:
+                        raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
+                    try:
+                        # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
+                        #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
+                        finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type=type, 
+                                                                    id=after_resource['id'], wait=3, sleep=1)
+                    except:
+                        raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
+                    return(finished)
+                else: # if not wait then merely verify the async process was at least started if not finished
+                    try:
+                        self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2, progress=progress)
+                    except:
+                        raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
             return(after_resource)
         else:
+            # no change, return the existing unmodified entity
             return(before_resource)
 
-    def put_resource(self,put):
-        """returns a resource
-            :put: required dictionary with all properties required by the particular resource's model 
+    def put_resource(self, put: dict, type: str=None, id: str=None, wait: int=0, sleep: int=2, progress: bool=False):
+        """Update a resource with a complete set of properties.
+
+        Blindly updates the entity in self link and returns the response object.
+            :param put: required dictionary with all properties required by the particular resource type's model
+            :param type: optional entity type, needed if put object lacks a self link, ignored if self link present
+            :param id: optional entity ID, needed if put object lacks a self link, ignored if self link present
         """
+        # prefer the self link if present, else require type and id to compose the self link
+        try: 
+            self_link = put['_links']['self']['href']
+        except KeyError:
+            try: self_link = self.session.audience+'core/v2/'+plural(type)+'/'+id
+            except NameError as e:
+                raise(e)
+        else: type = self_link.split('/')[5] # e.g. endpoints, app-wans, edge-routers, etc...
         try:
             headers = {
                 "authorization": "Bearer " + self.session.token 
             }
             response = http.put(
-                put['_links']['self']['href'],
+                self_link,
                 proxies=self.session.proxies,
                 verify=self.session.verify,
                 headers=headers,
@@ -604,6 +652,99 @@ class Network:
                     json_formatted
                 )
             )
+
+        # if API responded with async promise then parse the expected process execution ID, error if missing
+        if wait and response_code == STATUS_CODES.codes.ACCEPTED: # HTTP 202
+            # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
+            process_id = resource['_links']['process']['href'].split('/')[6]
+
+            # monitor async process, moot if API responded OK because this implies synchronous fulfillment of request
+            if wait:
+                try:
+                    self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait, sleep=sleep, progress=progress)
+                except:
+                    raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
+                try:
+                    # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
+                    #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
+                    finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type=type, 
+                                                                id=resource['id'], wait=3, sleep=1)
+                except:
+                    raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
+                return(finished)
+            else: # if not wait then merely verify the async process was at least started if not finished
+                try:
+                    self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2, progress=progress)
+                except:
+                    raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
+
+        return(resource)
+
+    def create_resource(self, type: str, properties: dict, wait: int=30, sleep: int=2, progress: bool=False):
+        """
+        Create a raw resource by sending a complete set of properties for some type of entity.
+
+        :param type: entity type such as endpoint, service, edge-router, app-wan
+        :param properties: required dictionary with all properties required by the particular resource type's model
+        """
+        try:
+            headers = {
+                "authorization": "Bearer " + self.session.token 
+            }
+            properties['networkId'] = self.id
+            response = http.post(
+                self.session.audience+'core/v2/'+plural(type),
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers,
+                json=properties
+            )
+            response_code = response.status_code
+        except:
+            raise
+
+        if response_code in [STATUS_CODES.codes.OK, STATUS_CODES.codes.ACCEPTED]: # HTTP 202
+            try:
+                resource = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load {r} object from POST response'.format(r = type))
+                raise(e)
+        else:
+            json_formatted = json.dumps(properties, indent=2)
+            raise Exception(
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s} for POST create {:s}'.format(
+                    STATUS_CODES._codes[response_code][0].upper(),
+                    response_code,
+                    response.text,
+                    json_formatted
+                )
+            )
+
+        # if API responded with async promise then parse the expected process execution ID, error if missing
+        if response_code == STATUS_CODES.codes.ACCEPTED: # HTTP 202
+            # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
+            process_id = resource['_links']['process']['href'].split('/')[6]
+
+            # monitor async process, moot if API responded OK because this implies synchronous fulfillment of request
+            if wait:
+                try:
+                    self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait, sleep=sleep, progress=progress)
+                except:
+                    raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
+                try:
+                    # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
+                    #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
+                    finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type=type, 
+                                                                id=resource['id'], wait=3, sleep=1)
+                except:
+                    raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
+                return(finished)
+            else: # if not wait then merely verify the async process was at least started if not finished
+                try:
+                    self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2, progress=progress)
+                except:
+                    raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
+
         return(resource)
 
     def create_endpoint(self, name: str, attributes: list=[], session_identity: str=None, wait: int=30, sleep: int=2, progress: bool=False):
@@ -688,7 +829,7 @@ class Network:
             return(started)
 
     def create_edge_router(self, name: str, attributes: list=[], link_listener: bool=False, data_center_id: str=None, 
-                            tunneler_enabled: bool=False, wait: int=300, sleep: int=10, progress: bool=False):
+                            tunneler_enabled: bool=False, wait: int=900, sleep: int=10, progress: bool=False):
         """Create an Edge Router.
 
         :param name:              a meaningful, unique name
@@ -849,7 +990,7 @@ class Network:
         :param: client_port is required integer of the ports to intercept
         :param: client_protocol is required string of the transport protocol. Choices: {valid_service_protocols}
         :param: server_host_name is optional string that is a hostname (DNS) or IPv4. If omitted service is assumed to be SDK-hosted (not Tunneler or Router-hosted).
-        :param: server_port is optional integer of the server port. If omitted the client port is used. 
+        :param: server_port is optional integer of the server port. If omitted the client port is used unless SDK-hosted.
         :param: server_protocol is optional string of the server protocol. If omitted the same client protocol is used.
         :param: attributes is optional list of strings of service roles to assign. Default is [].
         :param: edge_router_attributes is optional list of strings of Router roles or Router names that can "see" this service. Default is ["#all"].
