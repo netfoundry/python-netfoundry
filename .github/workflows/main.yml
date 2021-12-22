@@ -9,12 +9,6 @@
 name: Publish Python Package and Docker Image
 
 on:
-  push:
-    branches:
-      - release/*
-      - bugfix/*
-      - hotfix/*
-      - develop
   release:
     types: [published]
 
@@ -57,17 +51,17 @@ jobs:
     #     user: __token__
     #     password: ${{ secrets.PYPI_API_TOKEN }}
 
-  docker_image:
-    needs: [upload_pypi]
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout Workspace
-      uses: actions/checkout@v2
+  # docker_image:
+  #   needs: [upload_pypi]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #   - name: Checkout Workspace
+  #     uses: actions/checkout@v2
 
-    - uses: actions/download-artifact@v2
-      with:
-        name: netfoundry-pypi-${{ github.run_id }}
-        path: dist/
+  #   - uses: actions/download-artifact@v2
+  #     with:
+  #       name: netfoundry-pypi-${{ github.run_id }}
+  #       path: dist/
 
     - name: Set up QEMU
       uses: docker/setup-qemu-action@master
