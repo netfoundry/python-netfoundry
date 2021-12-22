@@ -36,6 +36,18 @@ jobs:
     - name: Build Package
       run: python3 -m build
 
+    - name: Test installing the build
+    
+    - name: Read version string
+      id: run_version
+      run: |
+        PYPI_VERSION=$(python3 -m netfoundry.version)
+        [[ ${PYPI_VERSION} =~ ^v[0-9]\s+\.[0-9]\s+\.[0-9]\s+.* ]] || {
+          echo "ERROR: unexpected version string" >&2
+          exit 1
+        }
+        echo ::set-output name=pypi_version::${PYPI_VERSION}
+
     - name: Publish Test Package
       uses: pypa/gh-action-pypi-publish@27b31702a0e7fc50959f5ad993c78deac1bdfc29
       with:
@@ -89,4 +101,4 @@ jobs:
         builder: ${{ steps.buildx.outputs.name }}
         platforms: linux/amd64,linux/arm/v7,linux/arm64
         push: true
-        tags: netfoundry/python:kentest
+        tags: netfoundry/python:${{ steps.run_version.outputs.pypi_version }}
