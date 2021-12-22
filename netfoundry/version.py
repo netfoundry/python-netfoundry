@@ -1,9 +1,7 @@
 """Print the version string."""
-from importlib.metadata import version, PackageNotFoundError
-
+from ._version import get_versions
 try:
-    __version__ = version("netfoundry")
-    print("v"+__version__)
-except PackageNotFoundError:
+    print("v"+get_versions()['version'] )
+except:
     # package is not installed
-    raise Exception("ERROR: 'netfoundry' package is not installed.")
+    raise Exception("ERROR: could not do get_version() from versioneer.")
