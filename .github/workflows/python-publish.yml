@@ -42,7 +42,7 @@ jobs:
 
     - uses: actions/upload-artifact@v2
       with:
-        name: netfoundry-pypi-{{ github.run_id }}
+        name: netfoundry-pypi-${{ github.run_id }}
         path: dist/netfoundry-*.tar.gz
 
     - name: Publish Test Package
