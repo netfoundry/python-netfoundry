@@ -1,3 +1,5 @@
 exclude Dockerfile
 exclude .gitignore
-exclude .github/workflows/*
+exclude .github/workflows/*include versioneer.py
+include netfoundry/_version.py
+include versioneer.py
