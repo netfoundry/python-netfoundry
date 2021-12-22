@@ -85,6 +85,7 @@ jobs:
     - name: Build & Push Multi-Platform Container Image to Hub
       uses: docker/build-push-action@v2
       with:
+        context: . # build context is workspace so we can copy artifacts from ./dist/
         builder: ${{ steps.buildx.outputs.name }}
         platforms: linux/amd64,linux/arm/v7,linux/arm64
         push: true
