@@ -36,7 +36,9 @@ jobs:
     - name: Build Package
       run: python3 -m build
 
-    - name: Test installing the build
+    - name: Install the build in workspace
+      run: |
+        pip install ./dist/netfoundry-*.tar.gz
     
     - name: Read version string
       id: run_version
