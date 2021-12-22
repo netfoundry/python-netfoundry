@@ -4,9 +4,13 @@ from .utility import RESOURCES, STATUS_CODES, eprint, http
 
 
 class NetworkGroup:
-    """use a Network Group by name or ID or the first group in the organization
+    """use a Network Group by name or ID.
+    
+    The default is to use the first network group available to the organization of the caller.
     """
+
     def __init__(self, Organization: object, network_group_id: str=None, network_group_name: str=None):
+        """Initialize the network group class with a group name or ID."""
         if network_group_id:
             self.network_group_id = network_group_id
             self.network_group_name = [ ng['organizationShortName'] for ng in Organization.network_groups if ng['id'] == network_group_id ][0]
