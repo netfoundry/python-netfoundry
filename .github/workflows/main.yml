@@ -61,15 +61,15 @@ jobs:
 
     - name: Append 'latest' tag if release published
       env:
-        GITHUB_ACTION: ${{ github.event.action }}
+        GITHUB_EVENT_ACTION: ${{ github.event.action }}
         PYPI_VERSION: ${{ steps.read_version.outputs.pypi_version }}
       id: compose_tags
       run: |
         CONTAINER_TAGS="netfoundry/python:${PYPI_VERSION}"
-        if [[ ${GITHUB_ACTION} == published ]]; then
+        if [[ ${GITHUB_EVENT_ACTION} == published ]]; then
           CONTAINER_TAGS+=",netfoundry/python:latest"
         fi
-        echo GITHUB_ACTION="${GITHUB_ACTION}"
+        echo GITHUB_EVENT_ACTION="${GITHUB_EVENT_ACTION}"
         echo CONTAINER_TAGS="${CONTAINER_TAGS}"
         echo ::set-output name=container_tags::${CONTAINER_TAGS}
 
