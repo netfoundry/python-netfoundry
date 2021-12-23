@@ -45,7 +45,7 @@ jobs:
       run: |
         PYPI_VERSION=$(python3 -m netfoundry.version)
         [[ ${PYPI_VERSION} =~ ^v[0-9]\s+\.[0-9]\s+\.[0-9]\s+.* ]] || {
-          echo "ERROR: unexpected version string" >&2
+          echo "ERROR: unexpected version string '${PYPI_VERSION}'" >&2
           exit 1
         }
         echo ::set-output name=pypi_version::${PYPI_VERSION}
