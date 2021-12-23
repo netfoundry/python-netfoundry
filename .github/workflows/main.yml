@@ -69,6 +69,7 @@ jobs:
         if [[ ${GITHUB_ACTION} == "published" ]]; then
           CONTAINER_TAGS+=",netfoundry/python:latest"
         fi
+        echo CONTAINER_TAGS="${CONTAINER_TAGS}"
         echo ::set-output name=container_tags::${CONTAINER_TAGS}
 
     - name: Publish Release Package
