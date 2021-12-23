@@ -36,16 +36,6 @@ jobs:
     - name: Build Package
       run: python3 -m build
 
-    - name: Read version string
-      id: run_version
-      run: |
-        PYPI_VERSION=$(python setup.py --version)
-        [[ ${PYPI_VERSION} =~ ^[0-9]+\.[0-9]+\.[0-9]+.* ]] || {
-          echo "ERROR: unexpected version string '${PYPI_VERSION}'" >&2
-          exit 1
-        }
-        echo ::set-output name=pypi_version::${PYPI_VERSION}
-
     - name: Publish Test Package
       uses: pypa/gh-action-pypi-publish@27b31702a0e7fc50959f5ad993c78deac1bdfc29
       with:
@@ -58,6 +48,28 @@ jobs:
       with:
         name: netfoundry-pypi-${{ github.run_id }}
         path: dist/netfoundry-*.tar.gz
+
+    - name: Read version string
+      id: read_version
+      run: |
+        PYPI_VERSION=$(python setup.py --version)
+        [[ ${PYPI_VERSION} =~ ^[0-9]+\.[0-9]+\.[0-9]+.* ]] || {
+          echo "ERROR: unexpected version string '${PYPI_VERSION}'" >&2
+          exit 1
+        }
+        echo ::set-output name=pypi_version::${PYPI_VERSION}
+
+    - name: Append 'latest' tag if release published
+      env:
+        GITHUB_ACTION=${{ github.event.action }}
+        PYPI_VERSION=${{ steps.read_version.outputs.pypi_version }}
+      id: compose_tags
+      run: |
+        CONTAINER_TAGS="netfoundry/python:${PYPI_VERSION}"
+        if [[ ${GITHUB_ACTION} == "published" ]]; then
+          CONTAINER_TAGS+=",netfoundry/python:latest"
+        fi
+        echo ::set-output name=container_tags::${CONTAINER_TAGS}
 
     - name: Publish Release Package
       if: github.event.action == 'published'
@@ -88,4 +100,4 @@ jobs:
         builder: ${{ steps.buildx.outputs.name }}
         platforms: linux/amd64,linux/arm/v7,linux/arm64
         push: true
-        tags: netfoundry/python:${{ steps.run_version.outputs.pypi_version }}
+        tags: netfoundry/python:${{ steps.compose_tags.outputs.container_tags }}
