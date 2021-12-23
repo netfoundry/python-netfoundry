@@ -100,4 +100,4 @@ jobs:
         builder: ${{ steps.buildx.outputs.name }}
         platforms: linux/amd64,linux/arm/v7,linux/arm64
         push: true
-        tags: netfoundry/python:${{ steps.compose_tags.outputs.container_tags }}
+        tags: ${{ steps.compose_tags.outputs.container_tags }}
