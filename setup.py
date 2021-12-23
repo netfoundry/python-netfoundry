@@ -1,4 +1,5 @@
 
+import versioneer
 import setuptools
 
 with open("README.md", "r") as fh:
@@ -6,9 +7,9 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name='netfoundry',
-    # use_scm_version=True,
-    # setup_requires=['setuptools_scm'],
     py_modules=['netfoundry'],
+    version=versioneer.get_version(),
+    cmdclass=versioneer.get_cmdclass(),
     url='https://developer.netfoundry.io/guides/python/',
     description='Interface to the NetFoundry network-as-code orchestration Platform',
     long_description=long_description,

@@ -2,4 +2,5 @@ FROM python:3.9-slim-buster
 COPY ./dist/netfoundry-*.tar.gz /tmp/
 RUN pip install --upgrade pip
 RUN pip install /tmp/netfoundry-*.tar.gz
-CMD ["bash"]
+RUN rm -f /tmp/netfoundry-*.tar.gz
+CMD ["python3 -m netfoundry.version"]

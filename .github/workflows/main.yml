@@ -1,0 +1,103 @@
+# This workflow will upload a Python Package using Twine when a release is created
+# For more information see: https://help.github.com/en/actions/language-and-framework-guides/using-python-with-github-actions#publishing-to-package-registries
+
+# This workflow uses actions that are not certified by GitHub.
+# They are provided by a third-party and are governed by
+# separate terms of service, privacy policy, and support
+# documentation.
+
+name: Publish Python Package and Docker Image
+
+on:
+  push:
+    branches:
+      - release-v*
+  release:
+    types: [published]
+
+jobs:
+  upload_pypi:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: 0 # unshallow checkout enables setuptools_scm to infer PyPi version from Git
+
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.6'
+
+    - name: Install dependencies
+      run: |
+        python3 -m pip install --upgrade pip
+        pip3 install build
+
+    - name: Build Package
+      run: python3 -m build
+
+    - name: Publish Test Package
+      uses: pypa/gh-action-pypi-publish@27b31702a0e7fc50959f5ad993c78deac1bdfc29
+      with:
+        user: __token__
+        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+        repository_url: https://test.pypi.org/legacy/
+
+    - name: Temporarily Store the Python Package in GitHub # for convenient reference, troubleshooting, investigation, etc...
+      uses: actions/upload-artifact@v2
+      with:
+        name: netfoundry-pypi-${{ github.run_id }}
+        path: dist/netfoundry-*.tar.gz
+
+    - name: Read version string
+      id: read_version
+      run: |
+        PYPI_VERSION=$(python setup.py --version)
+        [[ ${PYPI_VERSION} =~ ^[0-9]+\.[0-9]+\.[0-9]+.* ]] || {
+          echo "ERROR: unexpected version string '${PYPI_VERSION}'" >&2
+          exit 1
+        }
+        echo ::set-output name=pypi_version::${PYPI_VERSION}
+
+    - name: Append 'latest' tag if release published
+      env:
+        GITHUB_ACTION: ${{ github.event.action }}
+        PYPI_VERSION: ${{ steps.read_version.outputs.pypi_version }}
+      id: compose_tags
+      run: |
+        CONTAINER_TAGS="netfoundry/python:${PYPI_VERSION}"
+        if [[ ${GITHUB_ACTION} == "published" ]]; then
+          CONTAINER_TAGS+=",netfoundry/python:latest"
+        fi
+        echo ::set-output name=container_tags::${CONTAINER_TAGS}
+
+    - name: Publish Release Package
+      if: github.event.action == 'published'
+      uses: pypa/gh-action-pypi-publish@27b31702a0e7fc50959f5ad993c78deac1bdfc29
+      with:
+        user: __token__
+        password: ${{ secrets.PYPI_API_TOKEN }}
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@master
+      with:
+        platforms: amd64,arm,arm64
+
+    - name: Set up Docker BuildKit
+      id: buildx
+      uses: docker/setup-buildx-action@master
+
+    - name: Login to Docker Hub
+      uses: docker/login-action@v1
+      with:
+        username: ${{ secrets.DOCKER_HUB_API_USER }}
+        password: ${{ secrets.DOCKER_HUB_API_TOKEN }}
+
+    - name: Build & Push Multi-Platform Container Image to Hub
+      uses: docker/build-push-action@v2
+      with:
+        context: . # build context is workspace so we can copy artifacts from ./dist/
+        builder: ${{ steps.buildx.outputs.name }}
+        platforms: linux/amd64,linux/arm/v7,linux/arm64
+        push: true
+        tags: ${{ steps.compose_tags.outputs.container_tags }}
