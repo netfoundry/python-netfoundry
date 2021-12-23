@@ -61,8 +61,8 @@ jobs:
 
     - name: Append 'latest' tag if release published
       env:
-        GITHUB_ACTION=${{ github.event.action }}
-        PYPI_VERSION=${{ steps.read_version.outputs.pypi_version }}
+        GITHUB_ACTION: ${{ github.event.action }}
+        PYPI_VERSION: ${{ steps.read_version.outputs.pypi_version }}
       id: compose_tags
       run: |
         CONTAINER_TAGS="netfoundry/python:${PYPI_VERSION}"
