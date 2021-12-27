@@ -988,10 +988,9 @@ class Network:
         :param: name is required string
         :param: client_host_name is required strings that is the intercept hostname (DNS) or IPv4
         :param: client_port is required integer of the ports to intercept
-        :param: client_protocol is required string of the transport protocol. Choices: {valid_service_protocols}
         :param: server_host_name is optional string that is a hostname (DNS) or IPv4. If omitted service is assumed to be SDK-hosted (not Tunneler or Router-hosted).
         :param: server_port is optional integer of the server port. If omitted the client port is used unless SDK-hosted.
-        :param: server_protocol is optional string of the server protocol. If omitted the same client protocol is used.
+        :param: server_protocol is optional string of the server protocol.
         :param: attributes is optional list of strings of service roles to assign. Default is [].
         :param: edge_router_attributes is optional list of strings of Router roles or Router names that can "see" this service. Default is ["#all"].
         :param: egress_router_id is optional string of UUID or name of hosting Router. Selects Router-hosting strategy.
@@ -1468,7 +1467,7 @@ class Network:
             intercept_config_data = {
                 "addresses": client_hosts,
                 "portRanges": valid_ports,
-                "protocols": client_protocols,
+                "protocols": valid_client_protocols,
                 "sourceIp": "$src_ip:$src_port"
             }
 
@@ -1478,7 +1477,7 @@ class Network:
                 "forwardPort": True,
                 "allowedAddresses": client_hosts,
                 "allowedPortRanges": valid_ports,
-                "allowedProtocols": client_protocols,
+                "allowedProtocols": valid_client_protocols,
                 "allowedSourceAddresses": transparent_hosts
             }
 
@@ -1633,14 +1632,14 @@ class Network:
                 server_egress["forwardPort"] = True
                 server_egress["allowedPortRanges"] = valid_client_ports
 
-            if server_protocols and len(server_protocols) == 1:
-                server_egress["protocol"] = server_protocols[0]
-            elif server_protocols and len(server_protocols) > 1:
+            if valid_server_protocols and len(valid_server_protocols) == 1:
+                server_egress["protocol"] = valid_server_protocols[0]
+            elif valid_server_protocols and len(valid_server_protocols) > 1:
                 server_egress["forwardProtocol"] = True
-                server_egress["allowedProtocols"] = server_protocols
+                server_egress["allowedProtocols"] = valid_server_protocols
             else:
                 server_egress["forwardProtocol"] = True
-                server_egress["allowedProtocols"] = client_protocols
+                server_egress["allowedProtocols"] = valid_client_protocols
 
 
             # parse out the elements in the list of endpoints as one of #attribute, UUID, or resolvable Endoint name
