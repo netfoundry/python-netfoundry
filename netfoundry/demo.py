@@ -378,7 +378,7 @@ def main():
     # wait for customer router to be PROVISIONED so that registration will be available 
     try:
         network.wait_for_status("PROVISIONED",id=customer_router['id'],type="edge-router",wait=999,progress=True)
-        customer_router_registration = network.get_edge_router_registration(id=customer_router['id'])
+        customer_router_registration = network.rotate_edge_router_registration(id=customer_router['id'])
     except:
         raise
     print("INFO: Ready to register branch exit Edge Router {name} with key {key} (expires {expiry})".format(
