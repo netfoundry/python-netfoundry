@@ -48,6 +48,7 @@ else:
 
 [![Video Tour of Release Procedure](https://img.youtube.com/vi/RlIa2mv8YIM/0.jpg)](https://youtu.be/RlIa2mv8YIM)
 
+```
 00:00 Welcome Pythonistas
 00:50 Determine next version number
 01:30 GitFlow Release Start
@@ -64,3 +65,4 @@ else:
 12:00 Verify Published Artifacts in PyPi and Hub
 12:30 PyPi Upgrade Gets New Version
 13:30 Docker Run Check Version
+```
