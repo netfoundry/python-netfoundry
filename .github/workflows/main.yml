@@ -83,7 +83,9 @@ jobs:
     - name: Set up QEMU
       uses: docker/setup-qemu-action@master
       with:
-        platforms: amd64,arm,arm64
+        platforms: amd64,arm64
+        # ignore arm/v7 (32bit) because unsupported by "cryptography" dep of
+        # Ansible and demand seems unlikely
 
     - name: Set up Docker BuildKit
       id: buildx
@@ -100,6 +102,6 @@ jobs:
       with:
         context: . # build context is workspace so we can copy artifacts from ./dist/
         builder: ${{ steps.buildx.outputs.name }}
-        platforms: linux/amd64,linux/arm/v7,linux/arm64
+        platforms: linux/amd64,linux/arm64
         push: true
         tags: ${{ steps.compose_tags.outputs.container_tags }}
