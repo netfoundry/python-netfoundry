@@ -97,7 +97,7 @@ jobs:
         username: ${{ secrets.DOCKER_HUB_API_USER }}
         password: ${{ secrets.DOCKER_HUB_API_TOKEN }}
 
-    - name: Build & Push Multi-Platform Container Image to Hub
+    - name: Build & Push Multi-Platform Container
       uses: docker/build-push-action@v2
       with:
         context: . # build context is workspace so we can copy artifacts from ./dist/
@@ -106,7 +106,7 @@ jobs:
         push: true
         tags: ${{ steps.compose_tags.outputs.container_tags }}
 
-    - name: Build & Push Multi-Platform Container Image to Hub
+    - name: Demo Container
       if: github.event.action == 'published'
       uses: docker/build-push-action@v2
       with:
