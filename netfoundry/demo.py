@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 import netfoundry
+from netfoundry.utility import DC_PROVIDERS
 
 
 def main():
@@ -74,7 +75,7 @@ def main():
         default="AWS",
         required=False,
         help="cloud provider to host Edge Routers",
-        choices=["AWS", "AZURE", "GCP", "OCP"]
+        choices=DC_PROVIDERS
     )
     regions_group = parser.add_mutually_exclusive_group(required=False)
     regions_group.add_argument("--regions",
@@ -137,11 +138,9 @@ def main():
     fabric_placements = list()
     if args.location_codes:
         for location in args.location_codes:
-            data_centers = [dc for dc in network.get_edge_router_data_centers(provider=args.provider,location_code=location)]
-            data_center = data_centers[0]
-            existing_count = len([er for er in hosted_edge_routers if er['dataCenterId'] == data_center['id']])
+            existing_count = len([er for er in hosted_edge_routers if er['provider'] == args.provider and er['locationCode'] == args.location_code])
             if existing_count < 1:
-                fabric_placements += [data_center]
+                fabric_placements += [location]
             else:
                 print("INFO: found a hosted Edge Router(s) in {location}".format(location=location))
 
@@ -153,7 +152,8 @@ def main():
                     "#"+location['locationCode'],
                     "#"+location['provider']
                 ],
-                data_center_id=location['id']
+                provider=args.provider,
+                location_code=location
             )
             hosted_edge_routers += [er]
             print("INFO: Placed Edge Router in {provider} ({location_name})".format(
@@ -182,7 +182,8 @@ def main():
                     "#"+location['locationCode'],
                     "#"+location['geoRegion']
                 ],
-                data_center_id=location['id']
+                provider=args.provider,
+                location_code=location
             )
             hosted_edge_routers += [er]
             print("INFO: Placed Edge Router in {major} ({location_name})".format(
