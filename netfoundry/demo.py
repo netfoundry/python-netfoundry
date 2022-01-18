@@ -140,11 +140,11 @@ def main():
     else:
         raise Exception("ERROR: failed to find a network named \"{:s}\"".format(network_name))
 
-    # existing hosted ERs
+    # existing hosted routers
     hosted_edge_routers = network.edge_routers(only_hosted=True)
     # a list of places where Endpoints are dialing from
 
-    # a list of locations to place one hosted ER
+    # a list of locations to place a hosted router
     fabric_placements = list()
     if args.location_codes:
         for location in args.location_codes:
@@ -163,7 +163,7 @@ def main():
                     "#"+location['provider']
                 ],
                 provider=args.provider,
-                location_code=location
+                location_code=location['locationCode']
             )
             hosted_edge_routers += [er]
             print("INFO: Placed Edge Router in {provider} ({location_name})".format(
