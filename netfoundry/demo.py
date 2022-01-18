@@ -183,7 +183,7 @@ def main():
                     "#"+location['geoRegion']
                 ],
                 provider=args.provider,
-                location_code=location
+                location_code=location['locationCode']
             )
             hosted_edge_routers += [er]
             print("INFO: Placed Edge Router in {major} ({location_name})".format(

@@ -874,7 +874,7 @@ class Network:
                     found_data_centers = self.get_edge_router_data_centers(provider=provider, location_code=location_code)
                     if len(found_data_centers) == 1:
                         body['provider'] = provider
-                        body['location_code'] = location_code
+                        body['locationCode'] = location_code
                     else:
                         raise Exception("ERROR: failed to find exactly one {provider} data center with location_code={location_code}".format(
                             provider=provider,
