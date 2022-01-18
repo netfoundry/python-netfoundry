@@ -84,7 +84,7 @@ jobs:
           --network ${NETWORK_NAME} \
           --create-client \
           --create-private \
-          --regions Americas EuropeMiddleEastAfrica AsiaPacific \
+          --regions Americas \
           -- create
         python3 -m netfoundry.demo \
           --network ${NETWORK_NAME} \
