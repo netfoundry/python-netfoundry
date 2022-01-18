@@ -51,7 +51,7 @@ def main():
         "-s", "--network-size",
         dest="size",
         default="small",
-        help="Billable Network size to create",
+        help="Network size to create",
         choices=["small","medium","large"]
     )
     parser.add_argument(
@@ -171,6 +171,8 @@ def main():
                 location_name=location['locationName']
             ))
     elif args.regions:
+        if args.provider or args.location_codes:
+            print("WARN: ignoring provider and location_codes because AWS georegion is specified.")
         geo_regions = args.regions
         for region in geo_regions:
             data_center_ids = [dc['id'] for dc in network.aws_geo_regions[region]]
@@ -190,9 +192,10 @@ def main():
                 attributes=[
                     "#defaultRouters",
                     "#"+location['locationCode'],
+                    "#"+location['provider'],
                     "#"+location['geoRegion']
                 ],
-                provider=args.provider,
+                provider="AWS",
                 location_code=location['locationCode']
             )
             hosted_edge_routers += [er]
