@@ -56,6 +56,10 @@ class Organization:
             expiry = claim['exp']
             epoch = time.time()
 
+        client_id = None
+        password = None
+        token_endpoint = None
+
         # persist the credentials filename in instances so that it may be used to refresh the token
         if credentials is not None:
             self.credentials = credentials
@@ -80,7 +84,7 @@ class Organization:
         # if no token or near expiry (30 min) then use env vars or credentials file to obtain a token
         if epoch is None or epoch > (expiry - 600):
             # if not creds as env vars then look for creds file
-            if not client_id and password and token_endpoint:
+            if not client_id and not password and not token_endpoint:
                 # unless a valid path assume relative and search the default chain
                 if not os.path.exists(self.credentials):
                     default_creds_chain = [
