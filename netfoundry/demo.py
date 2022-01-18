@@ -127,6 +127,9 @@ def main():
         network_id = network_group.create_network(name=network_name,size=args.size,version=args.version)['id']
         network = netfoundry.Network(network_group, network_id=network_id)
         network.wait_for_status("PROVISIONED",wait=999,progress=True)
+    elif args.command == "delete":
+        print("Network \"{network_name}\" does not exist.".format(network_name=network_name))
+        sys.exit()
     else:
         raise Exception("ERROR: failed to find a network named \"{:s}\"".format(network_name))
 

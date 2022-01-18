@@ -444,8 +444,9 @@ class Organization:
         return(networks)
 
     def get_networks_by_group(self,network_group_id):
-        """return list of network objects
-            :param network_group_id: required network group UUID
+        """Find networks by network group ID.
+
+        :param network_group_id: required network group UUIDv4
         """
         try:
             headers = { 
