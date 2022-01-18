@@ -28,6 +28,13 @@ def main():
         choices=["create","delete"]
     )
     parser.add_argument(
+        "-y", "--yes",
+        dest="yes",
+        default=False,
+        action="store_true",
+        help="Skip interactive prompt to confirm destructive actions."
+    )
+    parser.add_argument(
         "-n", "--network",
         help="The name of your demo network"
     )
@@ -118,7 +125,7 @@ def main():
         if args.command == "create":
             network.wait_for_status("PROVISIONED",wait=999,progress=True)
         elif args.command == "delete":
-            if query_yes_no("Permanently destroy Network \"{network_name}\" now?".format(network_name=network_name)):
+            if args.yes or query_yes_no("Permanently destroy Network \"{network_name}\" now?".format(network_name=network_name)):
                 network.delete_network(progress=True)
             else:
                 print("Not deleting Network \"{network_name}\".".format(network_name=network_name))
