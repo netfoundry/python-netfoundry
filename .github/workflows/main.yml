@@ -67,7 +67,7 @@ jobs:
       env:
         PYPI_VERSION: ${{ steps.read_version.outputs.pypi_version }}
       run: |
-        INSTALLED_VERSION="$(python3 -m netfoundry.version)""
+        INSTALLED_VERSION="$(python3 -m netfoundry.version)"
         if ! [[ ${PYPI_VERSION} == ${INSTALLED_VERSION#v} ]]; then
           echo "ERROR: PyPi and installed version do not match." >&2
           exit 1
