@@ -56,56 +56,75 @@ class Organization:
             expiry = claim['exp']
             epoch = time.time()
 
+        client_id = None
+        password = None
+        token_endpoint = None
+
         # persist the credentials filename in instances so that it may be used to refresh the token
         if credentials is not None:
             self.credentials = credentials
             os.environ['NETFOUNDRY_API_ACCOUNT'] = self.credentials
         elif 'NETFOUNDRY_API_ACCOUNT' in os.environ:
             self.credentials = os.environ['NETFOUNDRY_API_ACCOUNT']
+        # if any credentials var then require all credentials vars
+        elif ('NETFOUNDRY_CLIENT_ID' in os.environ
+                    or 'NETFOUNDRY_PASSWORD' in os.environ
+                    or 'NETFOUNDRY_OAUTH_URL' in os.environ):
+            if ('NETFOUNDRY_CLIENT_ID' in os.environ 
+                    and 'NETFOUNDRY_PASSWORD' in os.environ 
+                    and 'NETFOUNDRY_OAUTH_URL' in os.environ):
+                client_id = os.environ['NETFOUNDRY_CLIENT_ID']
+                password = os.environ['NETFOUNDRY_PASSWORD']
+                token_endpoint = os.environ['NETFOUNDRY_OAUTH_URL']
+            else:
+                raise Exception("ERROR: some but not all credentials vars present. Need NETFOUNDRY_CLIENT_ID, NETFOUNDRY_PASSWORD, and NETFOUNDRY_OAUTH_URL or a credentials file in default file locations or NETFOUNDRY_API_ACCOUNT as path to credentials file.")
         else:
             self.credentials = "credentials.json"
 
-        # if no token or near expiry (30 min) then use credentials to obtain a token
+        # if no token or near expiry (30 min) then use env vars or credentials file to obtain a token
         if epoch is None or epoch > (expiry - 600):
-            # unless a valid path assume relative and search the default chain
-            if not os.path.exists(self.credentials):
-                default_creds_chain = [
-                    {
-                        "scope": "project",
-                        "base": str(Path.cwd())
-                    },
-                    {
-                        "scope": "user",
-                        "base": str(Path.home())+"/.netfoundry"
-                    },
-                    {
-                        "scope": "device",
-                        "base": "/netfoundry"
-                    }
-                ]
-                for link in default_creds_chain:
-                    candidate = link['base']+"/"+self.credentials
-                    if os.path.exists(candidate):
-                        print("INFO: using credentials in {path} (found in {scope}-default directory)".format(
-                            scope=link['scope'],
-                            path=candidate
-                        ))
-                        self.credentials = candidate
-                        break
-            else:
-                print("INFO: using credentials in {path}".format(
-                    path=self.credentials
-                ))
+            # if not creds as env vars then look for creds file
+            if not client_id and not password and not token_endpoint:
+                # unless a valid path assume relative and search the default chain
+                if not os.path.exists(self.credentials):
+                    default_creds_chain = [
+                        {
+                            "scope": "project",
+                            "base": str(Path.cwd())
+                        },
+                        {
+                            "scope": "user",
+                            "base": str(Path.home())+"/.netfoundry"
+                        },
+                        {
+                            "scope": "device",
+                            "base": "/netfoundry"
+                        }
+                    ]
+                    for link in default_creds_chain:
+                        candidate = link['base']+"/"+self.credentials
+                        if os.path.exists(candidate):
+                            print("INFO: using credentials in {path} (found in {scope}-default directory)".format(
+                                scope=link['scope'],
+                                path=candidate
+                            ))
+                            self.credentials = candidate
+                            break
+                else:
+                    print("INFO: using credentials in {path}".format(
+                        path=self.credentials
+                    ))
 
-            try:
-                with open(self.credentials) as file:
-                    try: account = json.load(file)
-                    except: raise Exception("ERROR: failed to load JSON from {file}".format(file=file))
-            except: raise Exception("ERROR: failed to open {file} while working in {dir}".format(
-                file=self.credentials,dir=str(Path.cwd())))
-            token_endpoint = account['authenticationUrl']
-            client_id = account['clientId']
-            password = account['password']
+                try:
+                    with open(self.credentials) as file:
+                        try: account = json.load(file)
+                        except: raise Exception("ERROR: failed to load JSON from {file}".format(file=file))
+                except: raise Exception("ERROR: failed to open {file} while working in {dir}".format(
+                    file=self.credentials,dir=str(Path.cwd())))
+                token_endpoint = account['authenticationUrl']
+                client_id = account['clientId']
+                password = account['password']
+
             # extract the environment name from the authorization URL aka token API endpoint
             self.environment = re.sub(r'https://netfoundry-([^-]+)-.*', r'\1', token_endpoint, re.IGNORECASE)
             # re: scope: we're not using scopes with Cognito, but a non-empty value is required;
@@ -444,8 +463,9 @@ class Organization:
         return(networks)
 
     def get_networks_by_group(self,network_group_id):
-        """return list of network objects
-            :param network_group_id: required network group UUID
+        """Find networks by network group ID.
+
+        :param network_group_id: required network group UUIDv4
         """
         try:
             headers = { 

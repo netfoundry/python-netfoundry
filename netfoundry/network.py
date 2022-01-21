@@ -5,7 +5,7 @@ import time
 from unicodedata import name  # enforce a timeout; sleep
 from uuid import UUID  # validate UUIDv4 strings
 
-from .utility import (EXCLUDED_PATCH_PROPERTIES, HOST_PROPERTIES,
+from .utility import (DC_PROVIDERS, EXCLUDED_PATCH_PROPERTIES, HOST_PROPERTIES,
                       MAJOR_REGIONS, RESOURCES, STATUS_CODES, VALID_SEPARATORS,
                       VALID_SERVICE_PROTOCOLS, docstring_parameters, eprint,
                       http, plural, singular)
@@ -165,7 +165,7 @@ class Network:
         an ERP.
 
         :param list entities: required hashtag role attributes, existing entity @names, or existing entity UUIDs
-        :param str type: required type of entity: one of {resource_entity_types}
+        :param str type: required type of entity, choices: {resource_entity_types}
         """
         valid_entities = list()
         for entity in entities:
@@ -197,8 +197,47 @@ class Network:
                     else: valid_entities.append('@'+entity_name) # is an existing endpoint's name resolved from UUID
         return(valid_entities)
 
-    def get_edge_router_data_centers(self,provider: str=None,location_code: str=None):
-        """list the data centers where an Edge Router may be created
+    def get_data_center_by_id(self, id: str):
+        """Get data centers by UUIDv4.
+
+        :param id:        required UUIDv4 of data center
+        """
+        try:
+            # data centers returns a list of dicts (data centers)
+            headers = { "authorization": "Bearer " + self.session.token }
+
+            response = http.get(
+                self.session.audience+'core/v2/data-centers/'+id,
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers
+            )
+            response_code = response.status_code
+        except:
+            raise
+
+        if response_code == STATUS_CODES.codes.OK: # HTTP 200
+            try:
+                data_center = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR getting data center')
+                raise(e)
+        else:
+            raise Exception(
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    STATUS_CODES._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
+                )
+            )
+        return(data_center)
+
+    @docstring_parameters(providers=str(DC_PROVIDERS))
+    def get_edge_router_data_centers(self, provider: str=None, location_code: str=None):
+        """Find data centers for hosting edge routers.
+
+        :param provider:        optionally filter by data center provider, choices: {providers}
+        :param location_code:   provider-specific string identifying the data center location e.g. us-west-1
         """
         try:
             # data centers returns a list of dicts (data centers)
@@ -208,10 +247,10 @@ class Network:
                 "hostType": "ER"
             }
             if provider is not None:
-                if provider in ["AWS", "AZURE", "GCP", "OCP"]:
+                if provider in DC_PROVIDERS:
                     params['provider'] = provider
                 else:
-                    raise Exception("ERROR: unexpected cloud provider {:s}".format(provider))
+                    raise Exception("ERROR: unexpected cloud provider {:s}. Need one of {:s}".format(provider,str(DC_PROVIDERS)))
             response = http.get(
                 self.session.audience+'core/v2/data-centers',
                 proxies=self.session.proxies,
@@ -377,6 +416,8 @@ class Network:
                 params['name'] = name
             if typeId is not None:
                 params['typeId'] = typeId
+            if deleted:
+                params['status'] = "DELETED"
 
             if not type in RESOURCES.keys():
                 raise Exception("ERROR: unknown type \"{}\". Choices: {}".format(type, RESOURCES.keys()))
@@ -452,7 +493,9 @@ class Network:
                         )
                     )
 
-        # omit deleted entities by default
+        # prune entities with non null deletedAt unless return deleted is true
+        # TODO: remove this because the API has been changed to stop returning
+        # deleted entities unless query param status=DELETED
         if not deleted:
             all_entities = [entity for entity in all_entities if not entity['deletedAt']]
 
@@ -828,14 +871,22 @@ class Network:
                 raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
             return(started)
 
+    @docstring_parameters(providers=str(DC_PROVIDERS))
     def create_edge_router(self, name: str, attributes: list=[], link_listener: bool=False, data_center_id: str=None, 
-                            tunneler_enabled: bool=False, wait: int=900, sleep: int=10, progress: bool=False):
+                            tunneler_enabled: bool=False, wait: int=900, sleep: int=10, progress: bool=False,
+                            provider: str=None, location_code: str=None):
         """Create an Edge Router.
+
+        A router may be hosted by NetFoundry or the customer. If hosted by NF,
+        then you must supply datacenter "provider" and "location_code". If
+        neither are given then the router is customer hosted. 
 
         :param name:              a meaningful, unique name
         :param attributes:        a list of hashtag role attributes
-        :param link_listener:     true if router should listen for other routers' links on 80/tcp
-        :param data_center_id:    the UUIDv4 of a data center location that can host edge routers
+        :param link_listener:     true if router should listen for other routers' transit links on 80/tcp, always true if hosted by NetFoundry
+        :param data_center_id:    (DEPRECATED by provider, location_code) the UUIDv4 of a NetFoundry data center location that can host edge routers
+        :param provider:          datacenter provider, choices: {providers}
+        :param location_code:     provider-specific string identifying the datacenter location e.g. us-west-1
         :param tunneler_enabled:  true if the built-in tunneler features should be enabled for hosting or interception or both
         :param wait:              seconds to wait for async create to succeed
         """
@@ -854,8 +905,25 @@ class Network:
                 "tunnelerEnabled": tunneler_enabled
             }
             if data_center_id:
-                body['dataCenterId'] = data_center_id
+                eprint('WARN: data_center_id is deprecated by provider, location_code. ')
+                data_center = self.get_data_center_by_id(id=data_center_id)
+                body['provider'] = data_center['provider']
+                body['locationCode'] = data_center['locationCode']
                 body['linkListener'] = True
+            elif provider or location_code:
+                if provider and location_code:
+                    data_centers = self.get_edge_router_data_centers(provider=provider, location_code=location_code)
+                    if len(data_centers) == 1:
+                        body['provider'] = provider
+                        body['locationCode'] = location_code
+                        body['linkListener'] = True
+                    else:
+                        raise Exception("ERROR: failed to find exactly one {provider} data center with location_code={location_code}".format(
+                            provider=provider,
+                            location_code=location_code))
+                else:
+                    raise Exception("ERROR: need both provider and location_code to create a hosted router.")
+
             response = http.post(
                 self.session.audience+'core/v2/edge-routers',
                 proxies=self.session.proxies,
@@ -990,7 +1058,7 @@ class Network:
         :param: client_port is required integer of the ports to intercept
         :param: server_host_name is optional string that is a hostname (DNS) or IPv4. If omitted service is assumed to be SDK-hosted (not Tunneler or Router-hosted).
         :param: server_port is optional integer of the server port. If omitted the client port is used unless SDK-hosted.
-        :param: server_protocol is optional string of the server protocol.
+        :param: server_protocol is optional string of the server protocol, choices: {valid_service_protocols}. Default is ["tcp"].
         :param: attributes is optional list of strings of service roles to assign. Default is [].
         :param: edge_router_attributes is optional list of strings of Router roles or Router names that can "see" this service. Default is ["#all"].
         :param: egress_router_id is optional string of UUID or name of hosting Router. Selects Router-hosting strategy.
@@ -1901,7 +1969,8 @@ class Network:
         return(network)
 
     def wait_for_property_defined(self, property_name: str, property_type: object=str, entity_type: str="network", wait: int=60, sleep: int=3, id: str=None, progress: bool=False):
-        """continuously poll until expiry for the expected property to become defined with the any value of the expected type
+        """Poll until expiry for the expected property to become defined with the any value of the expected type.
+
         :param: property_name a top-level property to wait for e.g. `zitiId`
         :param: property_type optional Python instance type to expect for the value of property_name
         :param: id the UUID of the entity having a status if entity is not a network
@@ -1909,7 +1978,6 @@ class Network:
         :param: wait optional SECONDS after which to raise an exception defaults to five minutes (300)
         :param: sleep SECONDS polling interval
         """
-
         # use the id of this instance's Network unless another one is specified
         if entity_type == "network" and not id:
             id = self.id
@@ -1983,7 +2051,7 @@ class Network:
         """Continuously poll until expiry for the expected entity name to exist.
 
         :param: entity_name
-        :param: entity_type is singular or plural form, any of {resource_entity_types}
+        :param: entity_type is singular or plural form, choices: {resource_entity_types}
         :param: wait optional SECONDS after which to raise an exception defaults to five minutes (300)
         :param: sleep SECONDS polling interval
         :param: progress print a horizontal progress meter as dots, default false
