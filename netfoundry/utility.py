@@ -127,6 +127,8 @@ MAJOR_REGIONS = {
     }
 }
 
+DC_PROVIDERS = ["AWS", "AZURE", "GCP", "OCP"]
+
 HOST_PROPERTIES = ["ownerIdentityId", "ipAddress", "port", "provider", "providerInstanceId", "size", "locationMetadataId", "dataCenterId"]
 
 EXCLUDED_PATCH_PROPERTIES = {
@@ -143,10 +145,11 @@ VALID_SERVICE_PROTOCOLS = ["tcp", "udp"]
 VALID_SEPARATORS = '[:-]' # : or - will match regex pattern
 
 def docstring_parameters(*args, **kwargs):
-    def dec(obj):
-        obj.__doc__ = obj.__doc__.format(*args, **kwargs)
-        return obj
-    return dec
+    """Part a method's __doc__ string with format()."""
+    def decorated(ref):
+        ref.__doc__ = ref.__doc__.format(*args, **kwargs)
+        return ref
+    return decorated
 
 
 RETRY_STRATEGY = Retry(

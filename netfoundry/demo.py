@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 import netfoundry
+from netfoundry.utility import DC_PROVIDERS
 
 
 def main():
@@ -25,6 +26,13 @@ def main():
         default="create",
         help="the command to run",
         choices=["create","delete"]
+    )
+    parser.add_argument(
+        "-y", "--yes",
+        dest="yes",
+        default=False,
+        action="store_true",
+        help="Skip interactive prompt to confirm destructive actions."
     )
     parser.add_argument(
         "-n", "--network",
@@ -43,7 +51,7 @@ def main():
         "-s", "--network-size",
         dest="size",
         default="small",
-        help="Billable Network size to create",
+        help="Network size to create",
         choices=["small","medium","large"]
     )
     parser.add_argument(
@@ -74,7 +82,7 @@ def main():
         default="AWS",
         required=False,
         help="cloud provider to host Edge Routers",
-        choices=["AWS", "AZURE", "GCP", "OCP"]
+        choices=DC_PROVIDERS
     )
     regions_group = parser.add_mutually_exclusive_group(required=False)
     regions_group.add_argument("--regions",
@@ -117,7 +125,7 @@ def main():
         if args.command == "create":
             network.wait_for_status("PROVISIONED",wait=999,progress=True)
         elif args.command == "delete":
-            if query_yes_no("Permanently destroy Network \"{network_name}\" now?".format(network_name=network_name)):
+            if args.yes or query_yes_no("Permanently destroy Network \"{network_name}\" now?".format(network_name=network_name)):
                 network.delete_network(progress=True)
             else:
                 print("Not deleting Network \"{network_name}\".".format(network_name=network_name))
@@ -126,22 +134,23 @@ def main():
         network_id = network_group.create_network(name=network_name,size=args.size,version=args.version)['id']
         network = netfoundry.Network(network_group, network_id=network_id)
         network.wait_for_status("PROVISIONED",wait=999,progress=True)
+    elif args.command == "delete":
+        print("Network \"{network_name}\" does not exist.".format(network_name=network_name))
+        sys.exit()
     else:
         raise Exception("ERROR: failed to find a network named \"{:s}\"".format(network_name))
 
-    # existing hosted ERs
+    # existing hosted routers
     hosted_edge_routers = network.edge_routers(only_hosted=True)
     # a list of places where Endpoints are dialing from
 
-    # a list of locations to place one hosted ER
+    # a list of locations to place a hosted router
     fabric_placements = list()
     if args.location_codes:
         for location in args.location_codes:
-            data_centers = [dc for dc in network.get_edge_router_data_centers(provider=args.provider,location_code=location)]
-            data_center = data_centers[0]
-            existing_count = len([er for er in hosted_edge_routers if er['dataCenterId'] == data_center['id']])
+            existing_count = len([er for er in hosted_edge_routers if er['provider'] == args.provider and er['locationCode'] == args.location_code])
             if existing_count < 1:
-                fabric_placements += [data_center]
+                fabric_placements += [location]
             else:
                 print("INFO: found a hosted Edge Router(s) in {location}".format(location=location))
 
@@ -153,7 +162,8 @@ def main():
                     "#"+location['locationCode'],
                     "#"+location['provider']
                 ],
-                data_center_id=location['id']
+                provider=args.provider,
+                location_code=location['locationCode']
             )
             hosted_edge_routers += [er]
             print("INFO: Placed Edge Router in {provider} ({location_name})".format(
@@ -161,6 +171,8 @@ def main():
                 location_name=location['locationName']
             ))
     elif args.regions:
+        if args.provider or args.location_codes:
+            print("WARN: ignoring provider and location_codes because AWS georegion is specified.")
         geo_regions = args.regions
         for region in geo_regions:
             data_center_ids = [dc['id'] for dc in network.aws_geo_regions[region]]
@@ -180,9 +192,11 @@ def main():
                 attributes=[
                     "#defaultRouters",
                     "#"+location['locationCode'],
+                    "#"+location['provider'],
                     "#"+location['geoRegion']
                 ],
-                data_center_id=location['id']
+                provider="AWS",
+                location_code=location['locationCode']
             )
             hosted_edge_routers += [er]
             print("INFO: Placed Edge Router in {major} ({location_name})".format(
