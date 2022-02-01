@@ -319,14 +319,14 @@ class Network:
             )
             
     def get_resource(self, type: str, id: str, accept: str=None):
-        """return an object describing an entity
+        """Return an object describing a resource entity.
+
         :param type: required string of the singular of an entity type e.g. network, endpoint, service, edge-router, edge-router-policy, posture-check
         :param id: the UUID of the entity if not a network
         :param: accept: optional modifier string specifying the form of the desired response. Choices ["create","update"] where
                 "create" is useful for comparing an existing entity to a set of properties that are used to create the same type of
                 entity in a POST request, and "update" may be used in the same way for a PUT update.
         """
-
         # to singular if plural
         if type[-1] == "s":
             type = singular(type)
@@ -369,6 +369,14 @@ class Network:
                 entity = json.loads(response.text)
             except:
                 raise Exception('ERROR parsing response as object, got:\n{}'.format(response.text))
+        else:
+            raise Exception(
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    STATUS_CODES._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
+                )
+            )
 
         # routers are a special case because the value of entity._embedded.host.dataCenterId is expected by
         # downstream consumers of this method to be found at entity.dataCenterId
@@ -382,7 +390,8 @@ class Network:
         return(entity)
 
     def get_resources(self, type: str,name: str=None, accept: str=None, deleted: bool=False, typeId: str=None):
-        """return the resources object
+        """Find resources by type.
+
         :param str type: plural of an entity type e.g. networks, endpoints, services, posture-checks, etc...
         :param str name: filter results by name
         :param str accept: specifying the form of the desired response. Choices ["create","update"] where
@@ -391,7 +400,6 @@ class Network:
         :param bool deleted: include resource entities that have a non-null property deletedAt
         :param str typeId: filter results by typeId
         """
-
         # pluralize if singular
         if not type[-1] == "s":
             type = plural(type)
