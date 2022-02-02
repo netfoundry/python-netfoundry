@@ -462,7 +462,7 @@ class Organization:
 
         return(networks)
 
-    def get_networks_by_group(self,network_group_id):
+    def get_networks_by_group(self,network_group_id: str, deleted: bool=False):
         """Find networks by network group ID.
 
         :param network_group_id: required network group UUIDv4
@@ -474,6 +474,8 @@ class Organization:
             params = {
                 "findByNetworkGroupId": network_group_id
             }
+            if deleted:
+                params['status'] = "DELETED"
             response = http.get(
                 self.audience+'core/v2/networks',
                 proxies=self.proxies,

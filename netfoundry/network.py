@@ -8,8 +8,8 @@ from uuid import UUID  # validate UUIDv4 strings
 from .utility import (DC_PROVIDERS, EXCLUDED_PATCH_PROPERTIES, HOST_PROPERTIES,
                       MAJOR_REGIONS, RESOURCES, STATUS_CODES, VALID_SEPARATORS,
                       VALID_SERVICE_PROTOCOLS, docstring_parameters, eprint,
-                      http, plural, singular)
-
+                      http, plural, singular, Utility)
+utility = Utility()
 
 class Network:
     """Describe and use a Network."""
@@ -47,48 +47,104 @@ class Network:
         for geo in MAJOR_REGIONS['AWS'].keys():
             self.aws_geo_regions[geo] = [dc for dc in self.get_edge_router_data_centers(provider="AWS") if dc['locationName'] in MAJOR_REGIONS['AWS'][geo]]
 
-    def endpoints(self, typeId: str=None):
-        """Find all endpoints, optionally filtered by type.
+    def endpoints(self, name: str=None, typeId: str=None):
+        """Find endpoints.
 
-        :param str typeId: filter results by typeId e.g. "Device" or "Router"
+        :param str typeId: optionally filter results by typeId e.g. "Device" or "Router"
+        :param str name: optionally filter by case-insensitive name
         """
         if typeId is not None:
-            return(self.get_resources(type="endpoints", typeId=typeId))
+            return(self.get_resources(name=name, type="endpoints", typeId=typeId))
         else:
-            return(self.get_resources(type="endpoints"))
+            return(self.get_resources(name=name, type="endpoints"))
 
-    def edge_routers(self, only_hosted: bool=False, only_customer: bool=False):
-        """Find all edge routers, optionally filtered by hosting strategy.
+    def endpoint_exists(self, name: str):
+        """Check if endpoint exists.
+        
+        :param str name: case-insensitive display name to search.
+        """
+        return(self.resource_exists_in_network(name=name, type="endpoints"))
+
+    def edge_routers(self, name: str=None, only_hosted: bool=False, only_customer: bool=False):
+        """Find edge routers.
         
         :param bool only_customer: only find routers that are customer-hosted, ignoring netfoundry-hosted
+        :param str name: optionally filter by case-insensitive name
         """
-        all_edge_routers = self.get_resources("edge-routers")
+        all_edge_routers = self.get_resources(name=name, type="edge-routers")
         if only_hosted and only_customer:
             raise Exception("ERROR: specify only one of only_hosted or only_customer")
         elif only_hosted:
-            hosted_edge_routers = [er for er in all_edge_routers if 'dataCenterId' in er.keys() and er['dataCenterId']]
+            hosted_edge_routers = [er for er in all_edge_routers if 'provider' in er.keys() and not er['provider'] == 'CUSTOMER']
             return(hosted_edge_routers)
         elif only_customer:
-            customer_edge_routers = [er for er in all_edge_routers if not 'dataCenterId' in er.keys() or not er['dataCenterId']]
+            customer_edge_routers = [er for er in all_edge_routers if not 'provider' in er.keys() or er['provider'] == 'CUSTOMER']
             return(customer_edge_routers)
         else:
             return(all_edge_routers)
 
-    def services(self):
-        """Find all services."""
-        return(self.get_resources("services"))
+    def edge_router_exists(self, name: str):
+        """Check if edge router exists.
+        
+        :param str name: case-insensitive display name to search.
+        """
+        return(self.resource_exists_in_network(name=name, type="edge-routers"))
 
-    def edge_router_policies(self):
-        """Find all edge router policies."""
-        return(self.get_resources("edge-router-policies"))
+    def services(self, name: str=None):
+        """Find services.
+        
+        :param str name: optionally filter by case-insensitive name
+        """
+        return(self.get_resources(name=name, type="services"))
 
-    def app_wans(self):
-        """Find all app-wans."""
-        return(self.get_resources("app-wans"))
+    def service_exists(self, name: str):
+        """Check if service exists.
+        
+        :param str name: case-insensitive display name to search.
+        """
+        return(self.resource_exists_in_network(name=name, type="services"))
+
+    def edge_router_policies(self, name: str=None):
+        """Find edge router policies.
+        
+        :param str name: optionally filter by case-insensitive name
+        """
+        return(self.get_resources(name=name, type="edge-router-policies"))
+
+    def edge_router_policy_exists(self, name: str):
+        """Check if edge router policy exists.
+        
+        :param str name: case-insensitive display name to search.
+        """
+        return(self.resource_exists_in_network(name=name, type="edge-router-policies"))
+
+    def app_wans(self, name: str=None):
+        """Find app-wans.
+
+        :param str name: optionally filter by case-insensitive name
+        """
+        return(self.get_resources(name=name, type="app-wans"))
+
+    def app_wan_exists(self, name: str):
+        """Check if app wan exists.
+        
+        :param str name: case-insensitive display name to search.
+        """
+        return(self.resource_exists_in_network(name=name, type="app-wans"))
 
     def posture_checks(self):
-        """Find all posture checks."""
-        return(self.get_resources("posture-checks"))
+        """Find posture checks.
+
+        :param str name: optionally filter by case-insensitive name
+        """
+        return(self.get_resources(name=name, type="posture-checks"))
+
+    def posture_check_exists(self, name: str):
+        """Check if posture check exists.
+        
+        :param str name: case-insensitive display name to search.
+        """
+        return(self.resource_exists_in_network(name=name, type="posture-checks"))
 
     def delete_network(self,wait=300,progress=False):
         """Delete the network for which this class instance was created."""
@@ -318,7 +374,7 @@ class Network:
                 )
             )
             
-    def get_resource(self, type: str, id: str, accept: str=None):
+    def get_resource_by_id(self, type: str, id: str, accept: str=None):
         """Return an object describing a resource entity.
 
         :param type: required string of the singular of an entity type e.g. network, endpoint, service, edge-router, edge-router-policy, posture-check
@@ -388,6 +444,8 @@ class Network:
                 for prop in HOST_PROPERTIES:
                     entity[prop] = entity['_embedded']['host'][prop]
         return(entity)
+
+    get_resource = get_resource_by_id
 
     def get_resources(self, type: str,name: str=None, accept: str=None, deleted: bool=False, typeId: str=None):
         """Find resources by type.
@@ -522,6 +580,21 @@ class Network:
             return(all_routers)
         else:
             return(all_entities)
+
+    def resource_exists_in_network(self, name: str, type: str, deleted: bool=False):
+        """Check if a resource of a particular type with a particular name exists in this network.
+        
+        :param str name: the case-insensitive name to search
+        :param str type: plural of an entity type e.g. networks, endpoints, services, posture-checks, etc...
+        :param bool deleted: search deleted resources
+        """
+        normal_names = list()
+        for normal in self.get_resources(name=name, type=type, deleted=deleted):
+            normal_names.append(utility.normalize_caseless(normal['name']))
+        if utility.normalize_caseless(name) in normal_names:
+            return(True)
+        else:
+            return(False)
 
     def patch_resource(self, patch: dict, type: str=None, id: str=None, wait: int=0, sleep: int=2, progress: bool=False):
         """Diff existing and expected properties and send a patch request with changed values.
