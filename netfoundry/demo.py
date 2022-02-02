@@ -15,7 +15,6 @@ from .organization import Organization
 from .network_group import NetworkGroup
 from .network import Network
 from .utility import (DC_PROVIDERS, Utility)
-from .utility import Utility
 
 def main():
     """Run the demo script."""
