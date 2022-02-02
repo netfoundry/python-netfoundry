@@ -11,9 +11,11 @@ import random
 import sys
 from pathlib import Path
 
-import netfoundry
-from netfoundry.utility import DC_PROVIDERS
-
+from .organization import Organization
+from .network_group import NetworkGroup
+from .network import Network
+from .utility import (DC_PROVIDERS, Utility)
+from .utility import Utility
 
 def main():
     """Run the demo script."""
@@ -106,22 +108,24 @@ def main():
     network_name = args.network
     
     # use the session with some organization, default is to use the first and there's typically only one
-    organization = netfoundry.Organization(
+    organization = Organization(
         credentials=args.credentials if 'credentials' in args else None,
         organization_label=args.organization if 'organization' in args else None,
         proxy=args.proxy
     )
 
     # use some Network Group, default is to use the first and there's typically only one
-    network_group = netfoundry.NetworkGroup(
+    network_group = NetworkGroup(
         organization,
         network_group_name=args.network_group if 'network_group' in args else None
     )
 
+    utility = Utility()
+
     # create a Network
-    if network_name in network_group.networks_by_name().keys():
+    if utility.normalize_caseless(network_name) in network_group.networks_by_name().keys():
         # use the Network
-        network = netfoundry.Network(network_group, network_name=network_name)
+        network = Network(network_group, network_name=network_name)
         if args.command == "create":
             network.wait_for_status("PROVISIONED",wait=999,progress=True)
         elif args.command == "delete":
@@ -132,7 +136,7 @@ def main():
             sys.exit()
     elif args.command == "create":
         network_id = network_group.create_network(name=network_name,size=args.size,version=args.version)['id']
-        network = netfoundry.Network(network_group, network_id=network_id)
+        network = Network(network_group, network_id=network_id)
         network.wait_for_status("PROVISIONED",wait=999,progress=True)
     elif args.command == "delete":
         print("Network \"{network_name}\" does not exist.".format(network_name=network_name))
@@ -213,14 +217,14 @@ def main():
     # create a simple global Edge Router Policy unless one exists with the same name
     ERPs = network.edge_router_policies()
     blanket_policy_name = "defaultRouters"
-    if not blanket_policy_name in [erp['name'] for erp in ERPs]:
+    if not utility.normalize_caseless(blanket_policy_name) in [utility.normalize_caseless(erp['name']) for erp in ERPs]:
         try: network.create_edge_router_policy(name=blanket_policy_name,edge_router_attributes=["#defaultRouters"],endpoint_attributes=["#all"])
         except: raise
 
     endpoints = network.endpoints()
     clients = list()
     client1_name = "Desktop1"
-    if not client1_name in [end['name'] for end in endpoints]:
+    if not utility.normalize_caseless(client1_name) in [utility.normalize_caseless(end['name']) for end in endpoints]:
         # create an Endpoint for the dialing device that will access Services
         client1 = network.create_endpoint(name=client1_name,attributes=["#workFromAnywhere"])
         print("INFO: created Endpoint \"{:s}\"".format(client1['name']))
@@ -279,14 +283,15 @@ def main():
                 os.remove(token_file)
 
     services = network.services()
+    demo_service_names = dict()
 
     if args.private:
         # create Endpoint-hosted Services unless name exists
-        service1_name = "Hello Service"
-        if not service1_name in [svc['name'] for svc in services]:
+        demo_service_names['hello_service'] = utility.normalize_caseless("Hello Service")
+        if not demo_service_names['hello_service'] in [utility.normalize_caseless(svc['name']) for svc in services]:
             # traffic sent to hello.netfoundry:80 leaves Endpoint exit1 to server hello:3000
-            service1 = network.create_service(
-                name=service1_name,
+            hello_service = network.create_service(
+                name=demo_service_names['hello_service'],
                 attributes=["#welcomeWagon"],
                 client_host_name="hello.netfoundry",
                 client_port="80",
@@ -295,16 +300,16 @@ def main():
                 server_port="3000",
                 server_protocol="TCP"
             )
-            print("INFO: created Service \"{:s}\"".format(service1['name']))
+            print("INFO: created Service \"{:s}\"".format(hello_service['name']))
         else:
-            service1 = [svc for svc in services if svc['name'] == service1_name][0]
-            print("INFO: found Service \"{:s}\"".format(service1['name']))
+            hello_service = [svc for svc in services if utility.normalize_caseless(svc['name']) == demo_service_names['hello_service']][0]
+            print("INFO: found Service \"{:s}\"".format(hello_service['name']))
 
-        service2_name = "REST Service"
-        if not service2_name in [svc['name'] for svc in services]:
+        demo_service_names['rest_service'] = utility.normalize_caseless("REST Service")
+        if not demo_service_names['rest_service'] in [utility.normalize_caseless(svc['name']) for svc in services]:
             # traffic sent to httpbin.netfoundry:80 leaves Endpoint exit1 to server httpbin:80
-            service2 = network.create_service(
-                name=service2_name,
+            rest_service = network.create_service(
+                name=demo_service_names['rest_service'],
                 attributes=["#welcomeWagon"],
                 client_host_name="httpbin.netfoundry",
                 client_port="80",
@@ -313,19 +318,19 @@ def main():
                 server_port="80",
                 server_protocol="TCP"
             )
-            print("INFO: created Service \"{:s}\"".format(service2['name']))
+            print("INFO: created Service \"{:s}\"".format(rest_service['name']))
         else:
-            service2 = [svc for svc in services if svc['name'] == service2_name][0]
-            print("INFO: found Service \"{:s}\"".format(service2['name']))
+            rest_service = [svc for svc in services if utility.normalize_caseless(svc['name']) == demo_service_names['rest_service']][0]
+            print("INFO: found Service \"{:s}\"".format(rest_service['name']))
 
     # Create router-hosted Services unless exists
     hosting_router = random.choice(hosted_edge_routers) # nosec
 
-    service3_name = "Fireworks Service"
-    if not service3_name in [svc['name'] for svc in services]:
+    demo_service_names['fireworks_service'] = utility.normalize_caseless("Fireworks Service")
+    if not demo_service_names['fireworks_service'] in [utility.normalize_caseless(svc['name']) for svc in services]:
         # traffic sent to fireworks.netfoundry:80 leaves Routers to 34.204.78.203:80
-        service3 = network.create_service(
-            name=service3_name,
+        fireworks_service = network.create_service(
+            name=demo_service_names['fireworks_service'],
             attributes=["#welcomeWagon"],
             client_host_name="fireworks.netfoundry",
             client_port="80",
@@ -334,16 +339,16 @@ def main():
             server_port="80",
             server_protocol="TCP"
         )
-        print("INFO: created Service \"{:s}\"".format(service3['name']))
+        print("INFO: created Service \"{:s}\"".format(fireworks_service['name']))
     else:
-        service3 = [svc for svc in services if svc['name'] == service3_name][0]
-        print("INFO: found Service \"{:s}\"".format(service3['name']))
+        fireworks_service = [svc for svc in services if utility.normalize_caseless(svc['name']) == demo_service_names['fireworks_service']][0]
+        print("INFO: found Service \"{:s}\"".format(fireworks_service['name']))
 
-    service4_name = "Weather Service"
-    if not service4_name in [svc['name'] for svc in services]:
+    demo_service_names['weather_service'] = utility.normalize_caseless("Weather Service")
+    if not demo_service_names['weather_service'] in [utility.normalize_caseless(svc['name']) for svc in services]:
         # traffic sent to weather.netfoundry:80 leaves Routers to wttr.in:80
-        service4 = network.create_service(
-            name=service4_name,
+        weather_service = network.create_service(
+            name=demo_service_names['weather_service'],
             attributes=["#welcomeWagon"],
             client_host_name="weather.netfoundry",
             client_port="80",
@@ -352,10 +357,10 @@ def main():
             server_port="80",
             server_protocol="TCP"
         )
-        print("INFO: created Service \"{:s}\"".format(service4['name']))
+        print("INFO: created Service \"{:s}\"".format(weather_service['name']))
     else:
-        service4 = [svc for svc in services if svc['name'] == service4_name][0]
-        print("INFO: found Service \"{:s}\"".format(service4['name']))
+        weather_service = [svc for svc in services if utility.normalize_caseless(svc['name']) == demo_service_names['weather_service']][0]
+        print("INFO: found Service \"{:s}\"".format(weather_service['name']))
 
     # fireworks
     # heartbeat
