@@ -19,22 +19,30 @@ class Utility:
         pass
 
     def camel(self, snake_str):
+        """Convert a string from snake case to camel case."""
         first, *others = snake_str.split('_')
         return ''.join([first.lower(), *map(str.title, others)])
 
     def snake(self, camel_str):
+        """Convert a string from camel case to snake case."""
         return sub(r'(?<!^)(?=[A-Z])', '_', camel_str).lower()
 
     def normalize_caseless(self, text):
+        """Normalize a string as lowercase unicode KD form.
+        
+        The normal form KD (NFKD) will apply the compatibility decomposition,
+        i.e. replace all compatibility characters with their equivalents.
+        """
         return unicodedata.normalize("NFKD", text.casefold())
 
     def caseless_equal(self, left, right):
+        """Compare the KD normal form of left, right strings."""
         return self.normalize_caseless(left) == self.normalize_caseless(right)
 
 class LookupDict(dict):
     """Dictionary lookup object."""
-
     def __init__(self, name=None):
+        """Initialize a lookup dictionary."""
         self.name = name
         super(LookupDict, self).__init__()
 
