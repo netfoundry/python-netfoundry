@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-r"""Use this script to create a network with functioning services and demonstrate the NetFoundry Python module.
+r"""This script demonstrates the NetFoundry Python module.
 
-Usage::
+Usage:
     $ python3 -m netfoundry.demo --network BibbidiBobbidiBoo
 """
 
