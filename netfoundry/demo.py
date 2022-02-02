@@ -4,7 +4,6 @@ r"""This script demonstrates the NetFoundry Python module.
 Usage:
     $ python3 -m netfoundry.demo --network BibbidiBobbidiBoo
 """
-
 import argparse
 import os
 import random
