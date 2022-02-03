@@ -138,7 +138,7 @@ def main():
     elif args.command == "delete":
         print("Network \"{network_name}\" does not exist.".format(network_name=network_name))
         sys.exit()
-    else:
+    else: # catch unhandled cases if the script changes in the future, not currently possible to match 'else' because only create, delete are valid args.
         raise Exception("ERROR: failed to find a network named \"{name}\" and no valid command in \"{command}\"." 
                         +" Need \"create\" (default) or \"delete\".".format(name=network_name, command=args.command))
 
