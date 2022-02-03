@@ -10,10 +10,11 @@ import random
 import sys
 from pathlib import Path
 
-from .organization import Organization
-from .network_group import NetworkGroup
 from .network import Network
+from .network_group import NetworkGroup
+from .organization import Organization
 from .utility import DC_PROVIDERS
+
 
 def main():
     """Run the demo script."""

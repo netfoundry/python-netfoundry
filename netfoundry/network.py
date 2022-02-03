@@ -1,3 +1,5 @@
+"""Use a network and find and manage its resources."""
+
 import json
 import re  # regex
 import sys
@@ -7,8 +9,9 @@ from uuid import UUID  # validate UUIDv4 strings
 
 from .utility import (DC_PROVIDERS, EXCLUDED_PATCH_PROPERTIES, HOST_PROPERTIES,
                       MAJOR_REGIONS, RESOURCES, STATUS_CODES, VALID_SEPARATORS,
-                      VALID_SERVICE_PROTOCOLS, docstring_parameters, eprint,
-                      http, plural, singular, Utility)
+                      VALID_SERVICE_PROTOCOLS, Utility, docstring_parameters,
+                      eprint, http, plural, singular)
+
 utility = Utility()
 
 class Network:

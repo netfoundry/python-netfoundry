@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-r"""Command-line interface to the NetFoundry API
+r"""[Experimental] command-line interface to the NetFoundry API
 Usage::
     $ python3 -m netfoundry.ctl --credentials credentials.json
 
 PYTHON_ARGCOMPLETE_OK
 """
+
 import pkg_resources  # part of setuptools
 from milc import cli
 

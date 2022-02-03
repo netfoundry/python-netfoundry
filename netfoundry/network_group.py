@@ -1,6 +1,9 @@
+"""Use a network group and find its networks."""
+
 import json
 
-from .utility import (RESOURCES, STATUS_CODES, eprint, http, Utility)
+from .utility import RESOURCES, STATUS_CODES, Utility, eprint, http
+
 utility = Utility()
 
 class NetworkGroup:

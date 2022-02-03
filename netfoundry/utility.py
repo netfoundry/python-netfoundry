@@ -1,3 +1,5 @@
+"""Shared helper functions, constants, and classes."""
+
 import sys  # open stderr
 import unicodedata  # case insensitive compare in Utility
 from re import sub
@@ -5,17 +7,19 @@ from re import sub
 import inflect  # singular and plural nouns
 from requests import \
     Session  # HTTP user agent will not emit server cert warnings if verify=False
-from urllib3.exceptions import InsecureRequestWarning
-
 from requests import status_codes
 from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 from urllib3 import disable_warnings
+from urllib3.exceptions import InsecureRequestWarning
+from urllib3.util.retry import Retry
 
 disable_warnings(InsecureRequestWarning)
 
 class Utility:
+    """Shared functions intended for use within the module and without."""
+
     def __init__(self):
+        """No-op."""
         pass
 
     def camel(self, snake_str):
@@ -40,7 +44,8 @@ class Utility:
         return self.normalize_caseless(left) == self.normalize_caseless(right)
 
 class LookupDict(dict):
-    """Dictionary lookup object."""
+    """Helper class to create a lookup dictionary from a set."""
+
     def __init__(self, name=None):
         """Initialize a lookup dictionary."""
         self.name = name
@@ -62,6 +67,7 @@ def eprint(*args, **kwargs):
 
 p = inflect.engine()
 def plural(singular):
+    """Pluralize a singular form."""
     # if already plural then return, else pluralize
     if singular[-1:] == 's':
         return(singular)
@@ -69,6 +75,7 @@ def plural(singular):
         return(p.plural_noun(singular))
 
 def singular(plural):
+    """Singularize a plural form."""
     return(p.singular_noun(plural))
 
 STATUSES_BY_CODE = {
@@ -170,6 +177,8 @@ RETRY_STRATEGY = Retry(
 DEFAULT_TIMEOUT = 31 # seconds, Gateway Service waits 30s before responding with an error code e.g. 503 and
 # so waiting at least 31s is necessary to obtain that information
 class TimeoutHTTPAdapter(HTTPAdapter):
+    """Configure Python requests library to have retry and timeout defaults."""
+
     def __init__(self, *args, **kwargs):
         self.timeout = DEFAULT_TIMEOUT
         if "timeout" in kwargs:
