@@ -1,6 +1,10 @@
+"""Use a network group and find its networks."""
+
 import json
 
-from .utility import (RESOURCES, STATUS_CODES, eprint, http, Utility)
+from .utility import RESOURCES, STATUS_CODES, Utility, eprint, http
+
+utility = Utility()
 
 class NetworkGroup:
     """use a Network Group by name or ID.
@@ -43,7 +47,7 @@ class NetworkGroup:
         self.describe = Organization.get_network_group(self.network_group_id)
         self.id = self.network_group_id
         self.name = self.network_group_name
-        self.vanity = Organization.label.lower()
+        self.vanity = utility.normalize_caseless(Organization.label)
 
         if self.session.environment == "production":
             self.nfconsole = "https://{vanity}.nfconsole.io".format(vanity=self.vanity)
@@ -69,6 +73,30 @@ class NetworkGroup:
         for net in self.session.get_networks_by_group(self.network_group_id):
             my_networks_by_name[utility.normalize_caseless(net['name'])] = net['id']
         return(my_networks_by_name)
+
+    def networks_by_normal_name(self):
+        """Find networks in group by case-insensitive (caseless, normalized) name.
+        
+        Case-insensitive uniqueness is enforced by the API for each type of entity.
+        """
+        my_networks_by_normal_name = dict()
+        for net in self.networks_by_name():
+            my_networks_by_normal_name[utility.normalize_caseless(net['name'])] = net['id']
+        return(my_networks_by_normal_name)
+
+    def network_exists(self, name: str, deleted: bool=False):
+        """Check if a network exists.
+        
+        :param name: the case-insensitive string to search
+        :param deleted: include deleted networks in results
+        """
+        network_normal_names = list()
+        for net in self.session.get_networks_by_group(network_group_id=self.network_group_id, deleted=deleted):
+            network_normal_names.append(utility.normalize_caseless(net['name']))
+        if utility.normalize_caseless(name) in network_normal_names:
+            return(True)
+        else:
+            return(False)
 
     def get_controller_data_centers(self):
         """Find controller data centers."""

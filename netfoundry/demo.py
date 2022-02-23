@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-r"""Use this script to create a network with functioning services and demonstrate the NetFoundry Python module.
+r"""This script demonstrates the NetFoundry Python module.
 
-Usage::
+Usage:
     $ python3 -m netfoundry.demo --network BibbidiBobbidiBoo
 """
-
 import argparse
 import os
 import random
@@ -141,8 +140,9 @@ def main():
     elif args.command == "delete":
         print("Network \"{network_name}\" does not exist.".format(network_name=network_name))
         sys.exit()
-    else:
-        raise Exception("ERROR: failed to find a network named \"{:s}\"".format(network_name))
+    else: # catch unhandled cases if the script changes in the future, not currently possible to match 'else' because only create, delete are valid args.
+        raise Exception("ERROR: failed to find a network named \"{name}\" and no valid command in \"{command}\"." 
+                        +" Need \"create\" (default) or \"delete\".".format(name=network_name, command=args.command))
 
     # existing hosted routers
     hosted_edge_routers = network.edge_routers(only_hosted=True)
@@ -215,13 +215,11 @@ def main():
             raise
 
     # create a simple global Edge Router Policy unless one exists with the same name
-    ERPs = network.edge_router_policies()
     blanket_policy_name = "defaultRouters"
     if not utility.normalize_caseless(blanket_policy_name) in [utility.normalize_caseless(erp['name']) for erp in ERPs]:
         try: network.create_edge_router_policy(name=blanket_policy_name,edge_router_attributes=["#defaultRouters"],endpoint_attributes=["#all"])
         except: raise
 
-    endpoints = network.endpoints()
     clients = list()
     client1_name = "Desktop1"
     if not utility.normalize_caseless(client1_name) in [utility.normalize_caseless(end['name']) for end in endpoints]:
@@ -229,40 +227,40 @@ def main():
         client1 = network.create_endpoint(name=client1_name,attributes=["#workFromAnywhere"])
         print("INFO: created Endpoint \"{:s}\"".format(client1['name']))
     else:
-        client1 = [end for end in endpoints if end['name'] == client1_name][0]
+        client1 = network.endpoints(name=client1_name)[0]
         print("INFO: found Endpoint \"{:s}\"".format(client1['name']))
     clients += [client1]
 
     client2_name = "Mobile1"
-    if not client2_name in [end['name'] for end in endpoints]:
+    if not network.endpoint_exists(name=client2_name):
         # create an Endpoint for the dialing device that will access Services
         client2 = network.create_endpoint(name=client2_name,attributes=["#workFromAnywhere"])
         print("INFO: created Endpoint \"{:s}\"".format(client2['name']))
     else:
-        client2 = [end for end in endpoints if end['name'] == client2_name][0]
+        client2 = network.endpoints(name=client2_name)[0]
         print("INFO: found Endpoint \"{:s}\"".format(client2['name']))
     clients += [client2]
 
     if args.client:
         client3_name = "Linux1"
-        if not client3_name in [end['name'] for end in endpoints]:
+        if not network.endpoint_exists(name=client3_name):
             # create an Endpoint for the dialing device that will access Services
             client3 = network.create_endpoint(name=client3_name,attributes=["#workFromAnywhere"])
             print("INFO: created Endpoint \"{:s}\"".format(client3['name']))
         else:
-            client3 = [end for end in endpoints if end['name'] == client3_name][0]
+            client3 = network.endpoints(name=client3_name)[0]
             print("INFO: found Endpoint \"{:s}\"".format(client3['name']))
         clients += [client3]
 
     exits = list()
     if args.private:
         exit1_name = "Exit1"
-        if not exit1_name in [end['name'] for end in endpoints]:
+        if not network.endpoint_exists(name=exit1_name):
             # create an Endpoint for the hosting device that will provide access to the server
             exit1 = network.create_endpoint(name=exit1_name,attributes=["#exits"])
             print("INFO: created Endpoint \"{:s}\"".format(exit1['name']))
         else:
-            exit1 = [end for end in endpoints if end['name'] == exit1_name][0]
+            exit1 = network.endpoints(name=client3_name)[0]
             print("INFO: found Endpoint \"{:s}\"".format(exit1['name']))
         exits += [exit1]
 
@@ -365,11 +363,12 @@ def main():
     # fireworks
     # heartbeat
     
-    service5_name = "Echo Service"
-    if not service5_name in [svc['name'] for svc in services]:
+    demo_services['echo_service'] = dict()
+    demo_services['echo_service']['display_name'] = "Echo Service"
+    if not network.service_exists(name=demo_services['echo_service']['display_name']):
         # traffic sent to echo.netfoundry:80 leaves Routers to eth0.me:80
-        service5 = network.create_service(
-            name=service5_name,
+        demo_services['echo_service']['entity'] = network.create_service(
+            name=demo_services['echo_service']['display_name'],
             attributes=["#welcomeWagon"],
             client_host_name="echo.netfoundry",
             client_port="80",
@@ -378,22 +377,22 @@ def main():
             server_port="80",
             server_protocol="TCP"
         )
-        print("INFO: created Service \"{:s}\"".format(service5['name']))
+        print("INFO: created Service \"{:s}\"".format(demo_services['echo_service']['entity']['name']))
     else:
-        service5 = [svc for svc in services if svc['name'] == service5_name][0]
-        print("INFO: found Service \"{:s}\"".format(service5['name']))
+        demo_services['echo_service']['entity'] = network.services(name=demo_services['echo_service']['display_name'])[0]
+        print("INFO: found Service \"{:s}\"".format(demo_services['echo_service']['entity']['name']))
 
     # create a customer-hosted ER unless exists
-    customer_routers = network.edge_routers(only_customer=True)
     customer_router_name="Branch Exit Router 1"
-    if not customer_router_name in [er['name'] for er in customer_routers]:
+    if not network.edge_router_exists(name=customer_router_name):
         customer_router = network.create_edge_router(
             name=customer_router_name,
             attributes=["#vmWareExitRouters"],
             tunneler_enabled=True
         )
     else:
-        customer_router = [er for er in customer_routers if er['name'] == customer_router_name][0]
+        customer_router = network.edge_routers(name=customer_router_name)[0]
+
     # wait for customer router to be PROVISIONED so that registration will be available 
     try:
         network.wait_for_status("PROVISIONED",id=customer_router['id'],type="edge-router",wait=999,progress=True)
@@ -406,22 +405,20 @@ def main():
         expiry=customer_router_registration['expiresAt'],
     ))
 
-
     # create unless exists
     app_wan1_name = "Welcome"
-    app_wans = network.app_wans()
-    if not app_wan1_name in [aw['name'] for aw in app_wans]:
+    if not network.app_wan_exists(name=app_wan1_name):
         # workFromAnywhere may connect to welcomeWagon
         app_wan1 = network.create_app_wan(name=app_wan1_name,endpoint_attributes=["#workFromAnywhere"],service_attributes=["#welcomeWagon"])
         print("INFO: created AppWAN \"{:s}\"".format(app_wan1['name']))
     else:
-        app_wan1 = [aw for aw in app_wans if aw['name'] == app_wan1_name][0]
+        app_wan1 = network.app_wans(name=app_wan1_name)[0]
         print("INFO: found AppWAN \"{:s}\"".format(app_wan1['name']))
 
     print("SUCCESS! The next step is to enroll one or more of your client Endpoints on some device(s) and visit one of the demo Service URLs described in the demo document ({doc})."
             "You may also log in to the web console ({nfconsole}) to play with your Network".format(doc="https://developer.netfoundry.io/v2/tools/#demos",nfconsole=network_group.nfconsole))
-    for svc in network.services():
-        print("* {name}:\thttp://{url}/".format(name=svc['name'],url=svc['model']['clientIngress']['host']))
+    for svc in demo_services:
+        print("* {name}:\thttp://{url}/".format(name=demo_services[svc]['entity']['name'],url=demo_services[svc]['entity']['model']['clientIngress']['host']))
 
 def query_yes_no(question: str, default: str="no"):
     """Ask a yes/no question via input() and return their answer.
