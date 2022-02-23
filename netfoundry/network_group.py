@@ -1,7 +1,10 @@
+"""Use a network group and find its networks."""
+
 import json
 
-from .utility import RESOURCES, STATUS_CODES, eprint, http
+from .utility import RESOURCES, STATUS_CODES, Utility, eprint, http
 
+utility = Utility()
 
 class NetworkGroup:
     """use a Network Group by name or ID.
@@ -44,17 +47,18 @@ class NetworkGroup:
         self.describe = Organization.get_network_group(self.network_group_id)
         self.id = self.network_group_id
         self.name = self.network_group_name
-        self.vanity = Organization.label.lower()
+        self.vanity = utility.normalize_caseless(Organization.label)
 
         if self.session.environment == "production":
             self.nfconsole = "https://{vanity}.nfconsole.io".format(vanity=self.vanity)
         else:
             self.nfconsole = "https://{vanity}.{env}-nfconsole.io".format(vanity=self.vanity, env=self.session.environment)
 
-    def nc_data_centers(self): # this was attribute self.nc_data_centers and converted to method to avoid calling preemptively with self.__init__
-        return(self.get_controller_data_centers())
-
-    def nc_data_centers_by_location(self): # this was attribute self.nc_data_centers_by_location and converted to method to avoid calling preemptively with self.__init__
+    def nc_data_centers_by_location(self):
+        """Get a controller data center by locationCode.
+        
+        Note that all controller data centers have provider: AWS.
+        """
         my_nc_data_centers_by_location = dict()
         for dc in self.get_controller_data_centers():
             my_nc_data_centers_by_location[dc['locationCode']] = dc['id']
@@ -62,15 +66,42 @@ class NetworkGroup:
         return(my_nc_data_centers_by_location)
 
     # resolve network UUIDs by name
-    def networks_by_name(self): # this was attribute self.networks_by_name and converted to method to avoid calling preemptively with self.__init__
+    def networks_by_name(self):
+        """Find networks in group by case-sensitive display name.
+
+        Note that case-insensitive (caseless) uniqueness is enforced by the API for each type of entity.
+        """
         my_networks_by_name = dict()
         for net in self.session.get_networks_by_group(self.network_group_id):
             my_networks_by_name[net['name']] = net['id']
         return(my_networks_by_name)
 
-    def get_controller_data_centers(self):
-        """list the data centers where a Network Controller may be created
+    def networks_by_normal_name(self):
+        """Find networks in group by case-insensitive (caseless, normalized) name.
+        
+        Case-insensitive uniqueness is enforced by the API for each type of entity.
         """
+        my_networks_by_normal_name = dict()
+        for net in self.networks_by_name():
+            my_networks_by_normal_name[utility.normalize_caseless(net['name'])] = net['id']
+        return(my_networks_by_normal_name)
+
+    def network_exists(self, name: str, deleted: bool=False):
+        """Check if a network exists.
+        
+        :param name: the case-insensitive string to search
+        :param deleted: include deleted networks in results
+        """
+        network_normal_names = list()
+        for net in self.session.get_networks_by_group(network_group_id=self.network_group_id, deleted=deleted):
+            network_normal_names.append(utility.normalize_caseless(net['name']))
+        if utility.normalize_caseless(name) in network_normal_names:
+            return(True)
+        else:
+            return(False)
+
+    def get_controller_data_centers(self):
+        """Find controller data centers."""
         try:
             # data centers returns a list of dicts (data center objects)
             headers = { "authorization": "Bearer " + self.session.token }
@@ -108,9 +139,11 @@ class NetworkGroup:
 
         return(aws_data_centers)
 
+    # provide a compatible alias
+    nc_data_centers = get_controller_data_centers
+
     def get_product_metadata(self, is_active: bool=True):
-        """fetch all product metadata
-        """
+        """Get all products' metadata."""
         try:
             response = http.get(
                 self.session.audience+'product-metadata/v2/download-urls.json',
@@ -146,8 +179,7 @@ class NetworkGroup:
             return (product_metadata)
 
     def list_product_versions(self, product_metadata: dict={}):
-        """find all product version from product metadata
-        """
+        """Find product versions in all products' metadata."""
         if product_metadata:
             product_versions = product_metadata.keys()
         else:
@@ -157,8 +189,7 @@ class NetworkGroup:
         return (product_versions)
 
     def find_latest_product_version(self, product_versions: list=[]):
-        """find the highest sorted product version number (may be experimental, not stable)
-        """
+        """Get the highest product version number (may be experimental, not stable)."""
         if not product_versions:
             product_versions = self.list_product_versions()
 
@@ -167,14 +198,14 @@ class NetworkGroup:
 
     def create_network(self, name: str, network_group_id: str=None, location: str="us-east-1", version: str=None, size: str="small"):
         """
-        create a network with
+        Create a network in this network group.
+
         :param name: required network name
         :param network_group: optional Network Group ID
         :param location: optional data center region name in which to create
         :param version: optional product version string like 7.3.17
         :param size: optional network configuration metadata name from /core/v2/network-configs e.g. "medium"
         """
-        
         my_nc_data_centers_by_location = self.nc_data_centers_by_location()
         if not location in my_nc_data_centers_by_location.keys():
             raise Exception("ERROR: unexpected Network location '{:s}'. Valid locations include: {}.".format(location, my_nc_data_centers_by_location.keys()))
@@ -243,9 +274,10 @@ class NetworkGroup:
 
     def delete_network(self, network_id=None, network_name=None):
         """
-        delete a Network
-        :param id: optional Network UUID to delete
-        :param name: optional Network name to delete
+        Delete a network.
+
+        :param id: optional network UUID to delete
+        :param name: optional network name to delete
         """
         try:
             networks_by_name = self.networks_by_name()

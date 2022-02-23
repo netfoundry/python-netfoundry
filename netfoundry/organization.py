@@ -1,3 +1,5 @@
+"""Use an identity organization and find authorized network groups and networks."""
+
 import json
 import os
 import re  # regex
@@ -10,12 +12,15 @@ from .utility import RESOURCES, STATUS_CODES, eprint, http
 
 
 class Organization:
-    """ Default is to use the Organization of the caller's user or API account identity
-    :param: organization_id is optional string UUID of an alternative Organization
-    :param: organization_label is optional string `label` property of an alternative Organization
-    :param token: continue using a session with this optional token from an existing instance of Organization
-    :param credentials: optional alternative path to API account credentials file, default is ~/.netfoundry/credentials.json
-    :param proxy: optional HTTP proxy, e.g., http://localhost:8080
+    """Authenticate as an identity ID in an organization.
+    
+    The default is to use the callering identity ID's organization. 
+
+    :param str organization_id: optional UUID of an alternative organization
+    :param str organization_label: is optional `label` property of an alternative organization
+    :param str token: continue using a session with this optional token from an existing instance of organization
+    :param str credentials: optional alternative path to API account credentials file, default is project, user, or device default directories containing file name credentials.json
+    :param str proxy: optional HTTP proxy, e.g., http://localhost:8080
     """
 
     def __init__(self, 
@@ -24,7 +29,7 @@ class Organization:
         organization_label: str=None,
         token=None, 
         proxy=None):
-
+        """Initialize an instance of Organization."""
         # verify auth endpoint's server certificate if proxy is type SOCKS or None
         self.proxy = proxy
         if proxy is None:
@@ -462,7 +467,7 @@ class Organization:
 
         return(networks)
 
-    def get_networks_by_group(self,network_group_id):
+    def get_networks_by_group(self,network_group_id: str, deleted: bool=False):
         """Find networks by network group ID.
 
         :param network_group_id: required network group UUIDv4
@@ -474,6 +479,8 @@ class Organization:
             params = {
                 "findByNetworkGroupId": network_group_id
             }
+            if deleted:
+                params['status'] = "DELETED"
             response = http.get(
                 self.audience+'core/v2/networks',
                 proxies=self.proxies,
