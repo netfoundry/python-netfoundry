@@ -37,6 +37,7 @@ def main():
     )
     parser.add_argument(
         "-n", "--network",
+        required=True,
         help="The name of your demo network"
     )
     parser.add_argument(

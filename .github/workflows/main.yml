@@ -80,13 +80,13 @@ jobs:
         NETFOUNDRY_PASSWORD: ${{ secrets.NETFOUNDRY_PASSWORD }}
         NETFOUNDRY_OAUTH_URL: ${{ secrets.NETFOUNDRY_OAUTH_URL }}
       run: |
-        python3 -m netfoundry.demo \
+        nfdemo \
           --network ${NETWORK_NAME} \
           --create-client \
           --create-private \
           --regions Americas \
           -- create
-        python3 -m netfoundry.demo \
+        nfdemo \
           --network ${NETWORK_NAME} \
           --yes \
           -- delete
