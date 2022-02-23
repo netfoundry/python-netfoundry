@@ -17,7 +17,7 @@ class NetworkGroup:
         if network_group_id:
             self.network_group_id = network_group_id
             self.network_group_name = [ ng['organizationShortName'] for ng in Organization.network_groups if ng['id'] == network_group_id ][0]
-        # TODO: review the use of org short name ref https://netfoundry.slack.com/archives/C45UDKR8V/p1603655594135000?thread_ts=1580318187.149400&cid=C45UDKR8V
+        # TODO: review the use of org short name ref https://mattermost.tools.netfoundry.io/netfoundry/pl/gegyzuybypb9jxnrw1g1imjywh
         elif network_group_name:
             self.network_group_name = network_group_name
             network_group_matches = [ ng['id'] for ng in Organization.network_groups if ng['organizationShortName'] == network_group_name ]
@@ -82,8 +82,9 @@ class NetworkGroup:
         Case-insensitive uniqueness is enforced by the API for each type of entity.
         """
         my_networks_by_normal_name = dict()
-        for net in self.networks_by_name():
-            my_networks_by_normal_name[utility.normalize_caseless(net['name'])] = net['id']
+        for name,id in self.networks_by_name().items():
+#            import epdb; epdb.serve()
+            my_networks_by_normal_name[utility.normalize_caseless(name)] = id
         return(my_networks_by_normal_name)
 
     def network_exists(self, name: str, deleted: bool=False):
@@ -282,7 +283,6 @@ class NetworkGroup:
         try:
             networks_by_name = self.networks_by_name()
             if network_id:
-#                import epdb; epdb.serve()
                 network_name = next(name for name, uuid in networks_by_name.items() if uuid == network_id)
             elif network_name and network_name in networks_by_name.keys():
                 network_id = networks_by_name[network_name]
