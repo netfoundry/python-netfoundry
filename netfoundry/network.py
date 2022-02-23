@@ -35,10 +35,10 @@ class Network:
 
         # populate some attributes
         self.id = self.describe['id']
-        self.network_controller_id = self.describe['networkController']['id']
         self.name = self.describe['name']
         self.network_group_id = self.describe['networkGroupId']
         self.status = self.describe['status']
+        self.network_controller = self.describe['networkController']
         self.product_version = self.describe['productVersion']
         self.owner_identity_id = self.describe['ownerIdentityId']
         self.size = self.describe['size']

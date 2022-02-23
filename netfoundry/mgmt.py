@@ -110,12 +110,12 @@ def main():
             ziti_cli = 'ziti'
         tempdir = tempfile.mkdtemp()
 
-        network_controller = network.get_resource_by_id(type="network-controller", id=network.network_controller_id)
+        network_controller = network.get_resource_by_id(type="network-controller", id=network.network_controller['id'])
 
         ziti_ctrl_ip = network_controller['_embedded']['host']['ipAddress']
 
         try:
-            secrets = network.get_controller_secrets(network.network_controller_id)
+            secrets = network.get_controller_secrets(network.network_controller['id'])
             os.system('curl -sSfk https://'+ziti_ctrl_ip+'/.well-known/est/cacerts | openssl base64 -d | openssl pkcs7 -inform DER -outform PEM -print_certs -out '+tempdir+'/well-known-certs.pem')
             os.system(ziti_cli+' edge login '+ziti_ctrl_ip+' -u '+secrets['zitiUserId']+' -p '+secrets['zitiPassword']+' -c '+tempdir+'/well-known-certs.pem')
             os.system(ziti_cli+' edge --help')
