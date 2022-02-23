@@ -99,6 +99,9 @@ RESOURCES = {
         'embedded': "networkList",
         'create_responses': ["ACCEPTED"]
     },
+    'network-controllers': {
+        'embedded': "networkControllerList",
+    },
     'endpoints': {
         'embedded': "endpointList",
         'create_responses': ["ACCEPTED"]

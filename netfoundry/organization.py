@@ -8,13 +8,15 @@ from pathlib import Path
 
 import jwt  # decode the JWT claimset
 
-from .utility import RESOURCES, STATUS_CODES, eprint, http
+from .utility import RESOURCES, STATUS_CODES, eprint, http, Utility
+
+utility = Utility()
 
 
 class Organization:
     """Authenticate as an identity ID in an organization.
     
-    The default is to use the callering identity ID's organization. 
+    The default is to use the calling identity's organization. 
 
     :param str organization_id: optional UUID of an alternative organization
     :param str organization_label: is optional `label` property of an alternative organization
@@ -29,7 +31,7 @@ class Organization:
         organization_label: str=None,
         token=None, 
         proxy=None):
-        """Initialize an instance of Organization."""
+        """Initialize an instance of organization."""
         # verify auth endpoint's server certificate if proxy is type SOCKS or None
         self.proxy = proxy
         if proxy is None:
@@ -269,7 +271,7 @@ class Organization:
         return(caller)
 
     def get_organizations(self):
-        """return the list of Organizations (formerly "tenants")
+        """return the list of organizations
         """
         try:
             headers = { "authorization": "Bearer " + self.token }
@@ -301,7 +303,7 @@ class Organization:
         return(organizations)
 
     def get_organization(self, id):
-        """return a single Organizations by ID
+        """return a single organizations by ID
         """
         try:
             headers = { "authorization": "Bearer " + self.token }
@@ -400,7 +402,7 @@ class Organization:
 
     def get_network_groups_by_organization(self):
         """list Network Groups
-        TODO: filter by Organization when that capability is available
+        TODO: filter by organization when that capability is available
         """
         try:
             # /network-groups returns a list of dicts (Network Group objects)
@@ -432,19 +434,32 @@ class Organization:
 
         return(network_groups)
 
-    def get_networks_by_organization(self):
-        """
-        return all networks known to this Organization
-        """
+    def get_networks_by_organization(self, name: str=None, deleted: bool=False):
+        """Find networks known to this organization.
 
+        :param str name: filter results by name
+        :param bool deleted: include resource entities that have a non-null property deletedAt
+        """
         try:
-            # returns a list of dicts (network objects)
             headers = { "authorization": "Bearer " + self.token }
+
+            params = {
+                "page": 0,
+                "size": 100,
+                "sort": "name,asc"
+            }
+
+            if name is not None:
+                params['findByName'] = name
+            if deleted:
+                params['status'] = "DELETED"
+
             response = http.get(
                 self.audience+'core/v2/networks',
                 proxies=self.proxies,
                 verify=self.verify,
-                headers=headers
+                headers=headers,
+                params=params
             )
             response_code = response.status_code
         except:
@@ -452,10 +467,10 @@ class Organization:
 
         if response_code == STATUS_CODES.codes.OK: # HTTP 200
             try:
-                networks = json.loads(response.text)['_embedded'][RESOURCES['networks']['embedded']]
-            except KeyError:
-                networks = []
-                pass
+                resources = json.loads(response.text)
+            except ValueError as e:
+                eprint('ERROR: failed to load {r} object from GET response'.format(r = type))
+                raise(e)
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
@@ -465,7 +480,69 @@ class Organization:
                 )
             )
 
-        return(networks)
+        total_pages = resources['page']['totalPages']
+        total_elements = resources['page']['totalElements']
+        # if there are no resources
+        if total_elements == 0:
+            return([])
+        # if there is one page of resources
+        elif total_pages == 1:
+            all_entities = resources['_embedded'][RESOURCES['networks']['embedded']]
+        # if there are multiple pages of resources
+        else:
+            # initialize the list with the first page of resources
+            all_entities = resources['_embedded'][RESOURCES['networks']['embedded']]
+            # append the remaining pages of resources
+            for page in range(1,total_pages):
+                try:
+                    params["page"] = page
+                    response = http.get(
+                        self.audience+'core/v2/networks',
+                        proxies=self.proxies,
+                        verify=self.verify,
+                        headers=headers,
+                        params=params
+                    )
+                    response_code = response.status_code
+                except:
+                    raise
+
+                if response_code == STATUS_CODES.codes.OK: # HTTP 200
+                    try:
+                        resources = json.loads(response.text)
+                        all_entities.extend(resources['_embedded'][RESOURCES['networks']['embedded']])
+                    except ValueError as e:
+                        eprint('ERROR: failed to load resources object from GET response')
+                        raise(e)
+                else:
+                    raise Exception(
+                        'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                            STATUS_CODES._codes[response_code][0].upper(),
+                            response_code,
+                            response.text
+                        )
+                    )
+
+        return(all_entities)
+
+    def count_networks_with_name(self, name: str, deleted: bool=False, unique: bool=True):
+        """
+        Count the networks with a particular name for this organization.
+
+        We can use this to determine whether a network group is needed to
+        filter a particular network. This is more useful than a true/false
+        existence check because network names are not unique for an
+        organization.  
+        
+        :param str name: the case-insensitive name to search
+        :param bool deleted: search deleted networks
+        :param bool unique: raise an exception if the name is not unique
+        """
+        normal_names = list()
+        for normal in self.get_networks_by_organization(name=name, deleted=deleted):
+            normal_names.append(utility.normalize_caseless(normal['name']))
+
+        return normal_names.count(utility.normalize_caseless(name))
 
     def get_networks_by_group(self,network_group_id: str, deleted: bool=False):
         """Find networks by network group ID.

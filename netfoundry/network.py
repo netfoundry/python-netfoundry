@@ -35,6 +35,7 @@ class Network:
 
         # populate some attributes
         self.id = self.describe['id']
+        self.network_controller_id = self.describe['networkController']['id']
         self.name = self.describe['name']
         self.network_group_id = self.describe['networkGroupId']
         self.status = self.describe['status']
@@ -409,7 +410,7 @@ class Network:
                     plural=plural(type),
                     choices=RESOURCES.keys()
                 ))
-            elif plural(type) == "edge-routers":
+            elif plural(type) in ["edge-routers","network-controllers"]:
                 params['embed'] = "host"
 
             response = http.get(
@@ -561,12 +562,6 @@ class Network:
                             response.text
                         )
                     )
-
-        # prune entities with non null deletedAt unless return deleted is true
-        # TODO: remove this because the API has been changed to stop returning
-        # deleted entities unless query param status=DELETED
-        if not deleted:
-            all_entities = [entity for entity in all_entities if not entity['deletedAt']]
 
         # routers are a special case because the value of entity._embedded.host.dataCenterId is expected by
         # downstream consumers of this method to be found at entity.dataCenterId
@@ -2051,6 +2046,41 @@ class Network:
             )
 
         return(network)
+
+    def get_controller_secrets(self, id: str):
+        """Return the controller management login credentials as {zitiUserId: ASDF, zitiPassword: ASDF}.
+
+        :param id: the UUID of the network controller
+        """
+
+        try:
+            headers = { "authorization": "Bearer " + self.session.token }
+            entity_url = self.session.audience+'core/v2/network-controllers/'+id+'/secrets'
+            response = http.get(
+                entity_url,
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers
+            )
+            response_code = response.status_code
+        except:
+            raise
+
+        if response_code == STATUS_CODES.codes.OK:
+            try:
+                secrets = json.loads(response.text)
+            except:
+                raise Exception('ERROR parsing response as object, got:\n{}'.format(response.text))
+        else:
+            raise Exception(
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    STATUS_CODES._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
+                )
+            )
+
+        return(secrets)
 
     def wait_for_property_defined(self, property_name: str, property_type: object=str, entity_type: str="network", wait: int=60, sleep: int=3, id: str=None, progress: bool=False):
         """Poll until expiry for the expected property to become defined with the any value of the expected type.
