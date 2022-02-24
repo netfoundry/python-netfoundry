@@ -67,6 +67,11 @@ def list(cli):
     """Find lists of things."""
     organization = setup_organization()
     if cli.args.resource_type == "networks":
+        columns = {
+            "name": 32,
+            "status": 20,
+            "id": 37
+        }
         if cli.config.list.headers:
             cli.echo('{style_bright}{fg_white}'+'{: ^32} {: ^20} {: ^37}'.format("name", "status", "id"))
             cli.echo('{style_bright}{fg_white}'+'{: <32} {: ^20} {: >37}'.format(
@@ -85,16 +90,21 @@ def list(cli):
             sys.exit(1)
         else:
             cli.log.debug("found at least one %s '%s'", cli.args.resource_type, cli.args.query)
+            columns = {
+                "name": 32,
+                "zitiId": 10,
+                "id": 37
+            }
             if cli.config.list.headers:
                 cli.echo('{style_bright}{fg_white}'+'{: ^32} {: ^10} {: ^37}'.format("name", "zitiId", "id"))
-                cli.echo('{style_bright}{fg_white}'+'{: <32} {: ^10} {: >37}'.format(
+                cli.echo('{style_bright}{fg_white}'+'{: >32} {: ^10} {: >37}'.format(
                     ''.join([char*32 for char in '-']),
-                    ''.join([char*20 for char in '-']),
+                    ''.join([char*10 for char in '-']),
                     ''.join([char*37 for char in '-'])
                     )
                 )
             for match in matches:
-                cli.echo('{style_normal}{fg_white}'+'{: >32} {: ^20} {: >20}'.format(match['name'], match['zitiId'], match['id']))
+                cli.echo('{style_normal}{fg_white}'+'{: <32} {: ^10} {: >37}'.format(match['name'], match['zitiId'], match['id']))
 
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
 @cli.argument('-q','--query', arg_only=True, action=StoreDictKeyPair, help="any valid query params for type as k=v,k=v comma-separated pairs", default=dict())
