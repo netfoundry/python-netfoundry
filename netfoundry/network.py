@@ -1,6 +1,7 @@
 """Use a network and find and manage its resources."""
 
 import json
+import logging
 import re  # regex
 import sys
 import time
@@ -2501,7 +2502,7 @@ class Network:
                 if id is None:
                     raise Exception("ERROR: need entity UUID to delete")
                 entity_url = self.session.audience+'core/v2/'+plural(type)+'/'+id
-            eprint("WARN: deleting {:s}".format(entity_url))
+            logging.debug("deleting {:s}".format(entity_url))
             params = dict()
             # if type == "service":
             #     params["beta"] = ''

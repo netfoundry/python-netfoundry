@@ -13,7 +13,9 @@ import platform
 import shutil
 import sys
 import tempfile
+from json import loads
 
+import pyjq
 from milc import set_metadata
 
 from ._version import get_versions
@@ -21,7 +23,7 @@ from .demo import main as nfdemo
 from .network import Network
 from .network_group import NetworkGroup
 from .organization import Organization
-from .utility import Utility, plural, singular, RESOURCES
+from .utility import RESOURCES, Utility, plural, singular
 
 set_metadata(version="v"+get_versions()['version']) # must precend import milc.cli
 from milc import cli, questions
@@ -67,23 +69,41 @@ def list(cli):
         cli.log.error("TODO: need list case for valid resource type '%s'", cli.args.resource_type)
         sys.exit(1)
 
-@cli.argument('resource_type', arg_only=True, help='delete what?', choices=[singular(type) for type in RESOURCES.keys()])
+@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
+@cli.argument('-n','--name', arg_only=True, help='caseless name of resource')
 @cli.subcommand('delete a resource')
 def delete(cli):
     """Delete a resource."""
     organization = setup_organization()
-    network = setup_network(organization)
+    network, network_group = setup_network(organization)
 
     if cli.args.resource_type == "network":
-        if cli.args.yes or questions.yesno("confirm destroy network \"{network_name}\" now".format(resource_type=cli.args.resource_type, network_name=cli.args.network_name), default=False):
-            network.delete_network(progress=True)
+        if cli.args.name is not None:
+            cli.log.warn("ignoring name='%s' because this operation applies to the entire network that is already selected", cli.args.name)
+        if cli.args.yes or questions.yesno("confirm delete network \"{name}\"".format(name=network.name), default=False):
+            spinner = cli.spinner(text='deleting {net}'.format(net=network.name), spinner='dots12')
+            spinner.start()
+            network.delete_network(progress=False)
+            spinner.stop()
         else:
-            cli.echo("not deleting Network \"{network_name}\".".format(network_name=network['name']))
+            cli.echo("not deleting network \"{name}\".".format(name=network.name))
     else:
-        if cli.args.yes or questions.yesno("confirm destroy network \"{network_name}\" now".format(resource_type=cli.args.resource_type, network_name=cli.args.network_name), default=False):
-            network.delete_network(progress=True)
-        else:
-            cli.echo("not deleting Network \"{network_name}\".".format(network_name=network['name']))
+        if cli.args.name is None:
+            cli.log.error("need name of resource")
+            raise Exception()
+        matches = network.get_resources(type=cli.args.resource_type, name=cli.args.name)
+        if len(matches) == 0:
+            cli.log.info("found no %s '%s'", cli.args.resource_type, cli.args.name)
+            sys.exit(1)
+        elif len(matches) > 1:
+            cli.log.error("found more than one %s '%s'", cli.args.resource_type, cli.args.name)
+            sys.exit(1)
+        if len(matches) == 1:
+            cli.log.debug("found one %s '%s'", cli.args.resource_type, cli.args.name)
+            if cli.args.yes or questions.yesno("confirm delete {type} '{name}'".format(type=cli.args.resource_type, name=cli.args.network_name), default=False):
+                network.delete_resource(type=cli.args.resouce_type, id=matches[0]['id'])
+            else:
+                cli.echo("not deleting Network \"{network_name}\"".format(network_name=network.name))
 
 @cli.argument('-z','--ziti-cli', help='path to ziti CLI executable')
 @cli.subcommand('login to the ziti-controller management API (requires ziti CLI)')
@@ -104,7 +124,7 @@ def login(cli):
         sys.exit(1)
 
     organization = setup_organization()
-    network = setup_network(organization, network_group=cli.args.network_group, network_name=cli.args.network_name)
+    network, network_group = setup_network(organization)
 
     tempdir = tempfile.mkdtemp()
 
@@ -151,37 +171,40 @@ def setup_organization():
 
     return organization
 
-def setup_network(organization: object, network_group: object, network_name: str):
+def setup_network(organization: object):
     """Use a network."""
-    if network_group:
+    if cli.config.general.network_group:
         network_group = NetworkGroup(
             organization,
             network_group_name=network_group
         )
         existing_networks = network_group.networks_by_normal_name()
-        if not utility.normalize_caseless(network_name) in existing_networks.keys():
-            raise Exception("ERROR: failed to find a network named \"{name}\".".format(name=network_name))
+        if not utility.normalize_caseless(cli.config.general.network_name) in existing_networks.keys():
+            cli.log.error("failed to find a network named \"{name}\".".format(name=cli.config.general.network_name))
+            raise Exception()
     else:
-        existing_count = organization.count_networks_with_name(network_name)
+        existing_count = organization.count_networks_with_name(cli.config.general.network_name)
         if existing_count == 1:
-            existing_networks = organization.get_networks_by_organization(name=network_name)
+            existing_networks = organization.get_networks_by_organization(name=cli.config.general.network_name)
             existing_network = existing_networks[0]
             network_group = NetworkGroup(
                 organization,
                 network_group_id=existing_network['networkGroupId']
             )
         elif existing_count > 1:
-            raise Exception("ERROR: there were {count} networks named \"{name}\" visible to your identity. Try filtering with '--network-group'.".format(count=existing_count, name=network_name))
+            cli.log.error("there were {count} networks named \"{name}\" visible to your identity. Try filtering with '--network-group'.".format(count=existing_count, name=cli.config.general.network_name))
+            raise Exception()
         else: #
-            raise Exception("ERROR: failed to find a network named \"{name}\".".format(name=network_name))
+            cli.log.error("failed to find a network named \"{name}\".".format(name=cli.config.general.network_name))
+            raise Exception()
 
     # use the Network
-    network = Network(network_group, network_name=network_name)
-    spinner = cli.spinner(text='waiting for {net} to have status PROVISIONED'.format(net=network_name), spinner='dots12')
+    network = Network(network_group, network_name=cli.config.general.network_name)
+    spinner = cli.spinner(text='waiting for {net} to have status PROVISIONED'.format(net=cli.config.general.network_name), spinner='dots12')
     spinner.start()
     network.wait_for_status("PROVISIONED",wait=999,progress=False)
     spinner.stop()
-    return network
+    return network, network_group
 
 if __name__ == '__main__':
     cli()
