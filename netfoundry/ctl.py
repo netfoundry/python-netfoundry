@@ -2,7 +2,6 @@
 r"""[Experimental] command-line interface to the NetFoundry API
 Usage::
     $ nfctl --help
-
     # Windows
     $ python3 -m netfoundry.ctl --help
 
@@ -22,12 +21,12 @@ from .demo import main as nfdemo
 from .network import Network
 from .network_group import NetworkGroup
 from .organization import Organization
-from .utility import Utility
+from .utility import Utility, plural, singular, RESOURCES
 
 set_metadata(version="v"+get_versions()['version']) # must precend import milc.cli
 from milc import cli, questions
 
-# TODO: enable config ini file
+# TODO: enable operating on config ini file
 #import milc.subcommand.config
 
 
@@ -35,6 +34,8 @@ utility = Utility()
 
 @cli.argument('-c', '--credentials', help='API account JSON file from web console', default=None)
 @cli.argument("-o", "--organization", help="label of an alternative organization (default is caller's org)" )
+@cli.argument('-n', '--network-name', arg_only=True, help='caseless display name of the network to login')
+@cli.argument("-g", "--network-group", arg_only=True, help="shortname or ID of a network group to search for network_name")
 @cli.argument('-y', '--yes', action='store_true', arg_only=True, help='Answer yes to all questions.')
 @cli.argument('-p', '--proxy', help="like http://localhost:8080 or socks5://localhost:9046", default=None)
 @cli.entrypoint('configure the CLI to manage a network')
@@ -44,30 +45,46 @@ def main(cli):
         '{style_bright}{bg_red}{fg_white}main!'
     cli.echo(text)
 
-@cli.argument('resource_type', arg_only=True, help='list what?')
+@cli.argument('-H','--headers', default=True, action='store_boolean', help='print column headers')
+@cli.argument('resource_type', arg_only=True, help='list what?', choices=RESOURCES.keys())
 @cli.subcommand('find lists of things')
 def list(cli):
     """Find lists of things."""
-    if cli.args['resource_type'] == "networks":
-        organization = setup_organization()
-        cli.echo('{style_bright}'+'{: ^32} {: ^20} {: ^37}'.format("name", "status", "id"))
-        cli.echo('{style_dim}{fg_black}'+'{: <32} {: ^20} {: >37}'.format(
-            ''.join([char*32 for char in '-']),
-            ''.join([char*20 for char in '-']),
-            ''.join([char*37 for char in '-'])
+    organization = setup_organization()
+    if cli.args.resource_type == "networks":
+        if cli.config.list.headers:
+            cli.echo('{style_bright}{fg_white}'+'{: ^32} {: ^20} {: ^37}'.format("name", "status", "id"))
+            cli.echo('{style_bright}{fg_white}'+'{: <32} {: ^20} {: >37}'.format(
+                ''.join([char*32 for char in '-']),
+                ''.join([char*20 for char in '-']),
+                ''.join([char*37 for char in '-'])
+                )
             )
-        )
 
         for net in organization.get_networks_by_organization():
-            cli.echo('{style_dim}{fg_cyan}'+'{: >32} {: ^20} {: >20}'.format(net['name'], net['status'], net['id']))
-
-#            scolper.print(net['name'], net['status'], net['id'])
+            cli.echo('{style_normal}{fg_white}'+'{: >32} {: ^20} {: >20}'.format(net['name'], net['status'], net['id']))
     else:
-        cli.log.error("unrecognized resource type '%s'", cli.args['resource_type'])
+        cli.log.error("TODO: need list case for valid resource type '%s'", cli.args.resource_type)
         sys.exit(1)
 
-@cli.argument('-n', '--network-name', arg_only=True, help='caseless display name of the network to login')
-@cli.argument("-g", "--network-group", arg_only=True, help="shortname or ID of a network group to search for network_name")
+@cli.argument('resource_type', arg_only=True, help='delete what?', choices=[singular(type) for type in RESOURCES.keys()])
+@cli.subcommand('delete a resource')
+def delete(cli):
+    """Delete a resource."""
+    organization = setup_organization()
+    network = setup_network(organization)
+
+    if cli.args.resource_type == "network":
+        if cli.args.yes or questions.yesno("confirm destroy network \"{network_name}\" now".format(resource_type=cli.args.resource_type, network_name=cli.args.network_name), default=False):
+            network.delete_network(progress=True)
+        else:
+            cli.echo("not deleting Network \"{network_name}\".".format(network_name=network['name']))
+    else:
+        if cli.args.yes or questions.yesno("confirm destroy network \"{network_name}\" now".format(resource_type=cli.args.resource_type, network_name=cli.args.network_name), default=False):
+            network.delete_network(progress=True)
+        else:
+            cli.echo("not deleting Network \"{network_name}\".".format(network_name=network['name']))
+
 @cli.argument('-z','--ziti-cli', help='path to ziti CLI executable')
 @cli.subcommand('login to the ziti-controller management API (requires ziti CLI)')
 def login(cli):
@@ -92,14 +109,21 @@ def login(cli):
     tempdir = tempfile.mkdtemp()
 
     network_controller = network.get_resource_by_id(type="network-controller", id=network.network_controller['id'])
-    ziti_ctrl_ip = network_controller['_embedded']['host']['ipAddress']
+    if 'domainName' in network_controller.keys() and network_controller['domainName']:
+        ziti_ctrl_ip = network_controller['domainName']
+    else:
+        ziti_ctrl_ip = network_controller['_embedded']['host']['ipAddress']
 
     try:
         secrets = network.get_controller_secrets(network.network_controller['id'])
     except:
         raise
     else:
-        os.system('curl -sSfk https://'+ziti_ctrl_ip+'/.well-known/est/cacerts | openssl base64 -d | openssl pkcs7 -inform DER -outform PEM -print_certs -out '+tempdir+'/well-known-certs.pem')
+        if cli.config.general.proxy:
+            curl_proxy = '--proxy '+cli.config.general.proxy
+        else:
+            curl_proxy = ''
+        os.system('curl '+curl_proxy+' -sSfk https://'+ziti_ctrl_ip+'/.well-known/est/cacerts | openssl base64 -d | openssl pkcs7 -inform DER -outform PEM -print_certs -out '+tempdir+'/well-known-certs.pem')
         os.system(ziti_cli+' edge login '+ziti_ctrl_ip+' -u '+secrets['zitiUserId']+' -p '+secrets['zitiPassword']+' -c '+tempdir+'/well-known-certs.pem')
         os.system(ziti_cli+' edge --help')
     
