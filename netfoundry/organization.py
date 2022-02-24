@@ -138,16 +138,17 @@ class Organization:
             else:
                 logging.info("using credentials in %s", self.credentials)
 
-                try: 
-                    file = open(self.credentials)
-                except FileNotFoundError: 
-                    pass # this means we can't renew the token, but it's not fatal
-                else:
-                    account = json.load(file)
-                    token_endpoint = account['authenticationUrl']
-                    client_id = account['clientId']
-                    password = account['password']
-                    credentials_configured = True
+            try: 
+                file = open(self.credentials)
+            except FileNotFoundError: 
+                pass # this means we can't renew the token, but it's not fatal
+            else:
+                account = json.load(file)
+                token_endpoint = account['authenticationUrl']
+                client_id = account['clientId']
+                password = account['password']
+                credentials_configured = True
+
         else:
             logging.debug("credentials are configured %s", str(credentials_configured))
 

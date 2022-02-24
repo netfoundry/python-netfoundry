@@ -18,11 +18,11 @@ import tempfile
 from milc import set_metadata
 
 from ._version import get_versions
+from .demo import main as nfdemo
 from .network import Network
 from .network_group import NetworkGroup
 from .organization import Organization
 from .utility import Utility
-from .demo import main as nfdemo
 
 set_metadata(version="v"+get_versions()['version']) # must precend import milc.cli
 from milc import cli, questions
@@ -33,9 +33,7 @@ from milc import cli, questions
 
 utility = Utility()
 
-@cli.argument('-n', '--network-name', help='caseless display name of the network to manage', required=True )
 @cli.argument('-c', '--credentials', help='API account JSON file from web console', default=None)
-@cli.argument("-g", "--network-group", help="shortname or ID of a network group to search for network_name")
 @cli.argument("-o", "--organization", help="label of an alternative organization (default is caller's org)" )
 @cli.argument('-y', '--yes', action='store_true', arg_only=True, help='Answer yes to all questions.')
 @cli.argument('-p', '--proxy', help="like http://localhost:8080 or socks5://localhost:9046", default=None)
@@ -46,6 +44,30 @@ def main(cli):
         '{style_bright}{bg_red}{fg_white}main!'
     cli.echo(text)
 
+@cli.argument('resource_type', arg_only=True, help='list what?')
+@cli.subcommand('find lists of things')
+def list(cli):
+    """Find lists of things."""
+    if cli.args['resource_type'] == "networks":
+        organization = setup_organization()
+        print("{: ^32} {: ^20} {: ^37}".format("name", "status", "id"))
+        print("{: <32} {: ^20} {: >37}".format(
+            ''.join([char*32 for char in '-']),
+            ''.join([char*20 for char in '-']),
+            ''.join([char*37 for char in '-'])
+            )
+        )
+
+        for net in organization.get_networks_by_organization():
+            print("{: >32} {: ^20} {: >20}".format(net['name'], net['status'], net['id']))
+
+#            scolper.print(net['name'], net['status'], net['id'])
+    else:
+        cli.log.error("unrecognized resource type '%s'", cli.args['resource_type'])
+        sys.exit(1)
+
+@cli.argument('-n', '--network-name', arg_only=True, help='caseless display name of the network to login')
+@cli.argument("-g", "--network-group", arg_only=True, help="shortname or ID of a network group to search for network_name")
 @cli.argument('-z','--ziti-cli', help='path to ziti CLI executable')
 @cli.subcommand('login to the ziti-controller management API (requires ziti CLI)')
 def login(cli):
@@ -64,7 +86,8 @@ def login(cli):
         cli.log.critical("missing executable '%s' in PATH: %s", ziti_cli, os.environ['PATH'])
         sys.exit(1)
 
-    network = setup_network()
+    organization = setup_organization()
+    network = setup_network(organization, network_group=cli.args.network_group, network_name=cli.args.network_name)
 
     tempdir = tempfile.mkdtemp()
 
@@ -80,8 +103,8 @@ def login(cli):
         os.system(ziti_cli+' edge login '+ziti_ctrl_ip+' -u '+secrets['zitiUserId']+' -p '+secrets['zitiPassword']+' -c '+tempdir+'/well-known-certs.pem')
         os.system(ziti_cli+' edge --help')
     
-def setup_network():
-    """Use a network."""
+def setup_organization():
+    """Assume an identity in an organization."""
     if 'NETFOUNDRY_API_TOKEN' in os.environ:
         cli.log.debug("using bearer token from environment NETFOUNDRY_API_TOKEN")
     elif 'NETFOUNDRY_API_ACCOUNT' in os.environ:
@@ -93,20 +116,23 @@ def setup_network():
     else:
         os.environ['NETFOUNDRY_API_TOKEN'] = questions.password(prompt='Enter Bearer Token:', confirm=False, validate=None)
 
-    network_name = cli.config.general.network_name
-    
     # use the session with some organization, default is to use the first and there's typically only one
     organization = Organization(
         credentials=cli.config.general.credentials if cli.config.general.credentials else None,
         organization_label=cli.config.general.organization if cli.config.general.organization else None,
+        expiry_minimum=0,
         proxy=cli.config.general.proxy
     )
     cli.log.debug("organization label is %s.", organization.label)
 
-    if cli.config.general.network_group:
+    return organization
+
+def setup_network(organization: object, network_group: object, network_name: str):
+    """Use a network."""
+    if network_group:
         network_group = NetworkGroup(
             organization,
-            network_group_name=cli.config.general.network_group
+            network_group_name=network_group
         )
         existing_networks = network_group.networks_by_normal_name()
         if not utility.normalize_caseless(network_name) in existing_networks.keys():
@@ -127,7 +153,7 @@ def setup_network():
 
     # use the Network
     network = Network(network_group, network_name=network_name)
-    spinner = cli.spinner(text='Loading', spinner='arrow3')
+    spinner = cli.spinner(text='waiting for {net} to have status PROVISIONED'.format(net=network_name), spinner='dots12')
     spinner.start()
     network.wait_for_status("PROVISIONED",wait=999,progress=False)
     spinner.stop()

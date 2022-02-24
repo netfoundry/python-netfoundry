@@ -5,6 +5,7 @@ Usage:
     $ python3 -m netfoundry.demo --network BibbidiBobbidiBoo
 """
 import argparse
+import logging
 import os
 import random
 import sys
@@ -29,6 +30,13 @@ def main():
         choices=["create","delete"]
     )
     parser.add_argument(
+        "-d", "--verbose", "--debug",
+        dest="verbose",
+        default=False,
+        action="store_true",
+        help="emit debug messages"
+    )
+    parser.add_argument(
         "-y", "--yes",
         dest="yes",
         default=False,
@@ -42,7 +50,7 @@ def main():
     )
     parser.add_argument(
         "-o", "--organization",
-        help="The label of an alternative organization (default is Org of caller)"
+        help="The label of an alternative organization (default is org of caller)"
     )
     parser.add_argument(
         "-g", "--network-group",
@@ -104,6 +112,12 @@ def main():
         " 'socks5://localhost:9046'"
     )
     args = parser.parse_args()
+
+    if args.verbose:
+        logging_level = logging.DEBUG
+    else:
+        logging_level = logging.INFO
+    logging.basicConfig(format='%(levelname)s:%(message)s', level=logging_level)
 
     network_name = args.network
     
