@@ -50,8 +50,8 @@ def list(cli):
     """Find lists of things."""
     if cli.args['resource_type'] == "networks":
         organization = setup_organization()
-        print("{: ^32} {: ^20} {: ^37}".format("name", "status", "id"))
-        print("{: <32} {: ^20} {: >37}".format(
+        cli.echo('{style_bright}'+'{: ^32} {: ^20} {: ^37}'.format("name", "status", "id"))
+        cli.echo('{style_dim}{fg_black}'+'{: <32} {: ^20} {: >37}'.format(
             ''.join([char*32 for char in '-']),
             ''.join([char*20 for char in '-']),
             ''.join([char*37 for char in '-'])
@@ -59,7 +59,7 @@ def list(cli):
         )
 
         for net in organization.get_networks_by_organization():
-            print("{: >32} {: ^20} {: >20}".format(net['name'], net['status'], net['id']))
+            cli.echo('{style_dim}{fg_cyan}'+'{: >32} {: ^20} {: >20}'.format(net['name'], net['status'], net['id']))
 
 #            scolper.print(net['name'], net['status'], net['id'])
     else:
