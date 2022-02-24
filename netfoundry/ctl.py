@@ -22,6 +22,7 @@ from .network import Network
 from .network_group import NetworkGroup
 from .organization import Organization
 from .utility import Utility
+from .demo import main as nfdemo
 
 set_metadata(version="v"+get_versions()['version']) # must precend import milc.cli
 from milc import cli, questions
@@ -33,19 +34,22 @@ from milc import cli, questions
 utility = Utility()
 
 @cli.argument('-n', '--network-name', help='caseless display name of the network to manage', required=True )
-@cli.argument('-c', '--credentials', help='API account JSON file from web console', default='credentials.json')
-@cli.argument("-g", "--network-group", help="The shortname or ID of a network group to search for network_name")
-@cli.argument("-o", "--organization", help="The label of an alternative organization (default is caller's org)" )
-@cli.argument('-p', '--proxy', help="'http://localhost:8080' or 'socks5://localhost:9046'", default=None)
-@cli.entrypoint('Configure the CLI to manage a network.')
+@cli.argument('-c', '--credentials', help='API account JSON file from web console', default=None)
+@cli.argument("-g", "--network-group", help="shortname or ID of a network group to search for network_name")
+@cli.argument("-o", "--organization", help="label of an alternative organization (default is caller's org)" )
+@cli.argument('-y', '--yes', action='store_true', arg_only=True, help='Answer yes to all questions.')
+@cli.argument('-p', '--proxy', help="like http://localhost:8080 or socks5://localhost:9046", default=None)
+@cli.entrypoint('configure the CLI to manage a network')
 def main(cli):
+    """Configure the CLI to manage a network."""
     text = '{style_bright}{bg_lightblue_ex}{fg_white}|___|\\___|{style_reset_all} ' \
         '{style_bright}{bg_red}{fg_white}main!'
     cli.echo(text)
 
 @cli.argument('-z','--ziti-cli', help='path to ziti CLI executable')
-@cli.subcommand('Login to the ziti-controller management API (requires ziti CLI)')
+@cli.subcommand('login to the ziti-controller management API (requires ziti CLI)')
 def login(cli):
+    """Login to the ziti-controller management API (requires ziti CLI)."""
     if cli.config.login.ziti_cli:
         ziti_cli = cli.config.login.ziti_cli
     else:
@@ -53,12 +57,31 @@ def login(cli):
             ziti_cli = 'ziti.exe'
         else:
             ziti_cli = 'ziti'
-    if shutil.which(ziti_cli):
-        cli.log.debug("found executable %s", shutil.which(ziti_cli))
+    which_ziti = shutil.which(ziti_cli)
+    if which_ziti:
+        cli.log.debug("found ziti CLI executable in %s", which_ziti)
     else:
         cli.log.critical("missing executable '%s' in PATH: %s", ziti_cli, os.environ['PATH'])
         sys.exit(1)
 
+    network = setup_network()
+
+    tempdir = tempfile.mkdtemp()
+
+    network_controller = network.get_resource_by_id(type="network-controller", id=network.network_controller['id'])
+    ziti_ctrl_ip = network_controller['_embedded']['host']['ipAddress']
+
+    try:
+        secrets = network.get_controller_secrets(network.network_controller['id'])
+    except:
+        raise
+    else:
+        os.system('curl -sSfk https://'+ziti_ctrl_ip+'/.well-known/est/cacerts | openssl base64 -d | openssl pkcs7 -inform DER -outform PEM -print_certs -out '+tempdir+'/well-known-certs.pem')
+        os.system(ziti_cli+' edge login '+ziti_ctrl_ip+' -u '+secrets['zitiUserId']+' -p '+secrets['zitiPassword']+' -c '+tempdir+'/well-known-certs.pem')
+        os.system(ziti_cli+' edge --help')
+    
+def setup_network():
+    """Use a network."""
     if 'NETFOUNDRY_API_TOKEN' in os.environ:
         cli.log.debug("using bearer token from environment NETFOUNDRY_API_TOKEN")
     elif 'NETFOUNDRY_API_ACCOUNT' in os.environ:
@@ -104,24 +127,11 @@ def login(cli):
 
     # use the Network
     network = Network(network_group, network_name=network_name)
-    network.wait_for_status("PROVISIONED",wait=999,progress=True)
-
-    tempdir = tempfile.mkdtemp()
-
-    network_controller = network.get_resource_by_id(type="network-controller", id=network.network_controller['id'])
-    ziti_ctrl_ip = network_controller['_embedded']['host']['ipAddress']
-
-    try:
-        secrets = network.get_controller_secrets(network.network_controller['id'])
-        os.system('curl -sSfk https://'+ziti_ctrl_ip+'/.well-known/est/cacerts | openssl base64 -d | openssl pkcs7 -inform DER -outform PEM -print_certs -out '+tempdir+'/well-known-certs.pem')
-        os.system(ziti_cli+' edge login '+ziti_ctrl_ip+' -u '+secrets['zitiUserId']+' -p '+secrets['zitiPassword']+' -c '+tempdir+'/well-known-certs.pem')
-        os.system(ziti_cli+' edge --help')
-    except:
-        raise
-    
-    text = '{style_bright}{bg_lightblue_ex}{fg_white}|___|\\___|{style_reset_all} ' \
-        '{style_bright}{bg_red}{fg_white}login!'
-    cli.echo(text)
+    spinner = cli.spinner(text='Loading', spinner='arrow3')
+    spinner.start()
+    network.wait_for_status("PROVISIONED",wait=999,progress=False)
+    spinner.stop()
+    return network
 
 if __name__ == '__main__':
     cli()

@@ -1,6 +1,7 @@
 """Use an identity organization and find authorized network groups and networks."""
 
 import json
+import logging
 import os
 import re  # regex
 import time  # enforce a timeout; sleep
@@ -8,7 +9,7 @@ from pathlib import Path
 
 import jwt  # decode the JWT claimset
 
-from .utility import RESOURCES, STATUS_CODES, eprint, http, Utility
+from .utility import RESOURCES, STATUS_CODES, Utility, eprint, http
 
 utility = Utility()
 
@@ -22,6 +23,7 @@ class Organization:
     :param str organization_label: is optional `label` property of an alternative organization
     :param str token: continue using a session with this optional token from an existing instance of organization
     :param str credentials: optional alternative path to API account credentials file, default is project, user, or device default directories containing file name credentials.json
+    :param int expiry_minimum: renew if possible else reject token with error if expires in < N seconds, ignore if N=0
     :param str proxy: optional HTTP proxy, e.g., http://localhost:8080
     """
 
@@ -29,8 +31,9 @@ class Organization:
         credentials=None, 
         organization_id: str=None, 
         organization_label: str=None,
-        token=None, 
-        proxy=None):
+        token: str=None,
+        expiry_minimum: int=600,
+        proxy: str=None):
         """Initialize an instance of organization."""
         # verify auth endpoint's server certificate if proxy is type SOCKS or None
         self.proxy = proxy
@@ -47,32 +50,44 @@ class Organization:
             else:
                 self.verify = False
         
+        epoch = None
+        expiry_offset = 0
+        client_id = None
+        password = None
+        token_endpoint = None
+        credentials_configured = False
+
         # if not token then use standard env var if defined
         if token is not None:
             self.token = token
         elif 'NETFOUNDRY_API_TOKEN' in os.environ:
             self.token = os.environ['NETFOUNDRY_API_TOKEN']
+        else:
+            self.token = None
 
         # if the token was found then extract the expiry
-        try: 
-            self.token
-        except AttributeError: epoch = None
+        if self.token:
+            try:
+                claim = jwt.decode(jwt=self.token, algorithms=["RS256"], options={"verify_signature": False})
+            except jwt.exceptions.PyJWTError:
+                logging.error("failed to parse bearer token as JWT")
+                raise
+            else:
+                expiry = claim['exp']
+                epoch = time.time()
+                expiry_offset = expiry - epoch
+                logging.debug("bearer token expiry in %ds", expiry_offset)
         else:
-            claim = jwt.decode(jwt=self.token, algorithms=["RS256"], options={"verify_signature": False})
-            # TODO: [MOP-13438] auto-renew token when near expiry (now+1hour in epoch seconds)
-            expiry = claim['exp']
-            epoch = time.time()
+            logging.debug("no bearer token found in param or env")
 
-        client_id = None
-        password = None
-        token_endpoint = None
-
-        # persist the credentials filename in instances so that it may be used to refresh the token
+        # find credentials from param or env so we can renew the token later
         if credentials is not None:
             self.credentials = credentials
             os.environ['NETFOUNDRY_API_ACCOUNT'] = self.credentials
+            logging.debug("got param credentials=%s", self.credentials)
         elif 'NETFOUNDRY_API_ACCOUNT' in os.environ:
             self.credentials = os.environ['NETFOUNDRY_API_ACCOUNT']
+            logging.debug("got path to credentials file from env NETFOUNDRY_API_ACCOUNT=%s", self.credentials)
         # if any credentials var then require all credentials vars
         elif ('NETFOUNDRY_CLIENT_ID' in os.environ
                     or 'NETFOUNDRY_PASSWORD' in os.environ
@@ -83,54 +98,67 @@ class Organization:
                 client_id = os.environ['NETFOUNDRY_CLIENT_ID']
                 password = os.environ['NETFOUNDRY_PASSWORD']
                 token_endpoint = os.environ['NETFOUNDRY_OAUTH_URL']
+                credentials_configured = True
+                logging.debug("configured API account credentials from env NETFOUNDRY_CLIENT_ID, NETFOUNDRY_PASSWORD, NETFOUNDRY_OAUTH_URL")
             else:
-                raise Exception("ERROR: some but not all credentials vars present. Need NETFOUNDRY_CLIENT_ID, NETFOUNDRY_PASSWORD, and NETFOUNDRY_OAUTH_URL or a credentials file in default file locations or NETFOUNDRY_API_ACCOUNT as path to credentials file.")
+                logging.error("some but not all credentials vars present. Need NETFOUNDRY_CLIENT_ID, NETFOUNDRY_PASSWORD, and NETFOUNDRY_OAUTH_URL or a credentials file in default file locations or NETFOUNDRY_API_ACCOUNT as path to credentials file.")
+                raise Exception()
         else:
             self.credentials = "credentials.json"
+            logging.debug("token renewal will look for default credentials file name 'credentials.json' in project (cwd), user, and device default paths")
 
-        # if no token or near expiry (30 min) then use env vars or credentials file to obtain a token
-        if epoch is None or epoch > (expiry - 600):
-            # if not creds as env vars then look for creds file
-            if not client_id and not password and not token_endpoint:
-                # unless a valid path assume relative and search the default chain
-                if not os.path.exists(self.credentials):
-                    default_creds_chain = [
-                        {
-                            "scope": "project",
-                            "base": str(Path.cwd())
-                        },
-                        {
-                            "scope": "user",
-                            "base": str(Path.home())+"/.netfoundry"
-                        },
-                        {
-                            "scope": "device",
-                            "base": "/netfoundry"
-                        }
-                    ]
-                    for link in default_creds_chain:
-                        candidate = link['base']+"/"+self.credentials
-                        if os.path.exists(candidate):
-                            print("INFO: using credentials in {path} (found in {scope}-default directory)".format(
-                                scope=link['scope'],
-                                path=candidate
-                            ))
-                            self.credentials = candidate
-                            break
+        # continue if we already found the credentials in env
+        if not credentials_configured:
+            logging.debug("searching for credentials file %s", self.credentials)
+            # continue if valid path to creds file, else search the default dirs
+            if not os.path.exists(self.credentials):
+                default_creds_dirs = [
+                    {
+                        "scope": "project",
+                        "base": str(Path.cwd())
+                    },
+                    {
+                        "scope": "user",
+                        "base": str(Path.home())+"/.netfoundry"
+                    },
+                    {
+                        "scope": "device",
+                        "base": "/netfoundry"
+                    }
+                ]
+                for link in default_creds_dirs:
+                    candidate = link['base']+"/"+self.credentials
+                    if os.path.exists(candidate):
+                        logging.debug("found credentials file %s in %s-default directory",
+                            candidate,
+                            link['scope'],
+                        )
+                        self.credentials = candidate
+                        break
+            else:
+                logging.info("using credentials in %s", self.credentials)
+
+                try: 
+                    file = open(self.credentials)
+                except FileNotFoundError: 
+                    pass # this means we can't renew the token, but it's not fatal
                 else:
-                    print("INFO: using credentials in {path}".format(
-                        path=self.credentials
-                    ))
+                    account = json.load(file)
+                    token_endpoint = account['authenticationUrl']
+                    client_id = account['clientId']
+                    password = account['password']
+                    credentials_configured = True
+        else:
+            logging.debug("credentials are configured %s", str(credentials_configured))
 
-                try:
-                    with open(self.credentials) as file:
-                        try: account = json.load(file)
-                        except: raise Exception("ERROR: failed to load JSON from {file}".format(file=file))
-                except: raise Exception("ERROR: failed to open {file} while working in {dir}".format(
-                    file=self.credentials,dir=str(Path.cwd())))
-                token_endpoint = account['authenticationUrl']
-                client_id = account['clientId']
-                password = account['password']
+        if not credentials_configured:
+            logging.warning("token renewal is disabled without API account credentials")
+
+        # renew token if not existing or imminent expiry, else continue
+        if not self.token or expiry_offset < expiry_minimum:
+            if not credentials_configured:
+                logging.exception("credentials needed to renew expired or imminently-expiring token")
+                raise Exception()
 
             # extract the environment name from the authorization URL aka token API endpoint
             self.environment = re.sub(r'https://netfoundry-([^-]+)-.*', r'\1', token_endpoint, re.IGNORECASE)
