@@ -463,10 +463,11 @@ class Organization:
 
         return(network_groups)
 
-    def get_networks_by_organization(self, name: str=None, deleted: bool=False):
+    def get_networks_by_organization(self, name: str=None, deleted: bool=False, **kwargs):
         """Find networks known to this organization.
 
         :param str name: filter results by name
+        :param str kwargs: filter results by any supported query param
         :param bool deleted: include resource entities that have a non-null property deletedAt
         """
         try:
@@ -478,6 +479,8 @@ class Organization:
                 "sort": "name,asc"
             }
 
+            for param in kwargs.keys():
+                params[param] = kwargs[param]            
             if name is not None:
                 params['findByName'] = name
             if deleted:

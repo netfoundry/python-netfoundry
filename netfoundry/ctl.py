@@ -14,6 +14,7 @@ import shutil
 import sys
 import tempfile
 from json import loads
+import argparse
 
 import pyjq
 from milc import set_metadata
@@ -34,6 +35,17 @@ from milc import cli, questions
 
 utility = Utility()
 
+class StoreDictKeyPair(argparse.Action):
+    """Parse key pairs into a dictionary."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        """Split comma-separated key=value pairs."""
+        my_dict = {}
+        for kv in values.split(","):
+            k,v = kv.split("=")
+            my_dict[k] = v
+        setattr(namespace, self.dest, my_dict)
+
 @cli.argument('-c', '--credentials', help='API account JSON file from web console', default=None)
 @cli.argument("-o", "--organization", help="label of an alternative organization (default is caller's org)" )
 @cli.argument('-n', '--network-name', arg_only=True, help='caseless display name of the network to login')
@@ -47,8 +59,9 @@ def main(cli):
         '{style_bright}{bg_red}{fg_white}main!'
     cli.echo(text)
 
+@cli.argument('-q','--query', arg_only=True, action=StoreDictKeyPair, help="any valid query params for type as k=v,k=v comma-separated pairs", default=dict())
 @cli.argument('-H','--headers', default=True, action='store_boolean', help='print column headers')
-@cli.argument('resource_type', arg_only=True, help='list what?', choices=RESOURCES.keys())
+@cli.argument('resource_type', arg_only=True, help='type of resource', choices=RESOURCES.keys())
 @cli.subcommand('find lists of things')
 def list(cli):
     """Find lists of things."""
@@ -62,15 +75,29 @@ def list(cli):
                 ''.join([char*37 for char in '-'])
                 )
             )
-
-        for net in organization.get_networks_by_organization():
+        for net in organization.get_networks_by_organization(**cli.args.query):
             cli.echo('{style_normal}{fg_white}'+'{: >32} {: ^20} {: >20}'.format(net['name'], net['status'], net['id']))
     else:
-        cli.log.error("TODO: need list case for valid resource type '%s'", cli.args.resource_type)
-        sys.exit(1)
+        network, network_group = setup_network(organization)
+        matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
+        if len(matches) == 0:
+            cli.log.info("found no %s '%s'", cli.args.resource_type, cli.args.query)
+            sys.exit(1)
+        else:
+            cli.log.debug("found at least one %s '%s'", cli.args.resource_type, cli.args.query)
+            if cli.config.list.headers:
+                cli.echo('{style_bright}{fg_white}'+'{: ^32} {: ^10} {: ^37}'.format("name", "zitiId", "id"))
+                cli.echo('{style_bright}{fg_white}'+'{: <32} {: ^10} {: >37}'.format(
+                    ''.join([char*32 for char in '-']),
+                    ''.join([char*20 for char in '-']),
+                    ''.join([char*37 for char in '-'])
+                    )
+                )
+            for match in matches:
+                cli.echo('{style_normal}{fg_white}'+'{: >32} {: ^20} {: >20}'.format(match['name'], match['zitiId'], match['id']))
 
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
-@cli.argument('-n','--name', arg_only=True, help='caseless name of resource')
+@cli.argument('-q','--query', arg_only=True, action=StoreDictKeyPair, help="any valid query params for type as k=v,k=v comma-separated pairs", default=dict())
 @cli.subcommand('delete a resource')
 def delete(cli):
     """Delete a resource."""
@@ -78,8 +105,8 @@ def delete(cli):
     network, network_group = setup_network(organization)
 
     if cli.args.resource_type == "network":
-        if cli.args.name is not None:
-            cli.log.warn("ignoring name='%s' because this operation applies to the entire network that is already selected", cli.args.name)
+        if cli.args.query is not None:
+            cli.log.warn("ignoring name='%s' because this operation applies to the entire network that is already selected", str(cli.args.query))
         if cli.args.yes or questions.yesno("confirm delete network \"{name}\"".format(name=network.name), default=False):
             spinner = cli.spinner(text='deleting {net}'.format(net=network.name), spinner='dots12')
             spinner.start()
@@ -88,22 +115,22 @@ def delete(cli):
         else:
             cli.echo("not deleting network \"{name}\".".format(name=network.name))
     else:
-        if cli.args.name is None:
-            cli.log.error("need name of resource")
+        if cli.args.query is None:
+            cli.log.error("need query to select a resource")
             raise Exception()
-        matches = network.get_resources(type=cli.args.resource_type, name=cli.args.name)
+        matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
         if len(matches) == 0:
-            cli.log.info("found no %s '%s'", cli.args.resource_type, cli.args.name)
+            cli.log.info("found no %s '%s'", cli.args.resource_type, str(cli.args.query))
             sys.exit(1)
         elif len(matches) > 1:
-            cli.log.error("found more than one %s '%s'", cli.args.resource_type, cli.args.name)
+            cli.log.error("found more than one %s '%s'", cli.args.resource_type, str(cli.args.query))
             sys.exit(1)
         if len(matches) == 1:
-            cli.log.debug("found one %s '%s'", cli.args.resource_type, cli.args.name)
-            if cli.args.yes or questions.yesno("confirm delete {type} '{name}'".format(type=cli.args.resource_type, name=cli.args.network_name), default=False):
-                network.delete_resource(type=cli.args.resouce_type, id=matches[0]['id'])
+            cli.log.debug("found one %s '%s'", cli.args.resource_type, str(cli.args.query))
+            if cli.args.yes or questions.yesno("confirm delete {type} '{name}'".format(type=cli.args.resource_type, name=matches[0]['name']), default=False):
+                network.delete_resource(type=cli.args.resource_type, id=matches[0]['id'])
             else:
-                cli.echo("not deleting Network \"{network_name}\"".format(network_name=network.name))
+                cli.echo("not deleting {type} '{name}'".format(type=cli.args.resource_type, name=matches[0]['name']))
 
 @cli.argument('-z','--ziti-cli', help='path to ziti CLI executable')
 @cli.subcommand('login to the ziti-controller management API (requires ziti CLI)')
@@ -173,6 +200,9 @@ def setup_organization():
 
 def setup_network(organization: object):
     """Use a network."""
+    if not cli.config.general.network_name:
+        cli.log.error("need --network-name to configure a network")
+        raise Exception()
     if cli.config.general.network_group:
         network_group = NetworkGroup(
             organization,

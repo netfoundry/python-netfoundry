@@ -452,11 +452,11 @@ class Network:
 
     get_resource = get_resource_by_id
 
-    def get_resources(self, type: str,name: str=None, accept: str=None, deleted: bool=False, typeId: str=None):
+    def get_resources(self, type: str, accept: str=None, deleted: bool=False, typeId: str=None, **kwargs):
         """Find resources by type.
 
         :param str type: plural of an entity type e.g. networks, endpoints, services, posture-checks, etc...
-        :param str name: filter results by name
+        :param str kwargs: filter results by logical AND query parameters
         :param str accept: specifying the form of the desired response. Choices ["create","update"] where
                 "create" is useful for comparing an existing entity to a set of properties that are used to create the same type of
                 entity in a POST request, and "update" may be used in the same way for a PUT update.
@@ -483,8 +483,8 @@ class Network:
             # if type == "services": 
             #     params["beta"] = ''
 
-            if name is not None:
-                params['name'] = name
+            for param in kwargs.keys():
+                params[param] = kwargs[param]
             if typeId is not None:
                 params['typeId'] = typeId
             if deleted:
