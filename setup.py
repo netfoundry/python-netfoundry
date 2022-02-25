@@ -29,7 +29,7 @@ setuptools.setup(
         'pyjwt >= 2.0.0',
         'inflect >= 5.3',
         'milc>=1.6.5',
-        'yaml>=5.4.1'
+        'pyyaml>=5.4.1'
     ]
 )
 
