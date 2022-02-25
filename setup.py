@@ -27,7 +27,9 @@ setuptools.setup(
         'requests >= 2.25.1',
         'pysocks >= 1.7.1',
         'pyjwt >= 2.0.0',
-        'inflect >= 5.3'
+        'inflect >= 5.3',
+        'milc>=1.6.5',
+        'yaml>=5.4.1'
     ]
 )
 
