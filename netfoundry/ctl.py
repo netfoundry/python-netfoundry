@@ -8,16 +8,16 @@ Usage::
 PYTHON_ARGCOMPLETE_OK
 """
 
+import argparse
 import os
 import platform
 import shutil
 import sys
 import tempfile
-from json import loads
-import argparse
+from json import dumps as json_dumps
 
-import pyjq
 from milc import set_metadata
+from yaml import dump as yaml_dumps
 
 from ._version import get_versions
 from .demo import main as nfdemo
@@ -48,63 +48,85 @@ class StoreDictKeyPair(argparse.Action):
 
 @cli.argument('-c', '--credentials', help='API account JSON file from web console', default=None)
 @cli.argument("-o", "--organization", help="label of an alternative organization (default is caller's org)" )
-@cli.argument('-n', '--network-name', arg_only=True, help='caseless display name of the network to login')
+@cli.argument('-n', '--network', dest='network_name', arg_only=True, help='caseless name of the network to manage')
 @cli.argument("-g", "--network-group", arg_only=True, help="shortname or ID of a network group to search for network_name")
 @cli.argument('-y', '--yes', action='store_true', arg_only=True, help='Answer yes to all questions.')
 @cli.argument('-p', '--proxy', help="like http://localhost:8080 or socks5://localhost:9046", default=None)
 @cli.entrypoint('configure the CLI to manage a network')
 def main(cli):
     """Configure the CLI to manage a network."""
-    text = '{style_bright}{bg_lightblue_ex}{fg_white}|___|\\___|{style_reset_all} ' \
-        '{style_bright}{bg_red}{fg_white}main!'
-    cli.echo(text)
 
-@cli.argument('-q','--query', arg_only=True, action=StoreDictKeyPair, help="any valid query params for type as k=v,k=v comma-separated pairs", default=dict())
+@cli.argument('-f','--filter', help="output filter as jq filter expression", default='.')
+@cli.argument('-o','--output', help="output format", default="text", choices=["text","json","yaml"])
+@cli.argument('-q','--query', arg_only=True, action=StoreDictKeyPair, help="query params as k=v,k=v comma-separated pairs", default=dict())
 @cli.argument('-H','--headers', default=True, action='store_boolean', help='print column headers')
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=RESOURCES.keys())
-@cli.subcommand('find lists of things')
+@cli.subcommand('find resources as lists')
 def list(cli):
-    """Find lists of things."""
+    """Find resources as lists."""
+    if cli.config.list.output == "text" and not sys.stdout.isatty():
+        cli.log.warn("nfctl does not have a stable CLI interface. Use with caution in scripts.")
+
     organization = setup_organization()
+
     if cli.args.resource_type == "networks":
-        columns = {
-            "name": 32,
-            "status": 20,
-            "id": 37
-        }
-        if cli.config.list.headers:
-            cli.echo('{style_bright}{fg_white}'+'{: ^32} {: ^20} {: ^37}'.format("name", "status", "id"))
-            cli.echo('{style_bright}{fg_white}'+'{: <32} {: ^20} {: >37}'.format(
-                ''.join([char*32 for char in '-']),
-                ''.join([char*20 for char in '-']),
-                ''.join([char*37 for char in '-'])
+        matches = organization.get_networks_by_organization(**cli.args.query)
+        if len(matches) == 0:
+            cli.log.info("found no %s matching '%s'", cli.args.resource_type, str(cli.args.query))
+            sys.exit(0)
+        elif len(matches) >= 1:
+            cli.log.debug("found %d %s matching '%s'", len(matches), cli.args.resource_type, str(cli.args.query))
+
+        if cli.config.list.output == "text":
+            if not cli.config.list.filter == '.':
+                cli.log.warn("ignoring custom output filter '%s' because output format is '%s'", cli.config.list.filter, cli.config.list.output)
+            columns = {
+                "name": 48,
+                "status": 20,
+                "id": 37
+            }
+            if cli.config.list.headers:
+                cli.echo('{style_bright}{fg_white}'+'{: ^48} {: ^20} {: ^37}'.format("name", "status", "id"))
+                cli.echo('{style_bright}{fg_white}'+'{: <48} {: ^20} {: >37}'.format(
+                    ''.join([char*48 for char in '-']),
+                    ''.join([char*20 for char in '-']),
+                    ''.join([char*37 for char in '-'])
+                    )
                 )
-            )
-        for net in organization.get_networks_by_organization(**cli.args.query):
-            cli.echo('{style_normal}{fg_white}'+'{: >32} {: ^20} {: >20}'.format(net['name'], net['status'], net['id']))
+            for match in matches:
+                cli.echo('{style_normal}{fg_white}'+'{: >48} {: ^20} {: >20}'.format(match['name'], match['status'], match['id']))
+        elif cli.config.list.output == "yaml":
+            cli.echo(yaml_dumps(matches))
+        elif cli.config.list.output == "json":
+            cli.echo(json_dumps(matches, indent=4))
     else:
         network, network_group = setup_network(organization)
         matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
         if len(matches) == 0:
             cli.log.info("found no %s '%s'", cli.args.resource_type, cli.args.query)
-            sys.exit(1)
+            sys.exit(0)
         else:
             cli.log.debug("found at least one %s '%s'", cli.args.resource_type, cli.args.query)
-            columns = {
-                "name": 32,
-                "zitiId": 10,
-                "id": 37
-            }
-            if cli.config.list.headers:
-                cli.echo('{style_bright}{fg_white}'+'{: ^32} {: ^10} {: ^37}'.format("name", "zitiId", "id"))
-                cli.echo('{style_bright}{fg_white}'+'{: >32} {: ^10} {: >37}'.format(
-                    ''.join([char*32 for char in '-']),
-                    ''.join([char*10 for char in '-']),
-                    ''.join([char*37 for char in '-'])
+            if cli.config.list.output == "text":
+                columns = {
+                    "name": 32,
+                    "zitiId": 10,
+                    "id": 37
+                }
+                if cli.config.list.headers:
+                    cli.echo('{style_bright}{fg_white}'+'{: ^48} {: ^10} {: ^37}'.format("name", "zitiId", "id"))
+                    cli.echo('{style_bright}{fg_white}'+'{: >48} {: ^10} {: >37}'.format(
+                        ''.join([char*48 for char in '-']),
+                        ''.join([char*10 for char in '-']),
+                        ''.join([char*37 for char in '-'])
+                        )
                     )
-                )
-            for match in matches:
-                cli.echo('{style_normal}{fg_white}'+'{: <32} {: ^10} {: >37}'.format(match['name'], match['zitiId'], match['id']))
+                for match in matches:
+                    cli.echo('{style_normal}{fg_white}'+'{: <32} {: ^10} {: >37}'.format(match['name'], match['zitiId'], match['id']))
+            elif cli.config.list.output == "yaml":
+                cli.echo(yaml_dumps(matches))
+            elif cli.config.list.output == "json":
+                cli.echo(json_dumps(matches, indent=4))
 
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
 @cli.argument('-q','--query', arg_only=True, action=StoreDictKeyPair, help="any valid query params for type as k=v,k=v comma-separated pairs", default=dict())
@@ -240,10 +262,11 @@ def setup_network(organization: object):
 
     # use the Network
     network = Network(network_group, network_name=cli.config.general.network_name)
-    spinner = cli.spinner(text='waiting for {net} to have status PROVISIONED'.format(net=cli.config.general.network_name), spinner='dots12')
-    spinner.start()
-    network.wait_for_status("PROVISIONED",wait=999,progress=False)
-    spinner.stop()
+    if cli.config.list.output == "text":
+        spinner = cli.spinner(text='waiting for {net} to have status PROVISIONED'.format(net=cli.config.general.network_name), spinner='dots12')
+        spinner.start()
+        network.wait_for_status("PROVISIONED",wait=999,progress=False)
+        spinner.stop()
     return network, network_group
 
 if __name__ == '__main__':
