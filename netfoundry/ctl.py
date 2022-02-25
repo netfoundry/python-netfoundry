@@ -14,9 +14,13 @@ import platform
 import shutil
 import sys
 import tempfile
+from base64 import b64decode
 from json import dumps as json_dumps
+from subprocess import call
 
+from cryptography.hazmat.primitives.serialization import pkcs7, Encoding
 from milc import set_metadata
+from requests import get
 from yaml import dump as yaml_dumps
 
 from ._version import get_versions
@@ -55,6 +59,17 @@ class StoreDictKeyPair(argparse.Action):
 @cli.entrypoint('configure the CLI to manage a network')
 def main(cli):
     """Configure the CLI to manage a network."""
+
+@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
+@cli.subcommand('create a resource')
+def create(cli):
+    """Create a resource."""
+    if sys.stdin.isatty():
+        create_request_body = edit_template(yaml_dumps(RESOURCES[plural(cli.args.resource_type)]['create_template']))
+    else:
+        for line in sys.stdin:
+            create_request_body+=line
+    cli.echo(create_request_body)
 
 @cli.argument('-f','--filter', help="output filter as jq filter expression", default='.')
 @cli.argument('-o','--output', help="output format", default="text", choices=["text","json","yaml"])
@@ -124,7 +139,7 @@ def list(cli):
                 for match in matches:
                     cli.echo('{style_normal}{fg_white}'+'{: <48} {: ^12} {: >37}'.format(match['name'], match['zitiId'], match['id']))
             elif cli.config.list.output == "yaml":
-                cli.echo(yaml_dumps(matches))
+                cli.echo(yaml_dumps(matches, indent=4))
             elif cli.config.list.output == "json":
                 cli.echo(json_dumps(matches, indent=4))
 
@@ -199,11 +214,21 @@ def login(cli):
         raise
     else:
         if cli.config.general.proxy:
-            curl_proxy = '--proxy '+cli.config.general.proxy
+            proxies = {
+                'http': cli.config.general.proxy,
+                'https': cli.config.general.proxy
+            }
         else:
-            curl_proxy = ''
-        os.system('curl '+curl_proxy+' -sSfk https://'+ziti_ctrl_ip+'/.well-known/est/cacerts | openssl base64 -d | openssl pkcs7 -inform DER -outform PEM -print_certs -out '+tempdir+'/well-known-certs.pem')
-        os.system(ziti_cli+' edge login '+ziti_ctrl_ip+' -u '+secrets['zitiUserId']+' -p '+secrets['zitiPassword']+' -c '+tempdir+'/well-known-certs.pem')
+            proxies = dict()
+        
+        well_known_response = get('https://'+ziti_ctrl_ip+'/.well-known/est/cacerts', proxies=proxies, verify=False)
+        well_known_decoding = b64decode(well_known_response.text)
+        well_known_certs = pkcs7.load_der_pkcs7_certificates(well_known_decoding)
+        well_known_pem = tempdir+'/well-known-certs.pem'
+        with open(well_known_pem, 'wb') as pem:
+            for cert in well_known_certs:
+                pem.write(cert.public_bytes(Encoding.PEM))
+        os.system(ziti_cli+' edge login '+ziti_ctrl_ip+' -u '+secrets['zitiUserId']+' -p '+secrets['zitiPassword']+' -c '+well_known_pem)
         os.system(ziti_cli+' edge --help')
     
 def setup_organization():
@@ -268,6 +293,23 @@ def setup_network(organization: object):
         network.wait_for_status("PROVISIONED",wait=999,progress=False)
         spinner.stop()
     return network, network_group
+
+def edit_template(template: object):
+    """
+    Edit a template and return the saved buffer.
+
+    :param obj template: a deserialized template to edit and return as yaml
+    """
+    EDITOR = os.environ.get('EDITOR','vim')
+
+    with tempfile.NamedTemporaryFile(suffix=".tmp") as tf:
+        tf.write(template)
+        tf.flush()
+        call([EDITOR, tf.name])
+
+        tf.seek(0)
+        edited = tf.read()
+    return edited
 
 if __name__ == '__main__':
     cli()

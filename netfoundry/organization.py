@@ -603,11 +603,14 @@ class Organization:
 
         if response_code == STATUS_CODES.codes.OK: # HTTP 200
             try:
-                embedded = json.loads(response.text)
+                embedded = response.json
+            except ValueError:
+                logging.error("response is not JSON")
+                raise ValueError("response is not JSON")
+            try:
                 networks = embedded['_embedded'][RESOURCES['networks']['embedded']]
             except KeyError:
-                networks = []
-                pass
+                networks = list()
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
