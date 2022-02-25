@@ -174,8 +174,6 @@ def list(cli):
             cli.log.debug("found %d %s matching '%s'", len(matches), cli.args.resource_type, str(cli.args.query))
 
         if cli.config.general.output == "text":
-            if not cli.config.list.filter == '.':
-                cli.log.warn("ignoring custom output filter '%s' because output format is '%s'", cli.config.list.filter, cli.config.general.output)
             columns = {
                 "name": 48,
                 "status": 20,
