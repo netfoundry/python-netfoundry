@@ -450,7 +450,7 @@ class Organization:
             try:
                 network_groups = json.loads(response.text)['_embedded']['organizations']
             except ValueError as e:
-                eprint('ERROR getting Network Groups')
+                logging.error('failed loading list of network groups as object')
                 raise(e)
         else:
             raise Exception(
@@ -607,6 +607,7 @@ class Organization:
             except ValueError:
                 logging.error("response is not JSON")
                 raise ValueError("response is not JSON")
+            logging.debug(str(embedded))
             try:
                 networks = embedded['_embedded'][RESOURCES['networks']['embedded']]
             except KeyError:

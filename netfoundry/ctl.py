@@ -15,13 +15,13 @@ import shutil
 import sys
 import tempfile
 from base64 import b64decode
-from json import dumps as json_dumps
+from json import dumps as json_dumps, loads as json_loads
 from subprocess import call
 
 from cryptography.hazmat.primitives.serialization import pkcs7, Encoding
 from milc import set_metadata
 from requests import get
-from yaml import dump as yaml_dumps
+from yaml import dump as yaml_dumps, full_load as yaml_loads
 
 from ._version import get_versions
 from .demo import main as nfdemo
@@ -60,16 +60,55 @@ class StoreDictKeyPair(argparse.Action):
 def main(cli):
     """Configure the CLI to manage a network."""
 
+@cli.subcommand('get caller identity')
+def whoami(cli):
+    """Get caller identity."""
+    organization = use_organization()
+    caller = organization.caller
+    caller['label'] = organization.label
+    caller['environment'] = organization.environment
+    cli.echo(yaml_dumps(caller))
+
+@cli.argument('-w','--wait', help='seconds to wait for process execution to finish', default=0)
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
 @cli.subcommand('create a resource')
 def create(cli):
     """Create a resource."""
+    create_yaml = str()
     if sys.stdin.isatty():
-        create_request_body = edit_template(yaml_dumps(RESOURCES[plural(cli.args.resource_type)]['create_template']))
+        if 'create_template' in RESOURCES[plural(cli.args.resource_type)].keys():
+            template = RESOURCES[plural(cli.args.resource_type)]['create_template']
+        else:
+            template = {"hint": "No template was found for resource type {type}. Replace the contents of this buffer with the request body as YAML or JSON to create a resource. networkId will be added automatically.".format(type=cli.args.resource_type)}
+        create_yaml = edit_template(template)
     else:
         for line in sys.stdin:
-            create_request_body+=line
-    cli.echo(create_request_body)
+            create_yaml+=line
+    create_object = yaml_loads(create_yaml)
+
+    organization = use_organization()
+
+    if cli.config.create.wait:
+        spinner = cli.spinner(text='creating {type} {name}'.format(type=cli.args.resource_type, name=create_object['name']), spinner='dots12')
+        spinner.start()
+
+    if cli.args.resource_type == "network":
+        if cli.config.general.network_group:
+            network_group = use_network_group(organization)
+        elif len(organization.get_network_groups_by_organization()) > 1:
+            cli.log.error("specify --network-group because there is more than one available to caller's identity")
+            raise SystemExit
+        else:
+            network_group_id = organization.get_network_groups_by_organization()[0]['id']
+            network_group = use_network_group(organization, id=network_group_id)
+        resource = network.create_resource(type=cli.args.resource_type, properties=create_object, wait=cli.config.create.wait)
+        if cli.config.create.wait:
+            spinner.stop()
+    else:
+        network, network_group = use_network(organization)
+        resource = network.create_resource(type=cli.args.resource_type, properties=create_object, wait=cli.config.create.wait)
+        if cli.config.create.wait:
+            spinner.stop()
 
 @cli.argument('-f','--filter', help="output filter as jq filter expression", default='.')
 @cli.argument('-o','--output', help="output format", default="text", choices=["text","json","yaml"])
@@ -82,7 +121,7 @@ def list(cli):
     if cli.config.list.output == "text" and not sys.stdout.isatty():
         cli.log.warn("nfctl does not have a stable CLI interface. Use with caution in scripts.")
 
-    organization = setup_organization()
+    organization = use_organization()
 
     if cli.args.resource_type == "networks":
         matches = organization.get_networks_by_organization(**cli.args.query)
@@ -111,11 +150,11 @@ def list(cli):
             for match in matches:
                 cli.echo('{style_normal}{fg_white}'+'{: >48} {: ^20} {: >20}'.format(match['name'], match['status'], match['id']))
         elif cli.config.list.output == "yaml":
-            cli.echo(yaml_dumps(matches))
+            cli.echo(yaml_dumps(matches, indent=4, default_flow_style=False))
         elif cli.config.list.output == "json":
             cli.echo(json_dumps(matches, indent=4))
     else:
-        network, network_group = setup_network(organization)
+        network, network_group = use_network(organization)
         matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
         if len(matches) == 0:
             cli.log.info("found no %s '%s'", cli.args.resource_type, cli.args.query)
@@ -139,7 +178,7 @@ def list(cli):
                 for match in matches:
                     cli.echo('{style_normal}{fg_white}'+'{: <48} {: ^12} {: >37}'.format(match['name'], match['zitiId'], match['id']))
             elif cli.config.list.output == "yaml":
-                cli.echo(yaml_dumps(matches, indent=4))
+                cli.echo(yaml_dumps(matches, indent=4, default_flow_style=False))
             elif cli.config.list.output == "json":
                 cli.echo(json_dumps(matches, indent=4))
 
@@ -148,8 +187,8 @@ def list(cli):
 @cli.subcommand('delete a resource')
 def delete(cli):
     """Delete a resource."""
-    organization = setup_organization()
-    network, network_group = setup_network(organization)
+    organization = use_organization()
+    network, network_group = use_network(organization)
 
     if cli.args.resource_type == "network":
         if cli.args.query is not None:
@@ -197,8 +236,8 @@ def login(cli):
         cli.log.critical("missing executable '%s' in PATH: %s", ziti_cli, os.environ['PATH'])
         sys.exit(1)
 
-    organization = setup_organization()
-    network, network_group = setup_network(organization)
+    organization = use_organization()
+    network, network_group = use_network(organization)
 
     tempdir = tempfile.mkdtemp()
 
@@ -231,7 +270,7 @@ def login(cli):
         os.system(ziti_cli+' edge login '+ziti_ctrl_ip+' -u '+secrets['zitiUserId']+' -p '+secrets['zitiPassword']+' -c '+well_known_pem)
         os.system(ziti_cli+' edge --help')
     
-def setup_organization():
+def use_organization():
     """Assume an identity in an organization."""
     if 'NETFOUNDRY_API_TOKEN' in os.environ:
         cli.log.debug("using bearer token from environment NETFOUNDRY_API_TOKEN")
@@ -255,7 +294,17 @@ def setup_organization():
 
     return organization
 
-def setup_network(organization: object):
+def use_network_group(organization: object, id: str=None):
+    """Use a network group."""
+    if cli.config.general.network_group or id:
+        network_group = NetworkGroup(
+            organization,
+            network_group_id=id if id else None
+            network_group_name=cli.config.general.network_group if cli.config.general.network_group else None
+        )
+    return network_group
+
+def use_network(organization: object):
     """Use a network."""
     if not cli.config.general.network_name:
         cli.log.error("need --network-name to configure a network")
@@ -263,7 +312,7 @@ def setup_network(organization: object):
     if cli.config.general.network_group:
         network_group = NetworkGroup(
             organization,
-            network_group_name=network_group
+            network_group_name=cli.config.general.network_group
         )
         existing_networks = network_group.networks_by_normal_name()
         if not utility.normalize_caseless(cli.config.general.network_name) in existing_networks.keys():
@@ -281,7 +330,7 @@ def setup_network(organization: object):
         elif existing_count > 1:
             cli.log.error("there were {count} networks named \"{name}\" visible to your identity. Try filtering with '--network-group'.".format(count=existing_count, name=cli.config.general.network_name))
             raise Exception()
-        else: #
+        else:
             cli.log.error("failed to find a network named \"{name}\".".format(name=cli.config.general.network_name))
             raise Exception()
 
@@ -292,7 +341,7 @@ def setup_network(organization: object):
         spinner.start()
         network.wait_for_status("PROVISIONED",wait=999,progress=False)
         spinner.stop()
-    return network, network_group
+    return network
 
 def edit_template(template: object):
     """
@@ -301,9 +350,9 @@ def edit_template(template: object):
     :param obj template: a deserialized template to edit and return as yaml
     """
     EDITOR = os.environ.get('EDITOR','vim')
-
+    yaml_dumps(template, default_flow_style=False)
     with tempfile.NamedTemporaryFile(suffix=".tmp") as tf:
-        tf.write(template)
+        tf.write(yaml_dumps(template, default_flow_style=False).encode())
         tf.flush()
         call([EDITOR, tf.name])
 

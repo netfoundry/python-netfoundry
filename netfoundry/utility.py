@@ -97,14 +97,25 @@ for code, titles in STATUSES_BY_CODE.items():
 RESOURCES = {
     'networks': {
         'embedded': "networkList",
-        'create_responses': ["ACCEPTED"]
+        'create_responses': ["ACCEPTED"],
+        'create_template': {
+            "name": "Name",
+            "locationCode": "us-east-1",
+            "size": "small",
+            "networkGroupId": "a7de7a6d-9b05-4e00-89e0-937498c49e0a"
+        }
     },
     'network-controllers': {
         'embedded': "networkControllerList",
     },
     'endpoints': {
         'embedded': "endpointList",
-        'create_responses': ["ACCEPTED"]
+        'create_responses': ["ACCEPTED"],
+        'create_template': {
+            "attributes": [],
+            "enrollmentMethod": {"ott": True},
+            "name": "Name"
+        }
     },
     'edge-routers': {
         'embedded': "edgeRouterList",
@@ -120,7 +131,8 @@ RESOURCES = {
     },
     'services': {
         'embedded': "serviceList",
-        'create_responses': ["ACCEPTED"]
+        'create_responses': ["ACCEPTED"],
+        'create_template': {"this": 1}
     },
     'service-policies': {
         'embedded': "servicePolicyList",
