@@ -114,15 +114,15 @@ def list(cli):
                     "id": 37
                 }
                 if cli.config.list.headers:
-                    cli.echo('{style_bright}{fg_white}'+'{: ^48} {: ^10} {: ^37}'.format("name", "zitiId", "id"))
-                    cli.echo('{style_bright}{fg_white}'+'{: >48} {: ^10} {: >37}'.format(
+                    cli.echo('{style_bright}{fg_white}'+'{: ^48} {: ^12} {: ^37}'.format("name", "zitiId", "id"))
+                    cli.echo('{style_bright}{fg_white}'+'{: >48} {: ^12} {: >37}'.format(
                         ''.join([char*48 for char in '-']),
-                        ''.join([char*10 for char in '-']),
+                        ''.join([char*12 for char in '-']),
                         ''.join([char*37 for char in '-'])
                         )
                     )
                 for match in matches:
-                    cli.echo('{style_normal}{fg_white}'+'{: <32} {: ^10} {: >37}'.format(match['name'], match['zitiId'], match['id']))
+                    cli.echo('{style_normal}{fg_white}'+'{: <48} {: ^12} {: >37}'.format(match['name'], match['zitiId'], match['id']))
             elif cli.config.list.output == "yaml":
                 cli.echo(yaml_dumps(matches))
             elif cli.config.list.output == "json":
