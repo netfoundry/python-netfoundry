@@ -53,18 +53,16 @@ class StoreDictKeyPair(argparse.Action):
         setattr(namespace, self.dest, my_dict)
 
 @cli.argument('-c', '--credentials', help='API account JSON file from web console', default=None)
-@cli.argument("-o", "--organization", help="label or ID of an alternative organization (default is caller's org)" )
-@cli.argument('-n', '--network', help='caseless name of the network to manage')
-@cli.argument("-g", "--network-group", help="shortname or ID of a network group to search for network_identifier")
-@cli.argument('-o','--output', help="objects formats suppress console messages", default="yaml", choices=["yaml","json","text"])
+@cli.argument("-O", "--organization", help="label or ID of an alternative organization (default is caller's org)" )
+@cli.argument('-N', '--network', help='caseless name of the network to manage')
+@cli.argument("-G", "--network-group", help="shortname or ID of a network group to search for network_identifier")
+@cli.argument('-o','--output', help="object formats suppress console messages", default="yaml", choices=["yaml","json","text"])
 @cli.argument('-y', '--yes', action='store_true', arg_only=True, help='answer yes to potentially-destructive operations')
 @cli.argument('-p', '--proxy', help="like http://localhost:8080 or socks5://localhost:9046", default=None)
 @cli.entrypoint('configure the CLI to manage a network')
 def main(cli):
     """Configure the CLI to manage a network."""
-    organization = use_organization(
-        cli.config.general.organization if cli.config.general.organization else None
-    )
+    organization = use_organization()
     if cli.config.general.network_group and cli.config.general.network:
         cli.log.debug("configuring network %s in group %s", cli.config.general.network, cli.config.general.network_group)
         network, network_group = use_network(
@@ -117,7 +115,7 @@ def whoami(cli, echo: bool=True):
 
 @cli.argument('-w','--wait', help='seconds to wait for process execution to finish', default=0)
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
-@cli.subcommand('create a resource')
+@cli.subcommand('create a resource from stdin or editor')
 def create(cli):
     """Create a resource."""
     create_yaml = str()
@@ -262,76 +260,84 @@ def delete(cli):
             else:
                 cli.echo("not deleting {type} '{name}'".format(type=cli.args.resource_type, name=matches[0]['name']))
 
+@cli.argument('api', help='login to what?', arg_only=True, default="organization", choices=["organization", "ziti"])
 @cli.argument('-z','--ziti-cli', help='path to ziti CLI executable')
-@cli.subcommand('login to the ziti-controller management API (requires ziti CLI)')
+@cli.subcommand('login to a management API')
 def login(cli):
-    """Login to the ziti-controller management API (requires ziti CLI)."""
-    if cli.config.login.ziti_cli:
-        ziti_cli = cli.config.login.ziti_cli
-    else:
-        if platform.system() == 'Windows':
-            ziti_cli = 'ziti.exe'
-        else:
-            ziti_cli = 'ziti'
-    which_ziti = shutil.which(ziti_cli)
-    if which_ziti:
-        cli.log.debug("found ziti CLI executable in %s", which_ziti)
-    else:
-        cli.log.critical("missing executable '%s' in PATH: %s", ziti_cli, os.environ['PATH'])
-        sys.exit(1)
-
+    """Login to a management API."""
     organization = use_organization()
-    network, network_group = use_network(organization)
-
-    tempdir = tempfile.mkdtemp()
-
-    network_controller = network.get_resource_by_id(type="network-controller", id=network.network_controller['id'])
-    if 'domainName' in network_controller.keys() and network_controller['domainName']:
-        ziti_ctrl_ip = network_controller['domainName']
-    else:
-        ziti_ctrl_ip = network_controller['_embedded']['host']['ipAddress']
-
-    try:
-        secrets = network.get_controller_secrets(network.network_controller['id'])
-    except:
-        raise
-    else:
-        if cli.config.general.proxy:
-            proxies = {
-                'http': cli.config.general.proxy,
-                'https': cli.config.general.proxy
-            }
+    if cli.args.api == "organization":
+        cli.echo(
+            """
+# source this output like
+# $ source <(nfctl --credentials credentials.json login organization)
+export NETFOUNDRY_API_TOKEN="{token}"
+# or, alternatively, silently-paste and export to child procs
+# $ read -s NETFOUNDRY_API_TOKEN && export NETFOUNDRY_API_TOKEN
+# then logout of organization with
+# $ unset NETFOUNDRY_API_TOKEN
+""".format(token=organization.token)
+        )
+    elif cli.args.api == "ziti":
+        if cli.config.login.ziti_cli:
+            ziti_cli = cli.config.login.ziti_cli
         else:
-            proxies = dict()
-        
-        well_known_response = get('https://'+ziti_ctrl_ip+'/.well-known/est/cacerts', proxies=proxies, verify=False)
-        well_known_decoding = b64decode(well_known_response.text)
-        well_known_certs = pkcs7.load_der_pkcs7_certificates(well_known_decoding)
-        well_known_pem = tempdir+'/well-known-certs.pem'
-        with open(well_known_pem, 'wb') as pem:
-            for cert in well_known_certs:
-                pem.write(cert.public_bytes(Encoding.PEM))
-        os.system(ziti_cli+' edge login '+ziti_ctrl_ip+' -u '+secrets['zitiUserId']+' -p '+secrets['zitiPassword']+' -c '+well_known_pem)
-        os.system(ziti_cli+' edge --help')
+            if platform.system() == 'Windows':
+                ziti_cli = 'ziti.exe'
+            else:
+                ziti_cli = 'ziti'
+        which_ziti = shutil.which(ziti_cli)
+        if which_ziti:
+            cli.log.debug("found ziti CLI executable in %s", which_ziti)
+        else:
+            cli.log.critical("missing executable '%s' in PATH: %s", ziti_cli, os.environ['PATH'])
+            sys.exit(1)
+        network, network_group = use_network(organization=organization, network=cli.config.general.network, group=cli.config.general.network_group)
+        tempdir = tempfile.mkdtemp()
+        network_controller = network.get_resource_by_id(type="network-controller", id=network.network_controller['id'])
+        if 'domainName' in network_controller.keys() and network_controller['domainName']:
+            ziti_ctrl_ip = network_controller['domainName']
+        else:
+            ziti_ctrl_ip = network_controller['_embedded']['host']['ipAddress']
+        try:
+            secrets = network.get_controller_secrets(network.network_controller['id'])
+        except:
+            raise
+        else:
+            if cli.config.general.proxy:
+                proxies = {
+                    'http': cli.config.general.proxy,
+                    'https': cli.config.general.proxy
+                }
+            else:
+                proxies = dict()
+            well_known_response = get('https://'+ziti_ctrl_ip+'/.well-known/est/cacerts', proxies=proxies, verify=False)
+            well_known_decoding = b64decode(well_known_response.text)
+            well_known_certs = pkcs7.load_der_pkcs7_certificates(well_known_decoding)
+            well_known_pem = tempdir+'/well-known-certs.pem'
+            with open(well_known_pem, 'wb') as pem:
+                for cert in well_known_certs:
+                    pem.write(cert.public_bytes(Encoding.PEM))
+            os.system(ziti_cli+' edge login '+ziti_ctrl_ip+' -u '+secrets['zitiUserId']+' -p '+secrets['zitiPassword']+' -c '+well_known_pem)
+            os.system(ziti_cli+' edge --help')
     
-def use_organization(credentials: str=None, organization: str=None):
+def use_organization():
     """Assume an identity in an organization."""
-    organization_identifier = organization
-    if 'NETFOUNDRY_API_TOKEN' in os.environ:
+    if cli.config.general.credentials:
+        cli.log.debug("using credentials file %s from config or args", cli.config.general.credentials)
+    elif 'NETFOUNDRY_API_TOKEN' in os.environ:
         cli.log.debug("using bearer token from environment NETFOUNDRY_API_TOKEN")
     elif 'NETFOUNDRY_API_ACCOUNT' in os.environ:
         cli.log.debug("using file path to credentials file from environment NETFOUNDRY_API_ACCOUNT")
     elif 'NETFOUNDRY_CLIENT_ID' in os.environ and 'NETFOUNDRY_PASSWORD' in os.environ and 'NETFOUNDRY_OAUTH_URL' in os.environ:
         cli.log.debug("using API account credentials from environment NETFOUNDRY_CLIENT_ID, NETFOUNDRY_PASSWORD, NETFOUNDRY_OAUTH_URL")
-    elif cli.config.general.credentials:
-        cli.log.debug("using credentials file %s from args", cli.config.general.credentials)
     else:
         os.environ['NETFOUNDRY_API_TOKEN'] = questions.password(prompt='Enter Bearer Token:', confirm=False, validate=None)
 
     # use the session with some organization, default is to use the first and there's typically only one
     organization = Organization(
-        credentials=credentials if credentials else None,
-        organization=organization_identifier if organization_identifier else None,
+        credentials=cli.config.general.credentials if cli.config.general.credentials else None,
+        organization=cli.config.general.organization if cli.config.general.organization else None,
         expiry_minimum=0,
         proxy=cli.config.general.proxy
     )
