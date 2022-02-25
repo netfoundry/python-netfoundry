@@ -97,6 +97,11 @@ def main(cli):
             '{fg_lightgreen_ex}'
             +yaml_dumps(summary, indent=4)
         )
+    elif cli.config.general.output == "json":
+        cli.echo(
+            '{fg_lightgreen_ex}'
+            +json_dumps(summary, indent=4)
+        )
 
 @cli.subcommand('get caller identity')
 def whoami(cli, echo: bool=True):
@@ -149,7 +154,11 @@ def create(cli):
         if cli.config.create.wait:
             spinner.stop()
     else:
-        network, network_group = use_network(organization)
+        network, network_group = use_network(
+            organization=organization,
+            group=cli.config.general.network_group,
+            network=cli.config.general.network
+        )
         resource = network.create_resource(type=cli.args.resource_type, properties=create_object, wait=cli.config.create.wait)
         if cli.config.create.wait:
             spinner.stop()
@@ -194,7 +203,11 @@ def list(cli):
         elif cli.config.general.output == "json":
             cli.echo(json_dumps(matches, indent=4))
     else:
-        network, network_group = use_network(organization)
+        network, network_group = use_network(
+            organization=organization,
+            group=cli.config.general.network_group,
+            network=cli.config.general.network
+        )
         matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
         if len(matches) == 0:
             cli.log.info("found no %s '%s'", cli.args.resource_type, cli.args.query)
@@ -228,7 +241,11 @@ def list(cli):
 def delete(cli):
     """Delete a resource."""
     organization = use_organization()
-    network, network_group = use_network(organization)
+    network, network_group = use_network(
+        organization=organization,
+        group=cli.config.general.network_group,
+        network=cli.config.general.network
+    )
 
     if cli.args.resource_type == "network":
         if cli.args.query is not None:
@@ -290,7 +307,11 @@ export NETFOUNDRY_API_TOKEN="{token}"
         else:
             cli.log.critical("missing executable '%s' in PATH: %s", ziti_cli, os.environ['PATH'])
             sys.exit(1)
-        network, network_group = use_network(organization=organization, network=cli.config.general.network, group=cli.config.general.network_group)
+        network, network_group = use_network(
+            organization=organization,
+            group=cli.config.general.network_group,
+            network=cli.config.general.network
+        )
         tempdir = tempfile.mkdtemp()
         network_controller = network.get_resource_by_id(type="network-controller", id=network.network_controller['id'])
         if 'domainName' in network_controller.keys() and network_controller['domainName']:
