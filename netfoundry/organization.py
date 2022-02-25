@@ -8,7 +8,6 @@ import time  # enforce a timeout; sleep
 from pathlib import Path
 
 import jwt
-from ptpython import embed  # decode the JWT claimset
 
 from .utility import RESOURCES, STATUS_CODES, Utility, eprint, http, is_uuidv4
 
