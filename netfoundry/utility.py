@@ -1,8 +1,10 @@
 """Shared helper functions, constants, and classes."""
 
+import logging
 import sys  # open stderr
 import unicodedata  # case insensitive compare in Utility
 from re import sub
+from uuid import UUID  # validate UUIDv4 strings
 
 import inflect  # singular and plural nouns
 from requests import \
@@ -62,8 +64,16 @@ class LookupDict(dict):
     def get(self, key, default=None):
         return self.__dict__.get(key, default)
 
+def is_uuidv4(string: str):
+    """Test if string is valid UUIDv4."""
+    try: UUID(string, version=4)
+    except ValueError:
+        return False
+    else:
+        return True
+
 def eprint(*args, **kwargs):
-    print(*args, file=sys.stderr, **kwargs)
+    logging.debug(*args, **kwargs)
 
 p = inflect.engine()
 def plural(singular):

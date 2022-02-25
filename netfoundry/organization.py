@@ -7,9 +7,10 @@ import re  # regex
 import time  # enforce a timeout; sleep
 from pathlib import Path
 
-import jwt  # decode the JWT claimset
+import jwt
+from ptpython import embed  # decode the JWT claimset
 
-from .utility import RESOURCES, STATUS_CODES, Utility, eprint, http
+from .utility import RESOURCES, STATUS_CODES, Utility, eprint, http, is_uuidv4
 
 utility = Utility()
 
@@ -19,6 +20,7 @@ class Organization:
     
     The default is to use the calling identity's organization. 
 
+    :param str organization: optional identifier of an alternative organization, ignored if organization_id or organization_label
     :param str organization_id: optional UUID of an alternative organization
     :param str organization_label: is optional `label` property of an alternative organization
     :param str token: continue using a session with this optional token from an existing instance of organization
@@ -29,6 +31,7 @@ class Organization:
 
     def __init__(self, 
         credentials=None, 
+        organization: str=None, 
         organization_id: str=None, 
         organization_label: str=None,
         token: str=None,
@@ -158,8 +161,10 @@ class Organization:
         # renew token if not existing or imminent expiry, else continue
         if not self.token or expiry_offset < expiry_minimum:
             if not credentials_configured:
-                logging.exception("credentials needed to renew expired or imminently-expiring token")
-                raise Exception()
+                logging.error("credentials needed to renew expired or imminently-expiring token")
+                exit(1)
+            else:
+                logging.warn("renewing expired or imminently-expiring token")
 
             # extract the environment name from the authorization URL aka token API endpoint
             self.environment = re.sub(r'https://netfoundry-([^-]+)-.*', r'\1', token_endpoint, re.IGNORECASE)
@@ -223,6 +228,13 @@ class Organization:
         self.network_groups = self.get_network_groups_by_organization()
         # Obtain a session token and find own `.caller` identity and `.organizations`
         self.caller = self.get_caller_identity()
+
+        if (not organization_id and not organization_label) and organization:
+            if is_uuidv4(organization):
+                organization_id = organization
+            else:
+                organization_label = organization
+
         if organization_id:
             self.describe = self.get_organization(id=organization_id)
         elif organization_label:
@@ -253,8 +265,7 @@ class Organization:
         return(self.get_network_groups_by_organization())
         
     def get_caller_identity(self):
-        """return the caller's identity object
-        """
+        """Return the caller's identity object."""
         # try the API account endpoint first, then the endpoint for human, interactive users
         request = {
             "url": self.audience+'identity/v1/api-account-identities/self',
@@ -272,7 +283,7 @@ class Organization:
             try:
                 caller = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR getting caller\'s API account identity from response document')
+                eprint('failed loading caller\'s API account identity as an object from response document')
                 raise(e)
         else:
             try:
@@ -603,11 +614,10 @@ class Organization:
 
         if response_code == STATUS_CODES.codes.OK: # HTTP 200
             try:
-                embedded = response.json
+                embedded = response.json()
             except ValueError:
                 logging.error("response is not JSON")
                 raise ValueError("response is not JSON")
-            logging.debug(str(embedded))
             try:
                 networks = embedded['_embedded'][RESOURCES['networks']['embedded']]
             except KeyError:

@@ -6,26 +6,34 @@ import re  # regex
 import sys
 import time
 from unicodedata import name  # enforce a timeout; sleep
-from uuid import UUID  # validate UUIDv4 strings
 
 from .utility import (DC_PROVIDERS, EXCLUDED_PATCH_PROPERTIES, HOST_PROPERTIES,
                       MAJOR_REGIONS, RESOURCES, STATUS_CODES, VALID_SEPARATORS,
                       VALID_SERVICE_PROTOCOLS, Utility, docstring_parameters,
-                      eprint, http, plural, singular)
+                      eprint, http, is_uuidv4, plural, singular)
 
 utility = Utility()
 
 class Network:
     """Describe and use a Network."""
 
-    def __init__(self, NetworkGroup: object, network_id: str=None, network_name: str=None):
+    def __init__(self, NetworkGroup: object, network_id: str=None, network_name: str=None, network: str=None):
         """Initialize Network.
         
         :param obj NetworkGroup: required parent Network Group of this Network
+        :param str network: optional identifier to resolve as UUID or name, ignored if network_id or network_name
         :param str network_name: optional name of the network to describe and use
         :param str network_id: optional UUID of the network to describe and use
         """
         self.session = NetworkGroup.session
+
+        if (not network_id and not network_name) and network:
+            if is_uuidv4(network):
+                network_id = network
+            else:
+                network_name = network
+        elif (network_id or network_name) and network:
+            logging.warn("ignoring network identifier '%s' because network_id or network_name were provided", network)
 
         if network_id:
             self.describe = self.get_network_by_id(network_id)
@@ -238,10 +246,14 @@ class Network:
                     entity = entity[1:]
 
                 # if UUIDv4 then resolve to name, else verify the named entity exists 
-                try:
-                    UUID(entity, version=4) # assigned below under "else" if already a UUID
-                except ValueError:
-                    # else assume is a name and resolve to ID
+                if is_uuidv4(entity): # assigned below under "else" if already a UUID
+                    try:
+                        name_lookup = self.get_resource(type=singular(type),id=entity)
+                        entity_name = name_lookup['name']
+                    except Exception as e:
+                        raise Exception('ERROR: Failed to find exactly one {type} with ID "{id}". Caught exception: {e}'.format(type=singular(type), id=entity, e=e))
+                    else: valid_entities.append('@'+entity_name) # is an existing endpoint's name resolved from UUID
+                else:
                     try: 
                         name_lookup = self.get_resources(type=plural(type),name=entity)[0]
                         entity_name = name_lookup['name']
@@ -249,13 +261,7 @@ class Network:
                         raise Exception('ERROR: Failed to find exactly one {type} named "{name}". Caught exception: {e}'.format(type=singular(type), name=entity, e=e))
                     # append to list after successfully resolving name to ID
                     else: valid_entities.append('@'+entity_name) # is an existing entity's name
-                else:
-                    try:
-                        name_lookup = self.get_resource(type=singular(type),id=entity)
-                        entity_name = name_lookup['name']
-                    except Exception as e:
-                        raise Exception('ERROR: Failed to find exactly one {type} with ID "{id}". Caught exception: {e}'.format(type=singular(type), id=entity, e=e))
-                    else: valid_entities.append('@'+entity_name) # is an existing endpoint's name resolved from UUID
+
         return(valid_entities)
 
     def get_data_center_by_id(self, id: str):
@@ -1182,8 +1188,7 @@ class Network:
                 elif egress_router_id and not endpoints:
                     body['modelType'] = "TunnelerToEdgeRouter"
                     # check if UUIDv4
-                    try: UUID(egress_router_id, version=4)
-                    except ValueError:
+                    if not is_uuidv4(egress_router_id):
                         # else assume is a name and resolve to ID
                         try: 
                             name_lookup = self.get_resources(type="edge-routers",name=egress_router_id)[0]
@@ -1214,9 +1219,14 @@ class Network:
                             endpoint = endpoint[1:]
 
                         # if UUIDv4 then resolve to name, else verify the named endpoint exists 
-                        try:
-                            UUID(endpoint, version=4) # assigned below under "else" if already a UUID
-                        except ValueError:
+                        if is_uuidv4(endpoint): # assigned below under "else" if already a UUID
+                            try:
+                                name_lookup = self.get_resource(type="endpoint",id=endpoint)
+                                endpoint_name = name_lookup['name']
+                            except Exception as e:
+                                raise Exception('ERROR: Failed to find exactly one hosting endpoint with ID "{}". Caught exception: {}'.format(endpoint, e))
+                            else: bind_endpoints += ['@'+endpoint_name]
+                        else:
                             # else assume is a name and resolve to ID
                             try: 
                                 name_lookup = self.get_resources(type="endpoints",name=endpoint)[0]
@@ -1224,13 +1234,6 @@ class Network:
                             except Exception as e:
                                 raise Exception('ERROR: Failed to find exactly one hosting endpoint named "{}". Caught exception: {}'.format(endpoint, e))
                             # append to list after successfully resolving name to ID
-                            else: bind_endpoints += ['@'+endpoint_name] 
-                        else:
-                            try:
-                                name_lookup = self.get_resource(type="endpoint",id=endpoint)
-                                endpoint_name = name_lookup['name']
-                            except Exception as e:
-                                raise Exception('ERROR: Failed to find exactly one hosting endpoint with ID "{}". Caught exception: {}'.format(endpoint, e))
                             else: bind_endpoints += ['@'+endpoint_name] 
                 body['model']['bindEndpointAttributes'] = bind_endpoints
 
@@ -1801,10 +1804,14 @@ class Network:
                         endpoint = endpoint[1:]
 
                     # if UUIDv4 then resolve to name, else verify the named endpoint exists 
-                    try:
-                        UUID(endpoint, version=4) # assigned below under "else" if already a UUID
-                    except ValueError:
-                        # else assume is a name and resolve to ID
+                    if is_uuidv4(endpoint): # assigned below under "else" if already a UUID
+                        try:
+                            name_lookup = self.get_resource(type="endpoint",id=endpoint)
+                            endpoint_name = name_lookup['name']
+                        except Exception as e:
+                            raise Exception('ERROR: Failed to find exactly one hosting endpoint with ID "{}". Caught exception: {}'.format(endpoint, e))
+                        else: bind_endpoints.append('@'+endpoint_name) # is an existing endpoint's name resolved from UUID
+                    else:
                         try: 
                             name_lookup = self.get_resources(type="endpoints",name=endpoint)[0]
                             endpoint_name = name_lookup['name']
@@ -1812,13 +1819,6 @@ class Network:
                             raise Exception('ERROR: Failed to find exactly one hosting endpoint named "{}". Caught exception: {}'.format(endpoint, e))
                         # append to list after successfully resolving name to ID
                         else: bind_endpoints.append('@'+endpoint_name) # is an existing endpoint's name
-                    else:
-                        try:
-                            name_lookup = self.get_resource(type="endpoint",id=endpoint)
-                            endpoint_name = name_lookup['name']
-                        except Exception as e:
-                            raise Exception('ERROR: Failed to find exactly one hosting endpoint with ID "{}". Caught exception: {}'.format(endpoint, e))
-                        else: bind_endpoints.append('@'+endpoint_name) # is an existing endpoint's name resolved from UUID
 
             headers = { 
                 "authorization": "Bearer " + self.session.token 

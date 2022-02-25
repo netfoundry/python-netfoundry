@@ -7,24 +7,27 @@ Usage::
 
 PYTHON_ARGCOMPLETE_OK
 """
-
 import argparse
+#import io
 import os
 import platform
 import shutil
 import sys
 import tempfile
 from base64 import b64decode
-from json import dumps as json_dumps, loads as json_loads
+#from contextlib import redirect_stdout
+from json import dumps as json_dumps
+from json import loads as json_loads
 from subprocess import call
 
-from cryptography.hazmat.primitives.serialization import pkcs7, Encoding
+from cryptography.hazmat.primitives.serialization import Encoding, pkcs7
 from milc import set_metadata
 from requests import get
-from yaml import dump as yaml_dumps, full_load as yaml_loads
+from yaml import dump as yaml_dumps
+from yaml import full_load as yaml_loads
 
 from ._version import get_versions
-from .demo import main as nfdemo
+#from .demo import main as nfdemo
 from .network import Network
 from .network_group import NetworkGroup
 from .organization import Organization
@@ -35,7 +38,6 @@ from milc import cli, questions
 
 # TODO: enable operating on config ini file
 #import milc.subcommand.config
-
 
 utility = Utility()
 
@@ -51,23 +53,67 @@ class StoreDictKeyPair(argparse.Action):
         setattr(namespace, self.dest, my_dict)
 
 @cli.argument('-c', '--credentials', help='API account JSON file from web console', default=None)
-@cli.argument("-o", "--organization", help="label of an alternative organization (default is caller's org)" )
-@cli.argument('-n', '--network', dest='network_name', arg_only=True, help='caseless name of the network to manage')
-@cli.argument("-g", "--network-group", arg_only=True, help="shortname or ID of a network group to search for network_name")
-@cli.argument('-y', '--yes', action='store_true', arg_only=True, help='Answer yes to all questions.')
+@cli.argument("-o", "--organization", help="label or ID of an alternative organization (default is caller's org)" )
+@cli.argument('-n', '--network', help='caseless name of the network to manage')
+@cli.argument("-g", "--network-group", help="shortname or ID of a network group to search for network_identifier")
+@cli.argument('-o','--output', help="objects formats suppress console messages", default="yaml", choices=["yaml","json","text"])
+@cli.argument('-y', '--yes', action='store_true', arg_only=True, help='answer yes to potentially-destructive operations')
 @cli.argument('-p', '--proxy', help="like http://localhost:8080 or socks5://localhost:9046", default=None)
 @cli.entrypoint('configure the CLI to manage a network')
 def main(cli):
     """Configure the CLI to manage a network."""
+    organization = use_organization(
+        cli.config.general.organization if cli.config.general.organization else None
+    )
+    if cli.config.general.network_group and cli.config.general.network:
+        cli.log.debug("configuring network %s in group %s", cli.config.general.network, cli.config.general.network_group)
+        network, network_group = use_network(
+            organization=organization,
+            group=cli.config.general.network_group,
+            network=cli.config.general.network
+        )
+    elif cli.config.general.network:
+        cli.log.debug("configuring network %s and local group if unique name for this organization", cli.config.general.network)
+        network, network_group = use_network(
+            organization=organization,
+            network=cli.config.general.network
+        )
+    elif cli.config.general.network_group:
+        cli.log.debug("configuring network group %s", cli.config.general.network_group)
+        network_group = use_network_group(organization, group=cli.config.general.network_group)
+        network = None
+    else:
+        cli.log.debug("not configuring network or network group")
+        network, network_group = None, None
+
+    summary = dict()
+
+    summary["caller"] = whoami(cli, echo=False)
+    summary["organization"] = organization.describe
+    if network_group:
+        summary["network_group"] = network_group.describe
+    if network:
+        summary["network"] = network.describe
+    if cli.config.general.output == "yaml":
+        cli.echo(
+            '{fg_lightgreen_ex}'
+            +yaml_dumps(summary, indent=4)
+        )
 
 @cli.subcommand('get caller identity')
-def whoami(cli):
+def whoami(cli, echo: bool=True):
     """Get caller identity."""
     organization = use_organization()
     caller = organization.caller
     caller['label'] = organization.label
     caller['environment'] = organization.environment
-    cli.echo(yaml_dumps(caller))
+    if echo:
+        cli.echo(
+            '{style_normal}{fg_lightblue_ex}'
+            +yaml_dumps(caller)
+        )
+    else:
+        return caller
 
 @cli.argument('-w','--wait', help='seconds to wait for process execution to finish', default=0)
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
@@ -94,13 +140,13 @@ def create(cli):
 
     if cli.args.resource_type == "network":
         if cli.config.general.network_group:
-            network_group = use_network_group(organization)
+            network_group = use_network_group(organization=organization)
         elif len(organization.get_network_groups_by_organization()) > 1:
             cli.log.error("specify --network-group because there is more than one available to caller's identity")
             raise SystemExit
         else:
             network_group_id = organization.get_network_groups_by_organization()[0]['id']
-            network_group = use_network_group(organization, id=network_group_id)
+            network_group = use_network_group(organization=organization, id=network_group_id)
         resource = network.create_resource(type=cli.args.resource_type, properties=create_object, wait=cli.config.create.wait)
         if cli.config.create.wait:
             spinner.stop()
@@ -110,15 +156,13 @@ def create(cli):
         if cli.config.create.wait:
             spinner.stop()
 
-@cli.argument('-f','--filter', help="output filter as jq filter expression", default='.')
-@cli.argument('-o','--output', help="output format", default="text", choices=["text","json","yaml"])
 @cli.argument('-q','--query', arg_only=True, action=StoreDictKeyPair, help="query params as k=v,k=v comma-separated pairs", default=dict())
 @cli.argument('-H','--headers', default=True, action='store_boolean', help='print column headers')
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=RESOURCES.keys())
 @cli.subcommand('find resources as lists')
 def list(cli):
     """Find resources as lists."""
-    if cli.config.list.output == "text" and not sys.stdout.isatty():
+    if not sys.stdout.isatty():
         cli.log.warn("nfctl does not have a stable CLI interface. Use with caution in scripts.")
 
     organization = use_organization()
@@ -131,9 +175,9 @@ def list(cli):
         elif len(matches) >= 1:
             cli.log.debug("found %d %s matching '%s'", len(matches), cli.args.resource_type, str(cli.args.query))
 
-        if cli.config.list.output == "text":
+        if cli.config.general.output == "text":
             if not cli.config.list.filter == '.':
-                cli.log.warn("ignoring custom output filter '%s' because output format is '%s'", cli.config.list.filter, cli.config.list.output)
+                cli.log.warn("ignoring custom output filter '%s' because output format is '%s'", cli.config.list.filter, cli.config.general.output)
             columns = {
                 "name": 48,
                 "status": 20,
@@ -149,9 +193,9 @@ def list(cli):
                 )
             for match in matches:
                 cli.echo('{style_normal}{fg_white}'+'{: >48} {: ^20} {: >20}'.format(match['name'], match['status'], match['id']))
-        elif cli.config.list.output == "yaml":
+        elif cli.config.general.output == "yaml":
             cli.echo(yaml_dumps(matches, indent=4, default_flow_style=False))
-        elif cli.config.list.output == "json":
+        elif cli.config.general.output == "json":
             cli.echo(json_dumps(matches, indent=4))
     else:
         network, network_group = use_network(organization)
@@ -161,7 +205,7 @@ def list(cli):
             sys.exit(0)
         else:
             cli.log.debug("found at least one %s '%s'", cli.args.resource_type, cli.args.query)
-            if cli.config.list.output == "text":
+            if cli.config.general.output == "text":
                 columns = {
                     "name": 32,
                     "zitiId": 10,
@@ -177,9 +221,9 @@ def list(cli):
                     )
                 for match in matches:
                     cli.echo('{style_normal}{fg_white}'+'{: <48} {: ^12} {: >37}'.format(match['name'], match['zitiId'], match['id']))
-            elif cli.config.list.output == "yaml":
+            elif cli.config.general.output == "yaml":
                 cli.echo(yaml_dumps(matches, indent=4, default_flow_style=False))
-            elif cli.config.list.output == "json":
+            elif cli.config.general.output == "json":
                 cli.echo(json_dumps(matches, indent=4))
 
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
@@ -193,17 +237,17 @@ def delete(cli):
     if cli.args.resource_type == "network":
         if cli.args.query is not None:
             cli.log.warn("ignoring name='%s' because this operation applies to the entire network that is already selected", str(cli.args.query))
-        if cli.args.yes or questions.yesno("confirm delete network \"{name}\"".format(name=network.name), default=False):
+        if cli.args.yes or questions.yesno("confirm delete network '{name}'".format(name=network.name), default=False):
             spinner = cli.spinner(text='deleting {net}'.format(net=network.name), spinner='dots12')
             spinner.start()
             network.delete_network(progress=False)
             spinner.stop()
         else:
-            cli.echo("not deleting network \"{name}\".".format(name=network.name))
+            cli.echo("not deleting network '{name}'.".format(name=network.name))
     else:
         if cli.args.query is None:
             cli.log.error("need query to select a resource")
-            raise Exception()
+            exit(1)
         matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
         if len(matches) == 0:
             cli.log.info("found no %s '%s'", cli.args.resource_type, str(cli.args.query))
@@ -270,8 +314,9 @@ def login(cli):
         os.system(ziti_cli+' edge login '+ziti_ctrl_ip+' -u '+secrets['zitiUserId']+' -p '+secrets['zitiPassword']+' -c '+well_known_pem)
         os.system(ziti_cli+' edge --help')
     
-def use_organization():
+def use_organization(credentials: str=None, organization: str=None):
     """Assume an identity in an organization."""
+    organization_identifier = organization
     if 'NETFOUNDRY_API_TOKEN' in os.environ:
         cli.log.debug("using bearer token from environment NETFOUNDRY_API_TOKEN")
     elif 'NETFOUNDRY_API_ACCOUNT' in os.environ:
@@ -285,63 +330,61 @@ def use_organization():
 
     # use the session with some organization, default is to use the first and there's typically only one
     organization = Organization(
-        credentials=cli.config.general.credentials if cli.config.general.credentials else None,
-        organization_label=cli.config.general.organization if cli.config.general.organization else None,
+        credentials=credentials if credentials else None,
+        organization=organization_identifier if organization_identifier else None,
         expiry_minimum=0,
         proxy=cli.config.general.proxy
     )
     cli.log.debug("organization label is %s.", organization.label)
-
     return organization
 
-def use_network_group(organization: object, id: str=None):
-    """Use a network group."""
-    if cli.config.general.network_group or id:
-        network_group = NetworkGroup(
-            organization,
-            network_group_id=id if id else None
-            network_group_name=cli.config.general.network_group if cli.config.general.network_group else None
-        )
+def use_network_group(organization: object, group: str=None):
+    """
+    Use a network group.
+    
+    :param str group: name or UUIDv4 of gropu to use
+    """
+    # module will use first available group if not specified, and typically there is only one
+    network_group = NetworkGroup(
+        organization,
+        group=group if group else None,
+    )
+    cli.log.debug("network group is %s", network_group.name)
     return network_group
 
-def use_network(organization: object):
+def use_network(organization: object, network: str=None, group: str=None):
     """Use a network."""
-    if not cli.config.general.network_name:
-        cli.log.error("need --network-name to configure a network")
-        raise Exception()
-    if cli.config.general.network_group:
-        network_group = NetworkGroup(
-            organization,
-            network_group_name=cli.config.general.network_group
-        )
+    network_identifier = network
+    if not network_identifier:
+        cli.log.error("need --network to configure a network")
+        exit(1)
+    if group:
+        network_group = use_network_group(organization=organization, group=group)
         existing_networks = network_group.networks_by_normal_name()
-        if not utility.normalize_caseless(cli.config.general.network_name) in existing_networks.keys():
-            cli.log.error("failed to find a network named \"{name}\".".format(name=cli.config.general.network_name))
-            raise Exception()
+        if not utility.normalize_caseless(network_identifier) in existing_networks.keys():
+            cli.log.error("failed to find a network named '{name}'.".format(name=network_identifier))
+            exit(1)
     else:
-        existing_count = organization.count_networks_with_name(cli.config.general.network_name)
+        existing_count = organization.count_networks_with_name(network_identifier)
         if existing_count == 1:
-            existing_networks = organization.get_networks_by_organization(name=cli.config.general.network_name)
+            existing_networks = organization.get_networks_by_organization(name=network_identifier)
             existing_network = existing_networks[0]
-            network_group = NetworkGroup(
-                organization,
-                network_group_id=existing_network['networkGroupId']
-            )
+            network_group = use_network_group(organization, group=existing_network['networkGroupId'])
         elif existing_count > 1:
-            cli.log.error("there were {count} networks named \"{name}\" visible to your identity. Try filtering with '--network-group'.".format(count=existing_count, name=cli.config.general.network_name))
-            raise Exception()
+            cli.log.error("there were {count} networks named '{name}' visible to your identity. Try filtering with '--network-group'.".format(count=existing_count, name=network_identifier))
+            exit(1)
         else:
-            cli.log.error("failed to find a network named \"{name}\".".format(name=cli.config.general.network_name))
-            raise Exception()
+            cli.log.error("failed to find a network named '{name}'.".format(name=network_identifier))
+            exit(1)
 
     # use the Network
-    network = Network(network_group, network_name=cli.config.general.network_name)
-    if cli.config.list.output == "text":
-        spinner = cli.spinner(text='waiting for {net} to have status PROVISIONED'.format(net=cli.config.general.network_name), spinner='dots12')
+    network = Network(network_group, network=network_identifier)
+    if cli.config.general.output == "text":
+        spinner = cli.spinner(text='waiting for {net} to have status PROVISIONED'.format(net=network_identifier), spinner='dots12')
         spinner.start()
         network.wait_for_status("PROVISIONED",wait=999,progress=False)
         spinner.stop()
-    return network
+    return network, network_group
 
 def edit_template(template: object):
     """

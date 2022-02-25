@@ -1,19 +1,25 @@
 """Use a network group and find its networks."""
 
 import json
+import logging
 
-from .utility import RESOURCES, STATUS_CODES, Utility, eprint, http
+from .utility import RESOURCES, STATUS_CODES, Utility, eprint, http, is_uuidv4
 
 utility = Utility()
 
 class NetworkGroup:
-    """use a Network Group by name or ID.
+    """use a network group by name or ID.
     
     The default is to use the first network group available to the organization of the caller.
     """
 
-    def __init__(self, Organization: object, network_group_id: str=None, network_group_name: str=None):
+    def __init__(self, Organization: object, network_group_id: str=None, network_group_name: str=None, group: str=None):
         """Initialize the network group class with a group name or ID."""
+        if (not network_group_id and not network_group_name) and group:
+            if is_uuidv4(group):
+                network_group_id = group
+            else:
+                network_group_name = group
         if network_group_id:
             self.network_group_id = network_group_id
             self.network_group_name = [ ng['organizationShortName'] for ng in Organization.network_groups if ng['id'] == network_group_id ][0]
@@ -26,22 +32,22 @@ class NetworkGroup:
             else:
                 raise Exception("ERROR: there was not exactly one network group matching the name \"{}\"".format(network_group_name))
         elif len(Organization.network_groups) > 0:
-            # first Network Group is typically the only Network Group
+            # first network group is typically the only network group
             self.network_group_id = Organization.network_groups[0]['id']
             self.network_group_name = Organization.network_groups[0]['organizationShortName']
             # warn if there are other groups
             if len(Organization.network_groups) > 1:
-                eprint("WARN: Using first Network Group {:s} and ignoring {:d} other(s) e.g. {:s}, etc...".format(
+                logging.warn("using first network group {:s} and ignoring {:d} other(s) e.g. {:s}, etc...".format(
                     self.network_group_name,
                     len(Organization.network_groups) - 1,
                     Organization.network_groups[1]['organizationShortName']
                 ))
             elif len(Organization.network_groups) == 1:
-                eprint("WARN: Using the default Network Group: {:s}".format(
+                logging.debug("using the only available network group: {:s}".format(
                     self.network_group_name
                 ))
         else:
-            raise Exception("ERROR: need at least one Network Group in organization")
+            raise Exception("need at least one network group in organization")
 
         self.session = Organization
         self.describe = Organization.get_network_group(self.network_group_id)
@@ -200,7 +206,7 @@ class NetworkGroup:
         Create a network in this network group.
 
         :param name: required network name
-        :param network_group: optional Network Group ID
+        :param network_group: optional network group ID
         :param location: optional data center region name in which to create
         :param version: optional product version string like 7.3.17
         :param size: optional network configuration metadata name from /core/v2/network-configs e.g. "medium"
@@ -285,7 +291,7 @@ class NetworkGroup:
             elif network_name and network_name in networks_by_name.keys():
                 network_id = networks_by_name[network_name]
         except:
-            raise Exception("ERROR: need one of network_id or network_name for a Network in this Network Group: {:s}".format(self.name))
+            raise Exception("ERROR: need one of network_id or network_name for a Network in this network group: {:s}".format(self.name))
 
         try:
             headers = { "authorization": "Bearer " + self.session.token }
