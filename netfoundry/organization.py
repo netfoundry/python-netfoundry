@@ -160,10 +160,10 @@ class Organization:
         # renew token if not existing or imminent expiry, else continue
         if not self.token or expiry_offset < expiry_minimum:
             if not credentials_configured:
-                logging.error("credentials needed to renew expired or imminently-expiring token")
+                logging.error("credentials needed to renew token")
                 exit(1)
             else:
-                logging.warn("renewing expired or imminently-expiring token")
+                logging.debug("renewing token")
 
             # extract the environment name from the authorization URL aka token API endpoint
             self.environment = re.sub(r'https://netfoundry-([^-]+)-.*', r'\1', token_endpoint, re.IGNORECASE)
