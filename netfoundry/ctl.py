@@ -68,7 +68,6 @@ class StoreListKeys(argparse.Action):
 @cli.argument("-O", "--organization", help="label or ID of an alternative organization (default is caller's org)" )
 @cli.argument('-N', '--network', help='caseless name of the network to manage')
 @cli.argument("-G", "--network-group", help="shortname or ID of a network group to search for network_identifier")
-@cli.argument('-H','--headers', default=True, action='store_boolean', help='print column headers')
 @cli.argument('-O','--output', help="object formats suppress console messages", default="text", choices=['text', 'yaml','json'])
 @cli.argument('-Y', '--yes', action='store_true', arg_only=True, help='answer yes to potentially-destructive operations')
 @cli.argument('-P', '--proxy', help="like http://localhost:8080 or socks5://localhost:9046", default=None)
@@ -212,6 +211,8 @@ def create(cli):
         if cli.config.create.wait:
             spinner.stop()
 
+@cli.argument('-b','--borders', default=True, action='store_boolean', help='print cell borders in text tables')
+@cli.argument('-H','--headers', default=True, action='store_boolean', help='print column headers in text tables')
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)", default=['name','id','createdBy','createdAt','status','zitiId'])
 @cli.argument('-q','--query', arg_only=True, action=StoreDictKeyPair, help="query params as k=v,k=v comma-separated pairs", default=dict())
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=RESOURCES.keys())
@@ -256,8 +257,15 @@ def list(cli):
         filtered_matches.append(filtered_match)
 
     if cli.config.general.output == "text":
-        table_headers = filtered_matches[0].keys()
-        cli.echo(tabulate(tabular_data=[match.values() for match in filtered_matches], headers=table_headers, tablefmt="github"))
+        if cli.config.list.headers:
+            table_headers = filtered_matches[0].keys()
+        else:
+            table_headers = []
+        if cli.config.list.borders:
+            table_borders = "github"
+        else:
+            table_borders = "plain"
+        cli.echo(tabulate(tabular_data=[match.values() for match in filtered_matches], headers=table_headers, tablefmt=table_borders))
     elif cli.config.general.output == "yaml":
         cli.echo(yaml_dumps(matches, indent=4, default_flow_style=False))
     elif cli.config.general.output == "json":
