@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re  # regex
+import stat
 import time  # enforce a timeout; sleep
 from pathlib import Path
 
@@ -65,18 +66,25 @@ class Organization:
         config_dir_path = user_config_path(appname='netfoundry')
 
         try:
-            cache_dir_path.mkdir(parents=True, exist_ok=True)
+            # create and correct mode to 0o700
+            cache_dir_path.mkdir(mode=stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR, parents=True, exist_ok=True)
+            cache_dir_path.chmod(mode=stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR)
         except:
             logging.error("failed to create cache dir '%s'", cache_dir_path.resolve())
             raise
+        else:
+            cache_dir_stats = os.stat(cache_dir_path)
+            logging.debug("token cache dir exists with mode %s", stat.filemode(cache_dir_stats.st_mode))
         token_cache_file_path = Path(cache_dir_path.resolve() / token_cache_file_name)
         logging.debug("cache file path is computed '%s'", token_cache_file_path.resolve())
 
         # if not token then use standard env var if defined
         if token is not None:
             self.token = token
+            logging.debug("got token as param to Organization")
         elif 'NETFOUNDRY_API_TOKEN' in os.environ:
             self.token = os.environ['NETFOUNDRY_API_TOKEN']
+            logging.debug("got token from env NETFOUNDRY_API_TOKEN")
         else:
             try:
                 self.token = token_cache_file_path.read_text()
@@ -86,7 +94,8 @@ class Organization:
             except Exception as e:
                 logging.debug("failed to read cache file '%s', got %s", token_cache_file_path.resolve(), e)
             else:
-                logging.debug("read token from '%s'", token_cache_file_path.resolve())
+                cache_file_stats = os.stat(token_cache_file_path)
+                logging.debug("read token as %dB from cache file '%s' with mode %s", len(self.token), token_cache_file_path.resolve(), stat.filemode(cache_file_stats.st_mode))
 
 
         # if the token was found then extract the expiry
@@ -135,7 +144,7 @@ class Organization:
         if not credentials_configured:
             # if valid relative or absolute path to creds file, else search the default dirs
             if os.path.exists(self.credentials):
-                logging.info("using credentials in %s", self.credentials)
+                logging.debug("searching for credentials file '%s'", self.credentials)
             else:
                 default_creds_scopes = [
                     {
@@ -253,6 +262,8 @@ class Organization:
         except: raise
 
         try:
+            # set file mode 0o600 at creation
+            token_cache_file_path.touch(mode=stat.S_IRUSR|stat.S_IWUSR)
             token_cache_file_path.write_text(self.token)
         except:
             logging.warn("failed to cache token in '%s'", token_cache_file_path.resolve())
