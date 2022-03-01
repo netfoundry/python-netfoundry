@@ -197,6 +197,8 @@ class Organization:
 
         # renew token if not existing or imminent expiry, else continue
         if not self.token or self.expiry_seconds < expiry_minimum:
+            if self.token and self.expiry_seconds < expiry_minimum:
+                logging.warn("token expiry %ds is less than configured minimum %ds", self.expiry_seconds, expiry_minimum)
             if not credentials_configured:
                 logging.error("credentials needed to renew token")
                 raise NFAPINoCredentials
@@ -367,6 +369,45 @@ class Organization:
                 )
 
         return(caller)
+
+    def get_identities(self, **kwargs):
+        """Find identities.
+
+        :param str kwargs: filter results by logical AND query parameters
+        """
+        params = dict()
+        for param in kwargs.keys():
+            params[param] = kwargs[param]
+        # try the API account endpoint first, then the endpoint for human, interactive users
+        try:
+            headers = { "authorization": "Bearer " + self.token }
+            response = http.get(
+                self.audience+'identity/v1/identities',
+                proxies=self.proxies,
+                verify=self.verify,
+                headers=headers,
+                params=params
+            )
+            response_code = response.status_code
+        except:
+            raise
+
+        if response_code == STATUS_CODES.codes.OK: # HTTP 200
+            try:
+                identities = response.json()
+            except ValueError as e:
+                logging.error('failed loading identities as an object from response document')
+                raise(e)
+        else:
+            raise Exception(
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    STATUS_CODES._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
+                )
+            )
+
+        return(identities)
 
     def get_organizations(self, **kwargs):
         """Find organizations.

@@ -124,6 +124,9 @@ RESOURCES = {
     'network-controllers': {
         'embedded': "networkControllerList",
     },
+    'identities': {
+        'embedded': "",
+    },
     'endpoints': {
         'embedded': "endpointList",
         'create_responses': ["ACCEPTED"],

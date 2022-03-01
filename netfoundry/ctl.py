@@ -159,10 +159,10 @@ def whoami(cli, echo: bool=True, organization: object=None):
     caller['label'] = organization.label
     caller['environment'] = organization.environment
     if echo:
-        cli.echo(
-            '{style_normal}{fg_lightblue_ex}'
-            +yaml_dumps(caller)
-        )
+        if cli.config.general.output in ["yaml","text"]:
+            cli.echo(yaml_dumps(caller, indent=4, default_flow_style=False))
+        elif cli.config.general.output == "json":
+            cli.echo(json_dumps(caller, indent=4))
     else:
         return caller
 
@@ -213,7 +213,7 @@ def create(cli):
 
 @cli.argument('-b','--borders', default=True, action='store_boolean', help='print cell borders in text tables')
 @cli.argument('-H','--headers', default=True, action='store_boolean', help='print column headers in text tables')
-@cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)", default=['name','id','createdBy','createdAt','status','zitiId'])
+@cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)", default=['name','label','organizationShortName','id','createdBy','createdAt','status','zitiId'])
 @cli.argument('-q','--query', arg_only=True, action=StoreDictKeyPair, help="query params as k=v,k=v comma-separated pairs", default=dict())
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=RESOURCES.keys())
 @cli.subcommand('find resources as lists')
@@ -230,6 +230,8 @@ def list(cli):
         matches = organization.get_organizations(**cli.args.query)
     elif cli.args.resource_type == "network-groups":
         matches = organization.get_network_groups_by_organization(**cli.args.query)
+    elif cli.args.resource_type == "identities":
+        matches = organization.get_identities(**cli.args.query)
     elif cli.args.resource_type == "networks":
         if cli.config.general.network_group:
             network_group = use_network_group(organization, group=cli.config.general.network_group)
