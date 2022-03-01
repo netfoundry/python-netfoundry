@@ -8,6 +8,7 @@ import time  # enforce a timeout; sleep
 from pathlib import Path
 
 import jwt
+from platformdirs import user_cache_path, user_config_path
 
 from .utility import RESOURCES, STATUS_CODES, Utility, eprint, http, is_uuidv4
 
@@ -59,13 +60,34 @@ class Organization:
         token_endpoint = None
         credentials_configured = False
 
+        cache_dir_path = user_cache_path(appname='netfoundry')
+        token_cache_file_name = 'access_token'
+        config_dir_path = user_config_path(appname='netfoundry')
+
+        try:
+            cache_dir_path.mkdir(parents=True, exist_ok=True)
+        except:
+            logging.error("failed to create cache dir '%s'", cache_dir_path.resolve())
+            raise
+        token_cache_file_path = Path(cache_dir_path.resolve() / token_cache_file_name)
+        logging.debug("cache file path is computed '%s'", token_cache_file_path.resolve())
+
         # if not token then use standard env var if defined
         if token is not None:
             self.token = token
         elif 'NETFOUNDRY_API_TOKEN' in os.environ:
             self.token = os.environ['NETFOUNDRY_API_TOKEN']
         else:
-            self.token = None
+            try:
+                self.token = token_cache_file_path.read_text()
+            except FileNotFoundError as e:
+                logging.debug("cache file '%s' not found", token_cache_file_path.resolve())
+                self.token = None
+            except Exception as e:
+                logging.debug("failed to read cache file '%s', got %s", token_cache_file_path.resolve(), e)
+            else:
+                logging.debug("read token from '%s'", token_cache_file_path.resolve())
+
 
         # if the token was found then extract the expiry
         if self.token:
@@ -80,7 +102,7 @@ class Organization:
                 expiry_offset = expiry - epoch
                 logging.debug("bearer token expiry in %ds", expiry_offset)
         else:
-            logging.debug("no bearer token found in param or env")
+            logging.debug("no bearer token found in param, env, or cache")
 
         # find credentials from param or env so we can renew the token later
         if credentials is not None:
@@ -111,38 +133,47 @@ class Organization:
 
         # continue if we already found the credentials in env
         if not credentials_configured:
-            logging.debug("searching for credentials file %s", self.credentials)
-            # continue if valid path to creds file, else search the default dirs
-            if not os.path.exists(self.credentials):
-                default_creds_dirs = [
+            # if valid relative or absolute path to creds file, else search the default dirs
+            if os.path.exists(self.credentials):
+                logging.info("using credentials in %s", self.credentials)
+            else:
+                default_creds_scopes = [
                     {
                         "scope": "project",
-                        "base": str(Path.cwd())
+                        "path": Path.cwd()
                     },
                     {
                         "scope": "user",
-                        "base": str(Path.home())+"/.netfoundry"
+                        "path": Path.home() / ".netfoundry"
                     },
                     {
                         "scope": "device",
-                        "base": "/netfoundry"
-                    }
+                        "path": Path("/netfoundry")
+                    },
+                    {
+                        "scope": "site",
+                        "path": config_dir_path
+                    },
                 ]
-                for link in default_creds_dirs:
-                    candidate = link['base']+"/"+self.credentials
-                    if os.path.exists(candidate):
+                for scope in default_creds_scopes:
+                    candidate = scope['path'] / self.credentials
+                    if candidate.exists():
                         logging.debug("found credentials file %s in %s-default directory",
-                            candidate,
-                            link['scope'],
+                            candidate.resolve(),
+                            scope['scope'],
                         )
-                        self.credentials = candidate
+                        self.credentials = candidate.resolve()
                         break
-            else:
-                logging.info("using credentials in %s", self.credentials)
+                    else:
+                        logging.debug("no credentials file %s in %s-default directory",
+                            candidate.resolve(),
+                            scope['scope'],
+                        )
 
             try: 
-                file = open(self.credentials)
-            except FileNotFoundError: 
+                file = open(self.credentials, 'r')
+            except FileNotFoundError:
+                logging.debug("failed to open credentials file '%s' for reading", self.credentials)
                 pass # this means we can't renew the token, but it's not fatal
             else:
                 account = json.load(file)
@@ -150,12 +181,10 @@ class Organization:
                 client_id = account['clientId']
                 password = account['password']
                 credentials_configured = True
-
-        else:
-            logging.debug("credentials are configured %s", str(credentials_configured))
+                logging.debug("configured credentials from file '%s'", self.credentials)
 
         if not credentials_configured:
-            logging.warning("token renewal is disabled without API account credentials")
+            logging.warning("token renewal is disabled because API account credentials are not configured")
 
         # renew token if not existing or imminent expiry, else continue
         if not self.token or expiry_offset < expiry_minimum:
@@ -222,6 +251,14 @@ class Organization:
                 self.environment = re.sub(r'https://netfoundry-([^.]+)\.auth0\.com.*',r'\1',claim['iss'])
             self.audience = 'https://gateway.'+self.environment+'.netfoundry.io/'
         except: raise
+
+        try:
+            token_cache_file_path.write_text(self.token)
+        except:
+            logging.warn("failed to cache token in '%s'", token_cache_file_path.resolve())
+            import epdb; epdb.serve()
+        else:
+            logging.debug("cached token in '%s'", token_cache_file_path.resolve())
 
         # always resolve Network Groups so we can specify either name or ID when calling super()
         self.network_groups = self.get_network_groups_by_organization()
