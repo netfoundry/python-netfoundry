@@ -12,6 +12,7 @@ import jwt
 from platformdirs import user_cache_path, user_config_path
 
 from .utility import RESOURCES, STATUS_CODES, Utility, eprint, http, is_uuidv4
+from .exceptions import NFAPINoCredentials
 
 utility = Utility()
 
@@ -31,7 +32,7 @@ class Organization:
     """
 
     def __init__(self, 
-        credentials=None, 
+        credentials: str=None,
         organization: str=None, 
         organization_id: str=None, 
         organization_label: str=None,
@@ -55,7 +56,7 @@ class Organization:
                 self.verify = False
         
         epoch = None
-        expiry_offset = 0
+        self.expiry_seconds = 0
         client_id = None
         password = None
         token_endpoint = None
@@ -75,8 +76,8 @@ class Organization:
         else:
             cache_dir_stats = os.stat(cache_dir_path)
             logging.debug("token cache dir exists with mode %s", stat.filemode(cache_dir_stats.st_mode))
-        token_cache_file_path = Path(cache_dir_path.resolve() / token_cache_file_name)
-        logging.debug("cache file path is computed '%s'", token_cache_file_path.resolve())
+        self.token_cache_file_path = Path(cache_dir_path.resolve() / token_cache_file_name)
+        logging.debug("cache file path is computed '%s'", self.token_cache_file_path.resolve())
 
         # if not token then use standard env var if defined
         if token is not None:
@@ -87,15 +88,15 @@ class Organization:
             logging.debug("got token from env NETFOUNDRY_API_TOKEN")
         else:
             try:
-                self.token = token_cache_file_path.read_text()
+                self.token = self.token_cache_file_path.read_text()
             except FileNotFoundError as e:
-                logging.debug("cache file '%s' not found", token_cache_file_path.resolve())
+                logging.debug("cache file '%s' not found", self.token_cache_file_path.resolve())
                 self.token = None
             except Exception as e:
-                logging.debug("failed to read cache file '%s', got %s", token_cache_file_path.resolve(), e)
+                logging.debug("failed to read cache file '%s', got %s", self.token_cache_file_path.resolve(), e)
             else:
-                cache_file_stats = os.stat(token_cache_file_path)
-                logging.debug("read token as %dB from cache file '%s' with mode %s", len(self.token), token_cache_file_path.resolve(), stat.filemode(cache_file_stats.st_mode))
+                cache_file_stats = os.stat(self.token_cache_file_path)
+                logging.debug("read token as %dB from cache file '%s' with mode %s", len(self.token), self.token_cache_file_path.resolve(), stat.filemode(cache_file_stats.st_mode))
 
 
         # if the token was found then extract the expiry
@@ -106,10 +107,10 @@ class Organization:
                 logging.error("failed to parse bearer token as JWT")
                 raise
             else:
-                expiry = claim['exp']
+                self.expiry = claim['exp']
                 epoch = time.time()
-                expiry_offset = expiry - epoch
-                logging.debug("bearer token expiry in %ds", expiry_offset)
+                self.expiry_seconds = self.expiry - epoch
+                logging.debug("bearer token expiry in %ds", self.expiry_seconds)
         else:
             logging.debug("no bearer token found in param, env, or cache")
 
@@ -196,10 +197,10 @@ class Organization:
             logging.warning("token renewal is disabled because API account credentials are not configured")
 
         # renew token if not existing or imminent expiry, else continue
-        if not self.token or expiry_offset < expiry_minimum:
+        if not self.token or self.expiry_seconds < expiry_minimum:
             if not credentials_configured:
                 logging.error("credentials needed to renew token")
-                exit(1)
+                raise NFAPINoCredentials
             else:
                 logging.debug("renewing token")
 
@@ -263,13 +264,13 @@ class Organization:
 
         try:
             # set file mode 0o600 at creation
-            token_cache_file_path.touch(mode=stat.S_IRUSR|stat.S_IWUSR)
-            token_cache_file_path.write_text(self.token)
+            self.token_cache_file_path.touch(mode=stat.S_IRUSR|stat.S_IWUSR)
+            self.token_cache_file_path.write_text(self.token)
         except:
-            logging.warn("failed to cache token in '%s'", token_cache_file_path.resolve())
+            logging.warn("failed to cache token in '%s'", self.token_cache_file_path.resolve())
             import epdb; epdb.serve()
         else:
-            logging.debug("cached token in '%s'", token_cache_file_path.resolve())
+            logging.debug("cached token in '%s'", self.token_cache_file_path.resolve())
 
         # always resolve Network Groups so we can specify either name or ID when calling super()
         self.network_groups = self.get_network_groups_by_organization()
@@ -302,14 +303,21 @@ class Organization:
             self.describe = self.get_organization(id=self.caller['organizationId'])
 
         self.label = self.describe['label']
+        self.name = self.describe['name']
         self.id = self.describe['id']
 
         self.network_groups_by_name = dict()
         for group in self.network_groups:
             self.network_groups_by_name[group['name']] = group['id']
 
-    def network_groups(self):
-        return(self.get_network_groups_by_organization())
+    # END init
+
+    def logout(self):
+        """Logout from NF organization by removing the cached token file."""
+        try:
+            os.remove(self.token_cache_file_path)
+        except Exception as e:
+            logging.error("failed to remove cached token file '%s'", self.token_cache_file_path.resolve())
         
     def get_caller_identity(self):
         """Return the caller's identity object."""
@@ -518,8 +526,9 @@ class Organization:
                     response.text
                 )
             )
-
         return(network_groups)
+
+    network_groups = get_network_groups_by_organization
 
     def get_networks_by_organization(self, name: str=None, deleted: bool=False, **kwargs):
         """Find networks known to this organization.

@@ -72,12 +72,11 @@ class NetworkGroup:
     def networks_by_name(self):
         """Find networks in group by normalized name.
         
-        Normalize a search term by calling "Utility.normalize_caseless(text)".
+        Deprecated: use networks_by_normal_name
         """
-        utility = Utility()
         my_networks_by_name = dict()
         for net in self.session.get_networks_by_group(self.network_group_id):
-            my_networks_by_name[utility.normalize_caseless(net['name'])] = net['id']
+            my_networks_by_name[net['name']] = net['id']
         return(my_networks_by_name)
 
     def networks_by_normal_name(self):
@@ -87,7 +86,6 @@ class NetworkGroup:
         """
         my_networks_by_normal_name = dict()
         for name,id in self.networks_by_name().items():
-#            import epdb; epdb.serve()
             my_networks_by_normal_name[utility.normalize_caseless(name)] = id
         return(my_networks_by_normal_name)
 

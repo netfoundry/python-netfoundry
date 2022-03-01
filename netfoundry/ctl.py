@@ -8,12 +8,14 @@ Usage::
 PYTHON_ARGCOMPLETE_OK
 """
 import argparse
+import logging
 #import io
 import os
 import platform
 import shutil
 import sys
 import tempfile
+import time
 from base64 import b64decode
 #from contextlib import redirect_stdout
 from json import dumps as json_dumps
@@ -21,12 +23,14 @@ from json import loads as json_loads
 from subprocess import call
 
 from cryptography.hazmat.primitives.serialization import Encoding, pkcs7
+from jwt.exceptions import PyJWTError
 from milc import set_metadata
 from requests import get
 from yaml import dump as yaml_dumps
 from yaml import full_load as yaml_loads
 
 from ._version import get_versions
+from .exceptions import NFAPINoCredentials
 #from .demo import main as nfdemo
 from .network import Network
 from .network_group import NetworkGroup
@@ -52,13 +56,15 @@ class StoreDictKeyPair(argparse.Action):
             my_dict[k] = v
         setattr(namespace, self.dest, my_dict)
 
+
 @cli.argument('-c', '--credentials', help='API account JSON file from web console', default=None)
 @cli.argument("-O", "--organization", help="label or ID of an alternative organization (default is caller's org)" )
 @cli.argument('-N', '--network', help='caseless name of the network to manage')
 @cli.argument("-G", "--network-group", help="shortname or ID of a network group to search for network_identifier")
-@cli.argument('-o','--output', help="object formats suppress console messages", default="yaml", choices=["yaml","json","text"])
+@cli.argument('-H','--headers', default=True, action='store_boolean', help='print column headers')
+@cli.argument('-o','--output', help="object formats suppress console messages", default="text", choices=['text', 'yaml','json'])
 @cli.argument('-y', '--yes', action='store_true', arg_only=True, help='answer yes to potentially-destructive operations')
-@cli.argument('-p', '--proxy', help="like http://localhost:8080 or socks5://localhost:9046", default=None)
+@cli.argument('-P', '--proxy', help="like http://localhost:8080 or socks5://localhost:9046", default=None)
 @cli.entrypoint('configure the CLI to manage a network')
 def main(cli):
     """Configure the CLI to manage a network."""
@@ -86,13 +92,48 @@ def main(cli):
 
     summary = dict()
 
-    summary["caller"] = whoami(cli, echo=False)
-    summary["organization"] = organization.describe
+    summary['caller'] = whoami(cli, echo=False, organization=organization)
+    summary['organization'] = organization.describe
     if network_group:
-        summary["network_group"] = network_group.describe
+        summary['network_group'] = network_group.describe
+        summary['network_group']['networks_count'] = len(network_group.networks_by_normal_name().keys())
     if network:
-        summary["network"] = network.describe
-    if cli.config.general.output == "yaml":
+        summary['network'] = network.describe
+
+    if cli.config.general.output == "text":
+        cli.echo(
+            '{fg_lightgreen_ex}'
+            +'Logged in as {fullname} ({email}) of {org_name} ({org_label}@{env}) until {expiry_timestamp} ({expiry_seconds}s)'.format(
+                fullname=summary['caller']['name'],
+                email=summary['caller']['email'],
+                org_label=organization.label,
+                org_name=organization.name,
+                env=organization.environment,
+                expiry_timestamp=time.strftime('%Y-%m-%d %H:%M:%S GMT%z', time.localtime(organization.expiry)),
+                expiry_seconds=int(organization.expiry_seconds)
+            )
+        )
+        if network_group:
+            cli.echo(
+                '{fg_lightgreen_ex}'
+                +'❯ network group {fullname} ({shortname}) containing {count} networks'.format(
+                    fullname=summary['network_group']['name'],
+                    shortname=summary['network_group']['organizationShortName'],
+                    count=summary['network_group']['networks_count']
+                )
+            )
+        if network:
+            cli.echo(
+                '{fg_lightgreen_ex}'
+                +'❯ network {fullname} ({data_center}) with version {version} and status {status}'.format(
+                    fullname=summary['network']['name'],
+                    data_center=summary['network']['region'],
+                    version=summary['network']['productVersion'],
+                    status=summary['network']['status']
+                )
+            )
+
+    elif cli.config.general.output == "yaml":
         cli.echo(
             '{fg_lightgreen_ex}'
             +yaml_dumps(summary, indent=4)
@@ -104,9 +145,10 @@ def main(cli):
         )
 
 @cli.subcommand('get caller identity')
-def whoami(cli, echo: bool=True):
+def whoami(cli, echo: bool=True, organization: object=None):
     """Get caller identity."""
-    organization = use_organization()
+    if organization is None:
+        organization = use_organization()
     caller = organization.caller
     caller['label'] = organization.label
     caller['environment'] = organization.environment
@@ -164,7 +206,6 @@ def create(cli):
             spinner.stop()
 
 @cli.argument('-q','--query', arg_only=True, action=StoreDictKeyPair, help="query params as k=v,k=v comma-separated pairs", default=dict())
-@cli.argument('-H','--headers', default=True, action='store_boolean', help='print column headers')
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=RESOURCES.keys())
 @cli.subcommand('find resources as lists')
 def list(cli):
@@ -175,7 +216,11 @@ def list(cli):
     organization = use_organization()
 
     if cli.args.resource_type == "networks":
-        matches = organization.get_networks_by_organization(**cli.args.query)
+        if cli.config.general.network_group:
+            network_group = use_network_group(organization, group=cli.config.general.network_group)
+            matches = organization.get_networks_by_group(network_group.id)
+        else:
+            matches = organization.get_networks_by_organization(**cli.args.query)
         if len(matches) == 0:
             cli.log.info("found no %s matching '%s'", cli.args.resource_type, str(cli.args.query))
             sys.exit(0)
@@ -188,7 +233,7 @@ def list(cli):
                 "status": 20,
                 "id": 37
             }
-            if cli.config.list.headers:
+            if cli.config.general.headers:
                 cli.echo('{style_bright}{fg_white}'+'{: ^48} {: ^20} {: ^37}'.format("name", "status", "id"))
                 cli.echo('{style_bright}{fg_white}'+'{: <48} {: ^20} {: >37}'.format(
                     ''.join([char*48 for char in '-']),
@@ -220,7 +265,7 @@ def list(cli):
                     "zitiId": 10,
                     "id": 37
                 }
-                if cli.config.list.headers:
+                if cli.config.general.headers:
                     cli.echo('{style_bright}{fg_white}'+'{: ^48} {: ^12} {: ^37}'.format("name", "zitiId", "id"))
                     cli.echo('{style_bright}{fg_white}'+'{: >48} {: ^12} {: >37}'.format(
                         ''.join([char*48 for char in '-']),
@@ -275,11 +320,26 @@ def delete(cli):
             else:
                 cli.echo("not deleting {type} '{name}'".format(type=cli.args.resource_type, name=matches[0]['name']))
 
-@cli.argument('api', help='login to what?', arg_only=True, default="organization", choices=["organization", "ziti"])
+@cli.argument('api', help='logout from what?', arg_only=True, default="organization", choices=['organization', 'ziti'])
+@cli.subcommand('logout from a management API')
+def logout(cli):
+    """Logout from an API by deleting the cached token."""
+    if cli.args.api == "organization":
+        organization = use_organization()
+        try:
+            organization.logout()
+        except Exception as e:
+            logging.error("failed to logout with %s", e)
+            exit(1)
+    elif cli.args.api == "ziti":
+        pass
+
+@cli.argument('-s','--shell', help='emit only shell commands to configure terminal environment', arg_only=True, action="store_true", default=False)
+@cli.argument('api', help='login to what?', arg_only=True, default="organization", choices=['organization', 'ziti'])
 @cli.argument('-z','--ziti-cli', help='path to ziti CLI executable')
 @cli.subcommand('login to a management API')
 def login(cli):
-    """Login to a management API."""
+    """Login to an API and cache the expiring token."""
     organization = use_organization()
     if cli.args.api == "organization":
         cli.echo(
@@ -351,19 +411,32 @@ def use_organization():
     elif 'NETFOUNDRY_CLIENT_ID' in os.environ and 'NETFOUNDRY_PASSWORD' in os.environ and 'NETFOUNDRY_OAUTH_URL' in os.environ:
         cli.log.debug("using API account credentials from environment NETFOUNDRY_CLIENT_ID, NETFOUNDRY_PASSWORD, NETFOUNDRY_OAUTH_URL")
     else:
+        cli.log.debug("no token or credentials file provided, trying token cache")
+
+    # use the session with some organization, default is to use the first and there's typically only one
+    try:
+        organization = Organization(
+            credentials=cli.config.general.credentials if cli.config.general.credentials else None,
+            organization=cli.config.general.organization if cli.config.general.organization else None,
+            expiry_minimum=0,
+            proxy=cli.config.general.proxy
+        )
+    except NFAPINoCredentials as e:
+        cli.log.debug("caught no credentials exception from Organization, prompting for token")
         try:
             os.environ['NETFOUNDRY_API_TOKEN'] = questions.password(prompt='Enter Bearer Token:', confirm=False, validate=None)
         except KeyboardInterrupt as e:
             cli.log.debug("input cancelled by user")
-
-    # use the session with some organization, default is to use the first and there's typically only one
-    organization = Organization(
-        credentials=cli.config.general.credentials if cli.config.general.credentials else None,
-        organization=cli.config.general.organization if cli.config.general.organization else None,
-        expiry_minimum=0,
-        proxy=cli.config.general.proxy
-    )
-    cli.log.debug("organization label is %s.", organization.label)
+        try:
+            organization = Organization(
+                credentials=cli.config.general.credentials if cli.config.general.credentials else None,
+                organization=cli.config.general.organization if cli.config.general.organization else None,
+                expiry_minimum=0,
+                proxy=cli.config.general.proxy
+            )
+        except PyJWTError as e:
+            exit(1)
+    cli.log.debug("logged-in organization label is %s.", organization.label)
     return organization
 
 def use_network_group(organization: object, group: str=None):

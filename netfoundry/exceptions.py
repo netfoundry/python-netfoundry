@@ -15,7 +15,7 @@ class NFAPINetworkDeleted(NFAPIError):
 
 
 class NFAPINetworkNotProvisioned(NFAPIError):
-    """Network has not been provisioned"""
+    """Network has not been provisioned."""
 
 
 class NFAPINetworkControllerMissing(NFAPIError):
@@ -31,4 +31,7 @@ class NFAPIHostCustomerHosted(NFAPIError):
 
 
 class NFAPIEdgeRouterNotProvisioned(NFAPIError):
-    """Network host has not been provisioned"""
+    """Network host has not been provisioned."""
+
+class NFAPINoCredentials(NFAPIError):
+    """Unable to obtain a token because no credentials were configured."""
