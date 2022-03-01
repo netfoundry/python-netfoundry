@@ -225,13 +225,16 @@ def list(cli):
 
     organization = use_organization()
 
-    if cli.args.resource_type == "networks":
+    if cli.args.resource_type == "organizations":
+        matches = organization.get_organizations(**cli.args.query)
+    elif cli.args.resource_type == "network-groups":
+        matches = organization.get_network_groups_by_organization(**cli.args.query)
+    elif cli.args.resource_type == "networks":
         if cli.config.general.network_group:
             network_group = use_network_group(organization, group=cli.config.general.network_group)
-            matches = organization.get_networks_by_group(network_group.id)
+            matches = organization.get_networks_by_group(network_group.id, **cli.args.query)
         else:
             matches = organization.get_networks_by_organization(**cli.args.query)
-
     else:
         network, network_group = use_network(
             organization=organization,

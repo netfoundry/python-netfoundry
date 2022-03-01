@@ -105,6 +105,12 @@ for code, titles in STATUSES_BY_CODE.items():
         setattr(CODES, title.upper(), code)
 
 RESOURCES = {
+    'organizations': {
+        'embedded': "",
+    },
+    'network-groups': {
+        'embedded': "organizations"
+    },
     'networks': {
         'embedded': "networkList",
         'create_responses': ["ACCEPTED"],

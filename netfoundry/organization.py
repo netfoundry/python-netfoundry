@@ -110,7 +110,6 @@ class Organization:
                 self.expiry = claim['exp']
                 epoch = time.time()
                 self.expiry_seconds = self.expiry - epoch
-                logging.debug("bearer token expiry in %ds", self.expiry_seconds)
         else:
             logging.debug("no bearer token found in param, env, or cache")
 
@@ -260,6 +259,10 @@ class Organization:
             elif re.match(r'.*\.auth0\.com', iss):
                 self.environment = re.sub(r'https://netfoundry-([^.]+)\.auth0\.com.*',r'\1',claim['iss'])
             self.audience = 'https://gateway.'+self.environment+'.netfoundry.io/'
+            self.expiry = claim['exp']
+            epoch = time.time()
+            self.expiry_seconds = self.expiry - epoch
+            logging.debug("bearer token expiry in %ds", self.expiry_seconds)
         except: raise
 
         try:
@@ -365,16 +368,23 @@ class Organization:
 
         return(caller)
 
-    def get_organizations(self):
-        """return the list of organizations
+    def get_organizations(self, **kwargs):
+        """Find organizations.
+
+        :param str kwargs: filter results by logical AND query parameters
         """
+        params = dict()
+        for param in kwargs.keys():
+            params[param] = kwargs[param]
+
         try:
             headers = { "authorization": "Bearer " + self.token }
             response = http.get(
                 self.audience+'identity/v1/organizations',
                 proxies=self.proxies,
                 verify=self.verify,
-                headers=headers
+                headers=headers,
+                params=params
             )
             response_code = response.status_code
         except:
@@ -495,10 +505,14 @@ class Organization:
 
         return(network)
 
-    def get_network_groups_by_organization(self):
-        """list Network Groups
-        TODO: filter by organization when that capability is available
+    def get_network_groups_by_organization(self, **kwargs):
+        """Find network groups.
+
+        :param str kwargs: filter results by any supported query param
         """
+        params = dict()
+        for param in kwargs.keys():
+            params[param] = kwargs[param]            
         try:
             # /network-groups returns a list of dicts (Network Group objects)
             headers = { "authorization": "Bearer " + self.token }
@@ -506,7 +520,8 @@ class Organization:
                 self.audience+'rest/v1/network-groups',
                 proxies=self.proxies,
                 verify=self.verify,
-                headers=headers
+                headers=headers,
+                params=params
             )
             response_code = response.status_code
         except:
@@ -654,10 +669,11 @@ class Organization:
 
         return normal_names.count(utility.normalize_caseless(name))
 
-    def get_networks_by_group(self,network_group_id: str, deleted: bool=False):
+    def get_networks_by_group(self,network_group_id: str, deleted: bool=False, **kwargs):
         """Find networks by network group ID.
 
         :param network_group_id: required network group UUIDv4
+        :param str kwargs: filter results by logical AND query parameters
         """
         try:
             headers = { 
@@ -666,6 +682,8 @@ class Organization:
             params = {
                 "findByNetworkGroupId": network_group_id
             }
+            for param in kwargs.keys():
+                params[param] = kwargs[param]
             if deleted:
                 params['status'] = "DELETED"
             response = http.get(
