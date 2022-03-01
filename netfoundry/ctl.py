@@ -26,6 +26,7 @@ from cryptography.hazmat.primitives.serialization import Encoding, pkcs7
 from jwt.exceptions import PyJWTError
 from milc import set_metadata
 from requests import get
+from tabulate import tabulate
 from yaml import dump as yaml_dumps
 from yaml import full_load as yaml_loads
 
@@ -56,14 +57,20 @@ class StoreDictKeyPair(argparse.Action):
             my_dict[k] = v
         setattr(namespace, self.dest, my_dict)
 
+class StoreListKeys(argparse.Action):
+    """Parse comma-separated strings into a list."""
 
-@cli.argument('-c', '--credentials', help='API account JSON file from web console', default=None)
+    def __call__(self, parser, namespace, values, option_string=None):
+        """Split comma-separated list elements."""
+        setattr(namespace, self.dest, values.split(','))
+
+@cli.argument('-C', '--credentials', help='API account JSON file from web console', default=None)
 @cli.argument("-O", "--organization", help="label or ID of an alternative organization (default is caller's org)" )
 @cli.argument('-N', '--network', help='caseless name of the network to manage')
 @cli.argument("-G", "--network-group", help="shortname or ID of a network group to search for network_identifier")
 @cli.argument('-H','--headers', default=True, action='store_boolean', help='print column headers')
-@cli.argument('-o','--output', help="object formats suppress console messages", default="text", choices=['text', 'yaml','json'])
-@cli.argument('-y', '--yes', action='store_true', arg_only=True, help='answer yes to potentially-destructive operations')
+@cli.argument('-O','--output', help="object formats suppress console messages", default="text", choices=['text', 'yaml','json'])
+@cli.argument('-Y', '--yes', action='store_true', arg_only=True, help='answer yes to potentially-destructive operations')
 @cli.argument('-P', '--proxy', help="like http://localhost:8080 or socks5://localhost:9046", default=None)
 @cli.entrypoint('configure the CLI to manage a network')
 def main(cli):
@@ -205,6 +212,7 @@ def create(cli):
         if cli.config.create.wait:
             spinner.stop()
 
+@cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)", default=['name','id','createdBy','createdAt','status','zitiId'])
 @cli.argument('-q','--query', arg_only=True, action=StoreDictKeyPair, help="query params as k=v,k=v comma-separated pairs", default=dict())
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=RESOURCES.keys())
 @cli.subcommand('find resources as lists')
@@ -212,6 +220,8 @@ def list(cli):
     """Find resources as lists."""
     if not sys.stdout.isatty():
         cli.log.warn("nfctl does not have a stable CLI interface. Use with caution in scripts.")
+
+    cli.log.debug("filtering keys: %s", str(cli.args.keys))
 
     organization = use_organization()
 
@@ -221,32 +231,7 @@ def list(cli):
             matches = organization.get_networks_by_group(network_group.id)
         else:
             matches = organization.get_networks_by_organization(**cli.args.query)
-        if len(matches) == 0:
-            cli.log.info("found no %s matching '%s'", cli.args.resource_type, str(cli.args.query))
-            sys.exit(0)
-        elif len(matches) >= 1:
-            cli.log.debug("found %d %s matching '%s'", len(matches), cli.args.resource_type, str(cli.args.query))
 
-        if cli.config.general.output == "text":
-            columns = {
-                "name": 48,
-                "status": 20,
-                "id": 37
-            }
-            if cli.config.general.headers:
-                cli.echo('{style_bright}{fg_white}'+'{: ^48} {: ^20} {: ^37}'.format("name", "status", "id"))
-                cli.echo('{style_bright}{fg_white}'+'{: <48} {: ^20} {: >37}'.format(
-                    ''.join([char*48 for char in '-']),
-                    ''.join([char*20 for char in '-']),
-                    ''.join([char*37 for char in '-'])
-                    )
-                )
-            for match in matches:
-                cli.echo('{style_normal}{fg_white}'+'{: >48} {: ^20} {: >20}'.format(match['name'], match['status'], match['id']))
-        elif cli.config.general.output == "yaml":
-            cli.echo(yaml_dumps(matches, indent=4, default_flow_style=False))
-        elif cli.config.general.output == "json":
-            cli.echo(json_dumps(matches, indent=4))
     else:
         network, network_group = use_network(
             organization=organization,
@@ -254,31 +239,26 @@ def list(cli):
             network=cli.config.general.network
         )
         matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
-        if len(matches) == 0:
-            cli.log.info("found no %s '%s'", cli.args.resource_type, cli.args.query)
-            sys.exit(0)
-        else:
-            cli.log.debug("found at least one %s '%s'", cli.args.resource_type, cli.args.query)
-            if cli.config.general.output == "text":
-                columns = {
-                    "name": 32,
-                    "zitiId": 10,
-                    "id": 37
-                }
-                if cli.config.general.headers:
-                    cli.echo('{style_bright}{fg_white}'+'{: ^48} {: ^12} {: ^37}'.format("name", "zitiId", "id"))
-                    cli.echo('{style_bright}{fg_white}'+'{: >48} {: ^12} {: >37}'.format(
-                        ''.join([char*48 for char in '-']),
-                        ''.join([char*12 for char in '-']),
-                        ''.join([char*37 for char in '-'])
-                        )
-                    )
-                for match in matches:
-                    cli.echo('{style_normal}{fg_white}'+'{: <48} {: ^12} {: >37}'.format(match['name'], match['zitiId'], match['id']))
-            elif cli.config.general.output == "yaml":
-                cli.echo(yaml_dumps(matches, indent=4, default_flow_style=False))
-            elif cli.config.general.output == "json":
-                cli.echo(json_dumps(matches, indent=4))
+
+    if len(matches) == 0:
+        cli.log.info("found no %s '%s'", cli.args.resource_type, cli.args.query)
+        exit(0)
+    else:
+        cli.log.debug("found at least one %s '%s'", cli.args.resource_type, cli.args.query)
+
+    filtered_matches = []
+    valid_keys = matches[0].keys()
+    for match in matches:
+        filtered_match = { key: match[key] for key in cli.args.keys if key in valid_keys}
+        filtered_matches.append(filtered_match)
+
+    if cli.config.general.output == "text":
+        table_headers = filtered_matches[0].keys()
+        cli.echo(tabulate(tabular_data=[match.values() for match in filtered_matches], headers=table_headers, tablefmt="github"))
+    elif cli.config.general.output == "yaml":
+        cli.echo(yaml_dumps(matches, indent=4, default_flow_style=False))
+    elif cli.config.general.output == "json":
+        cli.echo(json_dumps(matches, indent=4))
 
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
 @cli.argument('-q','--query', arg_only=True, action=StoreDictKeyPair, help="any valid query params for type as k=v,k=v comma-separated pairs", default=dict())
