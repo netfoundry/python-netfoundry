@@ -77,20 +77,30 @@ jobs:
       run: |
         register-python-argcomplete nfctl
 
-    - name: Run the demo script to smoke test installed version
+    - name: Run the demo script and NF CLI to smoke test installed version
       env:
         NETWORK_NAME: github_smoketest_run${{ github.run_id }}
         NETFOUNDRY_CLIENT_ID: ${{ secrets.NETFOUNDRY_CLIENT_ID }}
         NETFOUNDRY_PASSWORD: ${{ secrets.NETFOUNDRY_PASSWORD }}
         NETFOUNDRY_OAUTH_URL: ${{ secrets.NETFOUNDRY_OAUTH_URL }}
       run: |
+        set -x
         nfdemo \
+          --verbose \
           --network ${NETWORK_NAME} \
           --create-client \
           --create-private \
           --regions Americas \
           -- create
+        nfctl \
+          --verbose \
+          --network ${NETWORK_NAME}
+        nfctl \
+          --verbose \
+          --network ${NETWORK_NAME} \
+          list services
         nfdemo \
+          --verbose \
           --network ${NETWORK_NAME} \
           --yes \
           -- delete
