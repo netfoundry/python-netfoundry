@@ -73,6 +73,10 @@ jobs:
           exit 1
         fi
 
+    - name: Test shell autocomplete
+      run: |
+        register-python-argcomplete nfctl
+
     - name: Run the demo script to smoke test installed version
       env:
         NETWORK_NAME: github_smoketest_run${{ github.run_id }}
