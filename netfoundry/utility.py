@@ -127,6 +127,9 @@ RESOURCES = {
     'identities': {
         'embedded': "",
     },
+    'hosts': {
+        'embedded': "hostList",
+    },
     'endpoints': {
         'embedded': "endpointList",
         'create_responses': ["ACCEPTED"],

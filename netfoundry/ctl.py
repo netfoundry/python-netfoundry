@@ -211,6 +211,36 @@ def create(cli):
         if cli.config.create.wait:
             spinner.stop()
 
+@cli.argument('-q','--query', arg_only=True, action=StoreDictKeyPair, help="query params as k=v,k=v comma-separated pairs", default=dict())
+@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
+@cli.subcommand('get a single resource by id or query')
+def get(cli):
+    """Get a single resource as a dictionary."""
+    organization = use_organization()
+    network, network_group = use_network(
+        organization=organization,
+        group=cli.config.general.network_group,
+        network=cli.config.general.network,
+        operation='delete'
+    )
+    if cli.args.query:
+        matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
+        if len(matches) == 0:
+            cli.log.info("found no %s '%s'", cli.args.resource_type, cli.args.query)
+            exit(0)
+        if len(matches) == 1:
+            cli.log.debug("found exactly one %s '%s'", cli.args.resource_type, cli.args.query)
+            match = network.get_resource_by_id(type=cli.args.resource_type, id=matches[0]['id'])
+        else:
+            cli.log.debug("found more than one %s '%s'", cli.args.resource_type, cli.args.query)
+            exit(1)
+
+    if cli.config.general.output in ["yaml","text"]:
+        cli.echo(yaml_dumps(match, indent=4, default_flow_style=False))
+    elif cli.config.general.output == "json":
+        cli.echo(json_dumps(match, indent=4))
+
+
 @cli.argument('-b','--borders', default=True, action='store_boolean', help='print cell borders in text tables')
 @cli.argument('-H','--headers', default=True, action='store_boolean', help='print column headers in text tables')
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)", default=['name','label','organizationShortName','id','createdBy','createdAt','status','zitiId'])
