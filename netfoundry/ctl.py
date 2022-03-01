@@ -269,11 +269,12 @@ def delete(cli):
     network, network_group = use_network(
         organization=organization,
         group=cli.config.general.network_group,
-        network=cli.config.general.network
+        network=cli.config.general.network,
+        operation='delete'
     )
 
     if cli.args.resource_type == "network":
-        if cli.args.query is not None:
+        if cli.args.query is not {}:
             cli.log.warn("ignoring name='%s' because this operation applies to the entire network that is already selected", str(cli.args.query))
         if cli.args.yes or questions.yesno("confirm delete network '{name}'".format(name=network.name), default=False):
             spinner = cli.spinner(text='deleting {net}'.format(net=network.name), spinner='dots12')
@@ -283,7 +284,7 @@ def delete(cli):
         else:
             cli.echo("not deleting network '{name}'.".format(name=network.name))
     else:
-        if cli.args.query is None:
+        if cli.args.query is {}:
             cli.log.error("need query to select a resource")
             exit(1)
         matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
@@ -433,7 +434,7 @@ def use_network_group(organization: object, group: str=None):
     cli.log.debug("network group is %s", network_group.name)
     return network_group
 
-def use_network(organization: object, network: str=None, group: str=None):
+def use_network(organization: object, network: str=None, group: str=None, operation: str='read'):
     """Use a network."""
     network_identifier = network
     if not network_identifier:
@@ -463,7 +464,10 @@ def use_network(organization: object, network: str=None, group: str=None):
     if cli.config.general.output == "text":
         spinner = cli.spinner(text='waiting for {net} to have status PROVISIONED'.format(net=network_identifier), spinner='dots12')
         spinner.start()
-        network.wait_for_status("PROVISIONED",wait=999,progress=False)
+        if operation == delete:
+            network.wait_for_statuses(["DELETING","DELETED"],wait=999,progress=False)
+        elif operation in ['create','read','update']:
+            network.wait_for_status("PROVISIONED",wait=999,progress=False)
         spinner.stop()
     return network, network_group
 

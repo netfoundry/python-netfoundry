@@ -624,6 +624,17 @@ class Organization:
 
         return(all_entities)
 
+    def network_exists(self, name: str, deleted: bool=False):
+        """Check if a network exists.
+        
+        :param name: the case-insensitive string to search
+        :param deleted: include deleted networks in results
+        """
+        if self.count_networks_with_name(name=name, deleted=deleted) > 0:
+            return(True)
+        else:
+            return(False)
+
     def count_networks_with_name(self, name: str, deleted: bool=False, unique: bool=True):
         """
         Count the networks with a particular name for this organization.
