@@ -29,7 +29,7 @@ setuptools.setup(
         'inflect >= 5.4',
         'milc >= 1.6',
         'pyyaml >= 5.4',
-        'platformdirs >= 2.5'
+        'platformdirs >= 2.4'
     ]
 )
 

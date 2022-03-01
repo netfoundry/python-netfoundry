@@ -91,6 +91,10 @@ jobs:
           --yes \
           -- delete
 
+    - name: Install NetFoundry Support Dependencies
+      run: |
+        pip3 install -r ./requirements-nfsupport.txt
+
     - name: Append 'latest' tag if release published
       env:
         GITHUB_EVENT_ACTION: ${{ github.event.action }}
