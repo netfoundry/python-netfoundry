@@ -98,13 +98,16 @@ jobs:
           -- create
         nfctl \
           --verbose \
+          --profile default \
           --network ${NETWORK_NAME}
         nfctl \
           --verbose \
+          --profile default \
           --network ${NETWORK_NAME} \
           list services
         nfctl \
           --verbose \
+          --profile default \
           --network ${NETWORK_NAME} \
           --yes \
           delete network

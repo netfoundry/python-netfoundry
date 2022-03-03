@@ -49,9 +49,10 @@ class StoreDictKeyPair(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         """Split comma-separated key=value pairs."""
         my_dict = {}
-        for kv in values.split(","):
-            k,v = kv.split("=")
-            my_dict[k] = v
+        if values is not None: # and len(values.split(',')) > 0:
+            for kv in values.split(','):
+                k,v = kv.split('=')
+                my_dict[k] = v
         setattr(namespace, self.dest, my_dict)
 
 class StoreListKeys(argparse.Action):
@@ -74,16 +75,18 @@ def main(cli):
     """Configure the CLI to manage a network."""
     login(cli, api="organization")
 
-@cli.argument('-e','--eval', help=argparse.SUPPRESS, arg_only=True, action="store_true", default=False)
+@cli.argument('-s','--shell', help=argparse.SUPPRESS, arg_only=True, action="store_true", default=False)
 @cli.argument('api', help=argparse.SUPPRESS, arg_only=True, nargs='?', default="organization", choices=['organization', 'ziti'])
 @cli.argument('-z','--ziti-cli', help=argparse.SUPPRESS)
 @cli.subcommand('login to a management API', hidden=True)
-def login(cli, api: str=None, eval: bool=False):
+def login(cli, api: str=None, shell: bool=None):
     """Login to an API and cache the expiring token."""
     if api:
         cli.args.api = api
-    if eval:
-        cli.args.eval = eval
+    if shell is not None:
+        cli.args.shell = shell
+    else:
+        cli.args.shell = False
     # if logging in to a NF org (default)
     if cli.args.api == "organization":
         # first destroy any existing session with the same login profile name
@@ -119,7 +122,7 @@ def login(cli, api: str=None, eval: bool=False):
         if network:
             summary['network'] = network.describe
 
-        if not cli.args.eval and cli.config.general.output == "text":
+        if not cli.args.shell and cli.config.general.output == "text":
             cli.echo(
                 '{fg_lightgreen_ex}'
                 +'Logged in as {fullname} ({email}) of {org_name} ({org_label}@{env}) until {expiry_timestamp} ({expiry_seconds}s)'.format(
@@ -152,17 +155,17 @@ def login(cli, api: str=None, eval: bool=False):
                     )
                 )
 
-        elif not cli.args.eval and cli.config.general.output == "yaml":
+        elif not cli.args.shell and cli.config.general.output == "yaml":
             cli.echo(
                 '{fg_lightgreen_ex}'
                 +yaml_dumps(summary, indent=4)
             )
-        elif not cli.args.eval and cli.config.general.output == "json":
+        elif not cli.args.shell and cli.config.general.output == "json":
             cli.echo(
                 '{fg_lightgreen_ex}'
                 +json_dumps(summary, indent=4)
             )
-        if cli.args.eval:
+        if cli.args.shell:
             cli.echo(
                 """
 # source this output like
@@ -424,7 +427,7 @@ def list(cli):
         cli.echo(json_dumps(matches, indent=4))
 
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
-@cli.argument('query', arg_only=True, action=StoreDictKeyPair, help="query params as k=v,k=v comma-separated pairs")
+@cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs", default=None)
 @cli.subcommand('delete a resource')
 def delete(cli):
     """Delete a resource."""
@@ -437,20 +440,23 @@ def delete(cli):
     )
 
     if cli.args.resource_type == "network":
-        if cli.args.query is not {}:
+        if not cli.args.query == {}:
             cli.log.warn("ignoring name='%s' because this operation applies to the entire network that is already selected", str(cli.args.query))
-        if cli.args.yes or questions.yesno("confirm delete network '{name}'".format(name=network.name), default=False):
-            spinner = cli.spinner(text='deleting {net}'.format(net=network.name), spinner='dots12')
-            try:
-                spinner.start()
-                network.delete_network(progress=False)
-                spinner.stop()
-            except KeyboardInterrupt as e:
-                cli.log.debug("wait cancelled by user")
-        else:
-            cli.echo("not deleting network '{name}'.".format(name=network.name))
+        try:
+            if cli.args.yes or questions.yesno("confirm delete network '{name}'".format(name=network.name), default=False):
+                spinner = cli.spinner(text='deleting {net}'.format(net=network.name), spinner='dots12')
+                try:
+                    spinner.start()
+                    network.delete_network(progress=False)
+                    spinner.stop()
+                except KeyboardInterrupt as e:
+                    cli.log.debug("wait cancelled by user")
+            else:
+                cli.echo("not deleting network '{name}'.".format(name=network.name))
+        except KeyboardInterrupt as e:
+            cli.log.debug("input cancelled by user")
     else:
-        if cli.args.query is {}:
+        if not cli.args.query:
             cli.log.error("need query to select a resource")
             exit(1)
         matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
@@ -462,10 +468,13 @@ def delete(cli):
             exit(1)
         if len(matches) == 1:
             cli.log.debug("found one %s '%s'", cli.args.resource_type, str(cli.args.query))
-            if cli.args.yes or questions.yesno("confirm delete {type} '{name}'".format(type=cli.args.resource_type, name=matches[0]['name']), default=False):
-                network.delete_resource(type=cli.args.resource_type, id=matches[0]['id'])
-            else:
-                cli.echo("not deleting {type} '{name}'".format(type=cli.args.resource_type, name=matches[0]['name']))
+            try:
+                if cli.args.yes or questions.yesno("confirm delete {type} '{name}'".format(type=cli.args.resource_type, name=matches[0]['name']), default=False):
+                    network.delete_resource(type=cli.args.resource_type, id=matches[0]['id'])
+                else:
+                    cli.echo("not deleting {type} '{name}'".format(type=cli.args.resource_type, name=matches[0]['name']))
+            except KeyboardInterrupt as e:
+                cli.log.debug("input cancelled by user")
 
 def use_organization():
     """Assume an identity in an organization."""
