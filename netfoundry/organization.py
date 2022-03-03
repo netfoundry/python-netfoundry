@@ -23,6 +23,7 @@ class Organization:
     The default is to use the calling identity's organization. 
 
     :param str organization: optional identifier of an alternative organization, ignored if organization_id or organization_label
+    :param str profile: login profile name for storing and retrieving separate concurrent sessions
     :param str organization_id: optional UUID of an alternative organization
     :param str organization_label: is optional `label` property of an alternative organization
     :param str token: continue using a session with this optional token from an existing instance of organization
@@ -36,6 +37,7 @@ class Organization:
         organization: str=None, 
         organization_id: str=None, 
         organization_label: str=None,
+        profile: str="default",
         token: str=None,
         expiry_minimum: int=600,
         proxy: str=None):
@@ -62,8 +64,12 @@ class Organization:
         token_endpoint = None
         credentials_configured = False
 
+        if profile is None:
+            profile = "default"
+        self.profile = profile
+
         cache_dir_path = user_cache_path(appname='netfoundry')
-        token_cache_file_name = 'access_token'
+        token_cache_file_name = self.profile+'.jwt'
         config_dir_path = user_config_path(appname='netfoundry')
 
         try:
@@ -71,13 +77,13 @@ class Organization:
             cache_dir_path.mkdir(mode=stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR, parents=True, exist_ok=True)
             cache_dir_path.chmod(mode=stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR)
         except:
-            logging.error("failed to create cache dir '%s'", cache_dir_path.resolve())
+            logging.error("failed to create cache dir '%s'", cache_dir_path.__str__())
             raise
         else:
             cache_dir_stats = os.stat(cache_dir_path)
             logging.debug("token cache dir exists with mode %s", stat.filemode(cache_dir_stats.st_mode))
-        self.token_cache_file_path = Path(cache_dir_path.resolve() / token_cache_file_name)
-        logging.debug("cache file path is computed '%s'", self.token_cache_file_path.resolve())
+        self.token_cache_file_path = Path(cache_dir_path / token_cache_file_name)
+        logging.debug("cache file path is computed '%s'", self.token_cache_file_path.__str__())
 
         # if not token then use standard env var if defined
         if token is not None:
@@ -90,13 +96,13 @@ class Organization:
             try:
                 self.token = self.token_cache_file_path.read_text()
             except FileNotFoundError as e:
-                logging.debug("cache file '%s' not found", self.token_cache_file_path.resolve())
+                logging.debug("cache file '%s' not found", self.token_cache_file_path.__str__())
                 self.token = None
             except Exception as e:
-                logging.debug("failed to read cache file '%s', got %s", self.token_cache_file_path.resolve(), e)
+                logging.debug("failed to read cache file '%s', got %s", self.token_cache_file_path.__str__(), e)
             else:
                 cache_file_stats = os.stat(self.token_cache_file_path)
-                logging.debug("read token as %dB from cache file '%s' with mode %s", len(self.token), self.token_cache_file_path.resolve(), stat.filemode(cache_file_stats.st_mode))
+                logging.debug("read token as %dB from cache file '%s' with mode %s", len(self.token), self.token_cache_file_path.__str__(), stat.filemode(cache_file_stats.st_mode))
 
 
         # if the token was found then extract the expiry
@@ -144,7 +150,7 @@ class Organization:
         if not credentials_configured:
             # if valid relative or absolute path to creds file, else search the default dirs
             if os.path.exists(self.credentials):
-                logging.debug("searching for credentials file '%s'", self.credentials)
+                logging.debug("found credentials file '%s'", self.credentials)
             else:
                 default_creds_scopes = [
                     {
@@ -168,14 +174,14 @@ class Organization:
                     candidate = scope['path'] / self.credentials
                     if candidate.exists():
                         logging.debug("found credentials file %s in %s-default directory",
-                            candidate.resolve(),
+                            candidate.__str__(),
                             scope['scope'],
                         )
-                        self.credentials = candidate.resolve()
+                        self.credentials = candidate.__str__()
                         break
                     else:
                         logging.debug("no credentials file %s in %s-default directory",
-                            candidate.resolve(),
+                            candidate.__str__(),
                             scope['scope'],
                         )
 
@@ -272,10 +278,10 @@ class Organization:
             self.token_cache_file_path.touch(mode=stat.S_IRUSR|stat.S_IWUSR)
             self.token_cache_file_path.write_text(self.token)
         except:
-            logging.warn("failed to cache token in '%s'", self.token_cache_file_path.resolve())
+            logging.warn("failed to cache token in '%s'", self.token_cache_file_path.__str__())
             import epdb; epdb.serve()
         else:
-            logging.debug("cached token in '%s'", self.token_cache_file_path.resolve())
+            logging.debug("cached token in '%s'", self.token_cache_file_path.__str__())
 
         # always resolve Network Groups so we can specify either name or ID when calling super()
         self.network_groups = self.get_network_groups_by_organization()
@@ -319,10 +325,17 @@ class Organization:
 
     def logout(self):
         """Logout from NF organization by removing the cached token file."""
-        try:
-            os.remove(self.token_cache_file_path)
-        except Exception as e:
-            logging.error("failed to remove cached token file '%s'", self.token_cache_file_path.resolve())
+        if os.path.exists(self.token_cache_file_path):
+            try:
+                os.remove(self.token_cache_file_path)
+            except Exception as e:
+                logging.error("failed to remove cached token file '%s'", self.token_cache_file_path.__str__())
+                return False
+            else:
+                return True
+        else:
+            logging.debug("cached token file '%s' does not exist", self.token_cache_file_path.__str__())
+            return True
         
     def get_caller_identity(self):
         """Return the caller's identity object."""
@@ -513,17 +526,40 @@ class Organization:
 
         return(network_group)
 
-    def get_network(self,network_id):
-        """describe a Network by ID
+    def get_network(self, network_id: str, embed: str=None, accept: str=None):
+        """Describe a Network by ID.
+        
+        :param str network_id: UUIDv4 of the network to get
+        :param str embed: magic 'all' embeds all resource types in network domain, else comma-separated list of resource types to embed in response e.g. 'endpoints,services'
+        :param str accept: specifying the form of the desired response. Choices ["create","update"] where
+                "create" is useful for comparing an existing entity to a set of properties that are used to create the same type of
+                entity in a POST request, and "update" may be used in the same way for a PUT update.
         """
+        headers = dict()
+        if accept:
+            if not accept in ["update","create"]:
+                logging.error("param 'accept' must be one of 'update' or 'create', got '{:s}'".format(accept))
+                raise Exception("param 'accept' must be one of 'update' or 'create', got '{:s}'".format(accept))
+            else:
+                headers['accept'] = "application/json;as="+accept
+        headers["authorization"] = "Bearer " + self.token
+        params = dict()
+        if embed == "all":
+            params['embed'] = ','.join([type for type in RESOURCES.keys() if RESOURCES[type]['domain'] == "network"])
+            logging.debug("requesting embed all resource types in network domain: {:s}".format(params['embed']))
+        elif embed:
+            params['embed'] = ','.join([type for type in embed.split(',') if RESOURCES[type]['domain'] == "network"])
+            logging.debug("requesting embed some resource types in network domain: {:s}".format(params['embed']))
+            for type in embed.split(','):
+                if not type in [type for type in RESOURCES.keys() if RESOURCES[type]['domain'] == "network"]:
+                    logging.debug("not requesting embed of resource type '{:s}' because not a valid resource type or not in network domain".format(type))
         try:
-            # /networks/{id} returns a Network object
-            headers = { "authorization": "Bearer " + self.token }
             response = http.get(
-                self.audience+'rest/v1/networks/'+network_id,
+                self.audience+'core/v2/networks/'+network_id,
                 proxies=self.proxies,
                 verify=self.verify,
-                headers=headers
+                headers=headers,
+                params=params
             )
             response_code = response.status_code
         except:
@@ -533,7 +569,7 @@ class Organization:
             try:
                 network = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR getting Network Group')
+                eprint('ERROR: failed to load {r} object from GET response'.format(r = "network"))
                 raise(e)
         else:
             raise Exception(
@@ -545,6 +581,7 @@ class Organization:
             )
 
         return(network)
+
 
     def get_network_groups_by_organization(self, **kwargs):
         """Find network groups.

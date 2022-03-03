@@ -107,12 +107,15 @@ for code, titles in STATUSES_BY_CODE.items():
 RESOURCES = {
     'organizations': {
         'embedded': "",
+        'domain': "organization"
     },
     'network-groups': {
-        'embedded': "organizations"
+        'embedded': "organizations",
+        'domain': "network-group"
     },
     'networks': {
         'embedded': "networkList",
+        'domain': "network-group",
         'create_responses': ["ACCEPTED"],
         'create_template': {
             "name": "Name",
@@ -123,15 +126,19 @@ RESOURCES = {
     },
     'network-controllers': {
         'embedded': "networkControllerList",
+        'domain': "network"
     },
     'identities': {
         'embedded': "",
+        'domain': "organization"
     },
     'hosts': {
         'embedded': "hostList",
+        'domain': "network"
     },
     'endpoints': {
         'embedded': "endpointList",
+        'domain': "network",
         'create_responses': ["ACCEPTED"],
         'create_template': {
             "attributes": [],
@@ -141,31 +148,43 @@ RESOURCES = {
     },
     'edge-routers': {
         'embedded': "edgeRouterList",
+        'domain': "network",
         'create_responses': ["ACCEPTED"]
     },
     'edge-router-policies': {
         'embedded': "edgeRouterPolicyList",
+        'domain': "network",
         'create_responses': ["OK", "ACCEPTED"]
     },
     'app-wans': {
         'embedded': "appWanList",
+        'domain': "network",
         'create_responses': ["OK"]
     },
     'services': {
         'embedded': "serviceList",
+        'domain': "network",
         'create_responses': ["ACCEPTED"],
         'create_template': {"this": 1}
     },
     'service-policies': {
         'embedded': "servicePolicyList",
+        'domain': "network",
         'create_responses': ["ACCEPTED"]
     },
     'service-edge-router-policies': {
         'embedded': "serviceEdgeRouterPolicyList",
+        'domain': "network",
         'create_responses': ["ACCEPTED"]
     },
     'posture-checks': {
         'embedded': "postureCheckList",
+        'domain': "network",
+        'create_responses': ["ACCEPTED"]
+    },
+    'certificate-authorities': {
+        'embedded': "certificateAuthorityList",
+        'domain': "network",
         'create_responses': ["ACCEPTED"]
     }
 }

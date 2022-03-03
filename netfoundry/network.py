@@ -478,17 +478,18 @@ class Network:
             if accept and accept in ["create", "update"]:
                 headers['accept'] = "application/json;as="+accept
             elif accept:
-                raise Exception("ERROR: invalid value for param \"accept\" in {}".format(accept))
+                logging.error("invalid value for param 'accept': '%s'", accept)
+                raise Exception()
 
             params = {
                 "networkId": self.id,
                 "page": 0,
                 "size": 100,
-                "sort": "name,asc"
             }
             # if type == "services": 
             #     params["beta"] = ''
-
+            if not type == "hosts":
+                params["sort"] = "name,asc"
             for param in kwargs.keys():
                 params[param] = kwargs[param]
             if typeId is not None:
