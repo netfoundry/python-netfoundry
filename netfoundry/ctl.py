@@ -73,8 +73,8 @@ def main(cli):
     """Configure the CLI to manage a network."""
     login(cli, api="organization")
 
-@cli.argument('-s','--shell', help=argparse.SUPPRESS, arg_only=True, action="store_true", default=False)
 @cli.argument('api', help=argparse.SUPPRESS, arg_only=True, nargs='?', default="organization", choices=['organization', 'ziti'])
+@cli.argument('-s','--shell', help=argparse.SUPPRESS, arg_only=True, action="store_true", default=False)
 @cli.argument('-z','--ziti-cli', help=argparse.SUPPRESS)
 @cli.subcommand('login to a management API', hidden=True)
 def login(cli, api: str=None, shell: bool=None):
@@ -83,6 +83,8 @@ def login(cli, api: str=None, shell: bool=None):
         cli.args.api = api
     if shell is not None:
         cli.args.shell = shell
+    else:
+        cli.args.shell = False
     # if logging in to a NF org (default)
     if cli.args.api == "organization":
         organization = use_organization()
@@ -292,8 +294,8 @@ def create(cli):
         if cli.config.create.wait:
             spinner.stop()
 
-@cli.argument('-a', '--accept', arg_only=True, default=None, choices=['create','update'], help="request the as=create or as=update form of the resource")
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs", default="id=%")
+@cli.argument('-a', '--accept', arg_only=True, default=None, choices=['create','update'], help="request the as=create or as=update form of the resource")
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
 @cli.subcommand('get a single resource by query')
 def get(cli):
@@ -360,8 +362,8 @@ def get(cli):
         exit(len(matches))
 
 
-@cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)", default=['name','label','organizationShortName','id','createdBy','createdAt','status','zitiId','provider','ipAddress','region','size'])
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs", default="id=%")
+@cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)", default=['name','label','organizationShortName','id','createdBy','createdAt','status','zitiId','provider','locationCode','ipAddress','region','size'])
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=RESOURCES.keys())
 @cli.subcommand('find resources as lists')
 def list(cli):
@@ -398,11 +400,11 @@ def list(cli):
         cli.log.debug("found at least one %s '%s'", cli.args.resource_type, cli.args.query)
 
     if cli.config.general.output == "text":
-        filtered_matches = []
         # intersection of the set of valid, observed keys in the first match
         # and the set of configured, desired keys
-        valid_keys = list(set(matches[0].keys()) & set(cli.args.keys))
-        cli.log.debug("filtering keys: %s", str(valid_keys))
+        valid_keys = set(matches[0].keys()) & set(cli.args.keys)
+        cli.log.debug("valid keys: %s", str(valid_keys))
+        filtered_matches = []
         for match in matches:
             filtered_match = { key: match[key] for key in cli.args.keys if key in valid_keys}
             filtered_matches.append(filtered_match)
@@ -423,8 +425,8 @@ def list(cli):
     elif cli.config.general.output == "json":
         cli.echo(json_dumps(matches, indent=4))
 
-@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs", default=None)
+@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
 @cli.subcommand('delete a resource')
 def delete(cli):
     """Delete a resource."""
