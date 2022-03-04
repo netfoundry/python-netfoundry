@@ -7,8 +7,6 @@ Usage::
 PYTHON_ARGCOMPLETE_OK
 """
 import argparse
-import logging
-#import io
 import os
 import platform
 import shutil
@@ -16,7 +14,6 @@ import sys
 import tempfile
 import time
 from base64 import b64decode
-#from contextlib import redirect_stdout
 from json import dumps as json_dumps
 from json import loads as json_loads
 from subprocess import call
@@ -31,7 +28,6 @@ from yaml import full_load as yaml_loads
 
 from ._version import get_versions
 from .exceptions import NFAPINoCredentials
-#from .demo import main as nfdemo
 from .network import Network
 from .network_group import NetworkGroup
 from .organization import Organization
@@ -68,6 +64,8 @@ class StoreListKeys(argparse.Action):
 @cli.argument('-N', '--network', help='caseless name of the network to manage')
 @cli.argument("-G", "--network-group", help="shortname or ID of a network group to search for network_identifier")
 @cli.argument('-O','--output', help="object formats suppress console messages", default="text", choices=['text', 'yaml','json'])
+@cli.argument('-b','--borders', default=True, action='store_boolean', help='print cell borders in text tables')
+@cli.argument('-H','--headers', default=True, action='store_boolean', help='print column headers in text tables')
 @cli.argument('-Y', '--yes', action='store_true', arg_only=True, help='answer yes to potentially-destructive operations')
 @cli.argument('-P', '--proxy', help="like http://localhost:8080 or socks5://localhost:9046", default=None)
 @cli.entrypoint('configure the CLI to manage a network')
@@ -89,8 +87,6 @@ def login(cli, api: str=None, shell: bool=None):
         cli.args.shell = False
     # if logging in to a NF org (default)
     if cli.args.api == "organization":
-        # first destroy any existing session with the same login profile name
-        logout(cli)
         organization = use_organization()
         if cli.config.general.network_group and cli.config.general.network:
             cli.log.debug("configuring network %s in group %s", cli.config.general.network, cli.config.general.network_group)
@@ -113,57 +109,60 @@ def login(cli, api: str=None, shell: bool=None):
             cli.log.debug("not configuring network or network group")
             network, network_group = None, None
 
-        summary = dict()
-        summary['caller'] = whoami(cli, echo=False, organization=organization)
-        summary['organization'] = organization.describe
+        summary_object = dict()
+        summary_object['caller'] = whoami(cli, echo=False, organization=organization)
+        summary_object['organization'] = organization.describe
         if network_group:
-            summary['network_group'] = network_group.describe
-            summary['network_group']['networks_count'] = len(network_group.networks_by_normal_name().keys())
+            summary_object['network_group'] = network_group.describe
+            summary_object['network_group']['networks_count'] = len(network_group.networks_by_normal_name().keys())
         if network:
-            summary['network'] = network.describe
+            summary_object['network'] = network.describe
 
+        # compose a summary table from selected details if text, not yaml or
+        # json (unless shell which means to suppress normal output and only
+        # configure the current shell)
         if not cli.args.shell and cli.config.general.output == "text":
-            cli.echo(
-                '{fg_lightgreen_ex}'
-                +'Logged in as {fullname} ({email}) of {org_name} ({org_label}@{env}) until {expiry_timestamp} ({expiry_seconds}s)'.format(
-                    fullname=summary['caller']['name'],
-                    email=summary['caller']['email'],
+            summary_table = [['domain', 'summary']]
+            summary_table.append(['organization', '"{org_name}" ({org_label}@{env}) logged in as {fullname} ({email}) until {expiry_timestamp} ({expiry_seconds}s)'.format(
+                    fullname=summary_object['caller']['name'],
+                    email=summary_object['caller']['email'],
                     org_label=organization.label,
                     org_name=organization.name,
                     env=organization.environment,
                     expiry_timestamp=time.strftime('%Y-%m-%d %H:%M:%S GMT%z', time.localtime(organization.expiry)),
                     expiry_seconds=int(organization.expiry_seconds)
-                )
-            )
+                )])
             if network_group:
-                cli.echo(
-                    '{fg_lightgreen_ex}'
-                    +'❯ network group {fullname} ({shortname}) containing {count} networks'.format(
-                        fullname=summary['network_group']['name'],
-                        shortname=summary['network_group']['organizationShortName'],
-                        count=summary['network_group']['networks_count']
-                    )
-                )
+                    summary_table.append(['network group', '"{fullname}" ({shortname}) configured with {count} networks'.format(
+                        fullname=summary_object['network_group']['name'],
+                        shortname=summary_object['network_group']['organizationShortName'],
+                        count=summary_object['network_group']['networks_count']
+                )])
             if network:
-                cli.echo(
-                    '{fg_lightgreen_ex}'
-                    +'❯ network {fullname} ({data_center}) with version {version} and status {status}'.format(
-                        fullname=summary['network']['name'],
-                        data_center=summary['network']['region'],
-                        version=summary['network']['productVersion'],
-                        status=summary['network']['status']
-                    )
-                )
+                    summary_table.append(['network', '"{fullname}" ({data_center}) with version {version} and status {status} configured'.format(
+                        fullname=summary_object['network']['name'],
+                        data_center=summary_object['network']['region'],
+                        version=summary_object['network']['productVersion'],
+                        status=summary_object['network']['status']
+                )])
+            if cli.config.general.borders:
+                table_borders = "github"
+            else:
+                table_borders = "plain"
+            cli.echo(
+                '{fg_lightgreen_ex}'
+                +tabulate(tabular_data=summary_table, headers='firstrow', tablefmt=table_borders)
+            )
 
         elif not cli.args.shell and cli.config.general.output == "yaml":
             cli.echo(
                 '{fg_lightgreen_ex}'
-                +yaml_dumps(summary, indent=4)
+                +yaml_dumps(summary_object, indent=4)
             )
         elif not cli.args.shell and cli.config.general.output == "json":
             cli.echo(
                 '{fg_lightgreen_ex}'
-                +json_dumps(summary, indent=4)
+                +json_dumps(summary_object, indent=4)
             )
         if cli.args.shell:
             cli.echo(
@@ -228,11 +227,14 @@ export NETFOUNDRY_API_TOKEN="{token}"
 @cli.subcommand('logout from an identity organization')
 def logout(cli):
     """Logout by deleting the cached token."""
-    organization = use_organization()
+    organization = use_organization(prompt=False)
     try:
         organization.logout()
+    except NFAPINoCredentials as e:
+        cli.log.debug("no need to logout because not logged in")
+        return True
     except Exception as e:
-        logging.error("failed to logout with %s", e)
+        cli.log.error("failed to logout with %s", e)
         exit(1)
 
 @cli.subcommand('get caller identity')
@@ -364,8 +366,6 @@ def get(cli):
         exit(len(matches))
 
 
-@cli.argument('-b','--borders', default=True, action='store_boolean', help='print cell borders in text tables')
-@cli.argument('-H','--headers', default=True, action='store_boolean', help='print column headers in text tables')
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)", default=['name','label','organizationShortName','id','createdBy','createdAt','status','zitiId','provider','ipAddress','region','size'])
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs", default="id=%")
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=RESOURCES.keys())
@@ -412,15 +412,18 @@ def list(cli):
         filtered_matches.append(filtered_match)
 
     if cli.config.general.output == "text":
-        if cli.config.list.headers:
+        if cli.config.general.headers:
             table_headers = filtered_matches[0].keys()
         else:
             table_headers = []
-        if cli.config.list.borders:
+        if cli.config.general.borders:
             table_borders = "github"
         else:
             table_borders = "plain"
-        cli.echo(tabulate(tabular_data=[match.values() for match in filtered_matches], headers=table_headers, tablefmt=table_borders))
+        cli.echo(
+            '{fg_lightgreen_ex}'
+            +tabulate(tabular_data=[match.values() for match in filtered_matches], headers=table_headers, tablefmt=table_borders)
+        )
     elif cli.config.general.output == "yaml":
         cli.echo(yaml_dumps(matches, indent=4, default_flow_style=False))
     elif cli.config.general.output == "json":
@@ -476,7 +479,7 @@ def delete(cli):
             except KeyboardInterrupt as e:
                 cli.log.debug("input cancelled by user")
 
-def use_organization():
+def use_organization(prompt: bool=True):
     """Assume an identity in an organization."""
     if cli.config.general.credentials:
         cli.log.debug("using credentials file %s from config or args", cli.config.general.credentials)
@@ -499,20 +502,25 @@ def use_organization():
             proxy=cli.config.general.proxy
         )
     except NFAPINoCredentials as e:
-        cli.log.debug("caught no credentials exception from Organization, prompting for token")
-        try:
-            os.environ['NETFOUNDRY_API_TOKEN'] = questions.password(prompt='Enter Bearer Token:', confirm=False, validate=None)
-        except KeyboardInterrupt as e:
-            cli.log.debug("input cancelled by user")
-        try:
-            organization = Organization(
-                credentials=cli.config.general.credentials if cli.config.general.credentials else None,
-                organization=cli.config.general.organization if cli.config.general.organization else None,
-                expiry_minimum=0,
-                proxy=cli.config.general.proxy
-            )
-        except PyJWTError as e:
-            exit(1)
+        if prompt:
+            cli.log.debug("caught no credentials exception from organization, prompting for token")
+            try:
+                os.environ['NETFOUNDRY_API_TOKEN'] = questions.password(prompt='Enter Bearer Token:', confirm=False, validate=None)
+            except KeyboardInterrupt as e:
+                cli.log.debug("input cancelled by user")
+            try:
+                organization = Organization(
+                    credentials=cli.config.general.credentials if cli.config.general.credentials else None,
+                    organization=cli.config.general.organization if cli.config.general.organization else None,
+                    profile=cli.config.general.profile,
+                    expiry_minimum=0,
+                    proxy=cli.config.general.proxy
+                )
+            except PyJWTError as e:
+                exit(1)
+        else:
+            cli.log.info("not logged in")
+            raise NFAPINoCredentials()
     cli.log.debug("logged-in organization label is %s.", organization.label)
     return organization
 
