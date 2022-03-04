@@ -83,8 +83,6 @@ def login(cli, api: str=None, shell: bool=None):
         cli.args.api = api
     if shell is not None:
         cli.args.shell = shell
-    else:
-        cli.args.shell = False
     # if logging in to a NF org (default)
     if cli.args.api == "organization":
         organization = use_organization()
@@ -167,14 +165,10 @@ def login(cli, api: str=None, shell: bool=None):
         if cli.args.shell:
             cli.echo(
                 """
-# source this output like
 # $ source <(nfctl --credentials credentials.json login organization)
 export NETFOUNDRY_API_TOKEN="{token}"
-# or, alternatively, silently-paste and export to child procs
-# $ read -s NETFOUNDRY_API_TOKEN && export NETFOUNDRY_API_TOKEN
-# then logout of organization with
-# $ unset NETFOUNDRY_API_TOKEN
-""".format(token=organization.token)
+export MOPENV={env}
+""".format(token=organization.token, env=organization.environment)
             )
     elif cli.args.api == "ziti":
         if cli.config.login.ziti_cli:
@@ -375,8 +369,6 @@ def list(cli):
     if not sys.stdout.isatty():
         cli.log.warn("nfctl does not have a stable CLI interface. Use with caution in scripts.")
 
-    cli.log.debug("filtering keys: %s", str(cli.args.keys))
-
     organization = use_organization()
 
     if cli.args.resource_type == "organizations":
@@ -405,13 +397,15 @@ def list(cli):
     else:
         cli.log.debug("found at least one %s '%s'", cli.args.resource_type, cli.args.query)
 
-    filtered_matches = []
-    valid_keys = matches[0].keys()
-    for match in matches:
-        filtered_match = { key: match[key] for key in cli.args.keys if key in valid_keys}
-        filtered_matches.append(filtered_match)
-
     if cli.config.general.output == "text":
+        filtered_matches = []
+        # intersection of the set of valid, observed keys in the first match
+        # and the set of configured, desired keys
+        valid_keys = list(set(matches[0].keys()) & set(cli.args.keys))
+        cli.log.debug("filtering keys: %s", str(valid_keys))
+        for match in matches:
+            filtered_match = { key: match[key] for key in cli.args.keys if key in valid_keys}
+            filtered_matches.append(filtered_match)
         if cli.config.general.headers:
             table_headers = filtered_matches[0].keys()
         else:
