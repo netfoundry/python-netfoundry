@@ -7,7 +7,7 @@ import sys
 import time
 from unicodedata import name  # enforce a timeout; sleep
 
-from .utility import (DC_PROVIDERS, EXCLUDED_PATCH_PROPERTIES, HOST_PROPERTIES,
+from .utility import (DC_PROVIDERS, EXCLUDED_PATCH_PROPERTIES,
                       MAJOR_REGIONS, RESOURCES, STATUS_CODES, VALID_SEPARATORS,
                       VALID_SERVICE_PROTOCOLS, Utility, docstring_parameters,
                       eprint, http, is_uuidv4, plural, singular)
@@ -445,15 +445,6 @@ class Network:
                 )
             )
 
-        # routers are a special case because the value of entity._embedded.host.dataCenterId is expected by
-        # downstream consumers of this method to be found at entity.dataCenterId
-        if plural(type) == "edge-routers":
-            if (entity["hostId"]
-                    and "_embedded" in entity.keys()
-                    and "host" in entity['_embedded'].keys()
-                ):
-                for prop in HOST_PROPERTIES:
-                    entity[prop] = entity['_embedded']['host'][prop]
         return(entity)
 
     get_resource = get_resource_by_id
@@ -570,22 +561,7 @@ class Network:
                             response.text
                         )
                     )
-
-        # routers are a special case because the value of entity._embedded.host.dataCenterId is expected by
-        # downstream consumers of this method to be found at entity.dataCenterId
-        if type == "edge-routers":
-            all_routers = list()
-            for entity in all_entities:
-                if (entity["hostId"]
-                        and "_embedded" in entity.keys()
-                        and "host" in entity['_embedded'].keys()
-                    ):
-                    for prop in HOST_PROPERTIES:
-                        entity[prop] = entity['_embedded']['host'][prop]
-                all_routers.extend([entity])
-            return(all_routers)
-        else:
-            return(all_entities)
+        return(all_entities)
 
     def resource_exists_in_network(self, name: str, type: str, deleted: bool=False):
         """Check if a resource of a particular type with a particular name exists in this network.

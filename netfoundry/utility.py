@@ -200,8 +200,6 @@ MAJOR_REGIONS = {
 
 DC_PROVIDERS = ["AWS", "AZURE", "GCP", "OCP"]
 
-HOST_PROPERTIES = ["ownerIdentityId", "ipAddress", "port", "provider", "providerInstanceId", "size", "locationMetadataId", "dataCenterId"]
-
 EXCLUDED_PATCH_PROPERTIES = {
     "edge-routers": ["registration"],
     "services": [],
