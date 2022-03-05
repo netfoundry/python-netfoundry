@@ -199,7 +199,7 @@ class Organization:
                 logging.debug("configured credentials from file '%s'", self.credentials)
 
         if not credentials_configured:
-            logging.warning("token renewal is disabled because API account credentials are not configured")
+            logging.debug("token renewal is disabled because API account credentials are not configured")
 
         # renew token if not existing or imminent expiry, else continue
         if not self.token or self.expiry_seconds < expiry_minimum:
@@ -383,6 +383,42 @@ class Organization:
 
         return(caller)
 
+    def get_identity(self, identity_id: str):
+        """Get an identity by ID.
+
+        :param str identity: UUIDv4 of the identity to get
+        """
+        params = dict()
+        try:
+            headers = { "authorization": "Bearer " + self.token }
+            response = http.get(
+                self.audience+'identity/v1/identities/'+identity_id,
+                proxies=self.proxies,
+                verify=self.verify,
+                headers=headers,
+                params=params
+            )
+            response_code = response.status_code
+        except:
+            raise
+
+        if response_code == STATUS_CODES.codes.OK: # HTTP 200
+            try:
+                identity = response.json()
+            except ValueError as e:
+                logging.error('failed loading identities as an object from response document')
+                raise(e)
+        else:
+            raise Exception(
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    STATUS_CODES._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
+                )
+            )
+
+        return(identity)
+
     def get_identities(self, **kwargs):
         """Find identities.
 
@@ -391,7 +427,6 @@ class Organization:
         params = dict()
         for param in kwargs.keys():
             params[param] = kwargs[param]
-        # try the API account endpoint first, then the endpoint for human, interactive users
         try:
             headers = { "authorization": "Bearer " + self.token }
             response = http.get(

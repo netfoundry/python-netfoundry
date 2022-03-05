@@ -249,6 +249,7 @@ def whoami(cli, echo: bool=True, organization: object=None):
     else:
         return caller
 
+@cli.argument('-f', '--from-file', help='JSON or YAML file')
 @cli.argument('-w','--wait', help='seconds to wait for process execution to finish', default=0)
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
 @cli.subcommand('create a resource from stdin or editor')
@@ -294,13 +295,15 @@ def create(cli):
         if cli.config.create.wait:
             spinner.stop()
 
-@cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs", default="id=%")
+@cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs", default=None)
 @cli.argument('-a', '--accept', arg_only=True, default=None, choices=['create','update'], help="request the as=create or as=update form of the resource")
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
 @cli.subcommand('get a single resource by query')
 def get(cli):
     """Get a single resource as a dictionary."""
     organization = use_organization()
+    match = {}
+    matches = []
     if cli.args.resource_type == "organization":
         if 'id' in cli.args.query.keys():
             match = organization.get_organization(id=cli.args.query['id'])
@@ -310,35 +313,40 @@ def get(cli):
                 match = organization.get_organization(id=matches[0]['id'])
     elif cli.args.resource_type == "network-group":
         if 'id' in cli.args.query.keys():
-            match = organization.get_organization(id=cli.args.query['id'])
+            match = organization.get_network_group(network_group_id=cli.args.query['id'])
         else:
             matches = organization.get_network_groups_by_organization(**cli.args.query)
             if len(matches) == 1:
                 match = organization.get_network_group(network_group_id=matches[0]['id'])
     elif cli.args.resource_type == "identity":
         if 'id' in cli.args.query.keys():
-            match = organization.get_organization(id=cli.args.query['id'])
+            match = organization.get_identity(identity_id=cli.args.query['id'])
         else:
             matches = organization.get_identities(**cli.args.query)
             if len(matches) == 1:
                 match = matches[0]
     elif cli.args.resource_type == "network":
         if 'id' in cli.args.query.keys():
-            match = organization.get_organization(id=cli.args.query['id'])
+            match = organization.get_network(network_id=cli.args.query['id'])
         else:
-            if cli.config.general.network_group:
+            if cli.config.general.network_group and not cli.config.general.network:
                 network_group = use_network_group(organization, group=cli.config.general.network_group)
                 matches = organization.get_networks_by_group(network_group.id, **cli.args.query)
+            elif cli.config.general.network:
+                network, network_group = use_network(
+                    organization=organization,
+                    network=cli.config.general.network,
+                )
+                match = network.describe
             else:
                 matches = organization.get_networks_by_organization(**cli.args.query)
             if len(matches) == 1:
                 match = organization.get_network(network_id=matches[0]['id'], embed="all", accept=cli.args.accept)
-    else:
+    else: # is a resource in the network domain
         network, network_group = use_network(
             organization=organization,
             group=cli.config.general.network_group,
             network=cli.config.general.network,
-            operation='delete'
         )
         if 'id' in cli.args.query.keys():
             match = network.get_resource_by_id(type=cli.args.resource_type, id=cli.args.query['id'], accept=cli.args.accept)
