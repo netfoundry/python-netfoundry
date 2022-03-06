@@ -282,7 +282,7 @@ def whoami(cli, echo: bool=True, organization: object=None):
 @cli.argument('-f', '--file', help='JSON or YAML file', type=argparse.FileType('r', encoding='UTF-8'))
 @cli.argument('-w','--wait', help='seconds to wait for process execution to finish', default=0)
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
-@cli.subcommand('create a resource from stdin or editor')
+@cli.subcommand('create a resource from stdin or file')
 def create(cli):
     """Create a resource.
     
@@ -299,13 +299,15 @@ def create(cli):
             create_input_object = {"hint": "No template was found for resource type {type}. Replace the contents of this buffer with the request body as YAML or JSON to create a resource. networkId will be added automatically.".format(type=cli.args.resource_type)}
     elif cli.args.file:
         try:
-            create_input_lines = cli.args.file.readlines()
+            create_input_lines = cli.args.file.read()
+            cli.log.debug("got lines from file: %s", str(create_input_lines))
         except Exception as e:
             cli.log.error("failed to read the input file: %s", e)
             raise e
     else:
         for line in sys.stdin:
             create_input_lines += line
+            cli.log.debug("got lines from stdin: %s", str(create_input_lines))
     if not create_input_object and create_input_lines:
         try:
             create_input_object = yaml_loads(create_input_lines)
@@ -332,7 +334,7 @@ def create(cli):
             network_group = use_network_group(organization=organization)
         elif len(organization.get_network_groups_by_organization()) > 1:
             cli.log.error("specify --network-group because there is more than one available to caller's identity")
-            raise SystemExit
+            raise SystemExit()
         else:
             network_group_id = organization.get_network_groups_by_organization()[0]['id']
             network_group = use_network_group(organization=organization, id=network_group_id)
@@ -349,15 +351,21 @@ def create(cli):
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type_name) for type_name, type_props in RESOURCES.items() if type_props['domain'] == "network"])
 # this allows us to pass the edit subcommand's cli object to function get without further modifying that functions params
 @cli.argument('-a', '--accept', arg_only=True, default='update', help=argparse.SUPPRESS)
-@cli.subcommand('edit a single resource selected by query')
+@cli.subcommand('edit a single resource selected by query with editor defined in NETFOUNDRY_EDITOR or EDITOR')
 def edit(cli):
-    """Edit a single resource as YAML."""
+    """Edit a single resource as YAML.
+    
+    Configure env var NETFOUNDRY_EDITOR or EDITOR as path to executable that
+    accepts a file to edit as first positional parameter and waits for exit to
+    return e.g. "code --wait".
+    """
     edit_resource_object, network, network_group, organization = get(cli, echo=False)
-    cli.log.debug("opening %s named '%s' for editing", edit_resource_object['name'])
+    cli.log.debug("opening %s named '%s' for editing", cli.args.resource_type, edit_resource_object['name'])
     update_request_object = edit_object_as_yaml(edit_resource_object)
     network.put_resource(put=update_request_object, type=cli.args.resource_type)
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
+@cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
 @cli.argument('-a', '--accept', arg_only=True, choices=['create','update'], help="request the as=create or as=update form of the resource")
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
 @cli.subcommand('get a single resource by query')
@@ -415,7 +423,6 @@ def get(cli, echo: bool=True):
         else:
             matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
             if len(matches) == 1:
-                cli.log.debug("found exactly one %s '%s'", cli.args.resource_type, cli.args.query)
                 match = network.get_resource_by_id(type=cli.args.resource_type, id=matches[0]['id'], accept=cli.args.accept)
 
     if match:
@@ -423,10 +430,23 @@ def get(cli, echo: bool=True):
         if not echo:
             return match, network, network_group, organization
         else:
+            if cli.args.keys:
+                # intersection of the set of valid, observed keys in the match
+                # and the set of configured, desired keys
+                valid_keys = set(match.keys()) & set(cli.args.keys)
+                if valid_keys: # if at least one element in intersection set
+                    cli.log.debug("valid keys: %s", str(valid_keys))
+                    filtered_match = { key: match[key] for key in match.keys() if key in valid_keys}
+                else:
+                    cli.log.error("no valid keys requested in list: %s, need at least one of %s", str(cli.args.keys), str(match.keys()))
+                    exit(1)
+            else:
+                cli.log.debug("not filtering output keys")
+                filtered_match = match
             if cli.config.general.output in ["yaml","text"]:
-                cli.echo(yaml_dumps(match, indent=4, default_flow_style=False))
+                cli.echo(yaml_dumps(filtered_match, indent=4, default_flow_style=False))
             elif cli.config.general.output == "json":
-                cli.echo(json_dumps(match, indent=4))
+                cli.echo(json_dumps(filtered_match, indent=4))
     elif len(matches) == 0:
         cli.log.info("found no %s '%s'", cli.args.resource_type, cli.args.query)
         return True
@@ -511,9 +531,9 @@ def list(cli):
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
 @cli.argument('-w','--wait', help='seconds to wait for confirmation of delete', default=0)
-@cli.subcommand('delete a resource')
+@cli.subcommand('delete a resource in the network domain')
 def delete(cli):
-    """Delete a resource."""
+    """Delete a resource in the network domain."""
     organization = use_organization()
     network, network_group = use_network(
         organization=organization,
@@ -522,12 +542,20 @@ def delete(cli):
         operation='delete'
     )
 
+    spinner = cli.spinner(text=str(), spinner='dots12', stream=sys.stderr)
+    if sys.stdout.isatty():
+        spinner.enabled = True
+    else:
+        spinner.enabled = False
+        cli.log.debug("spinner disabled")
+
     if cli.args.resource_type == "network":
         if not cli.args.query == {}:
             cli.log.warn("ignoring name='%s' because this operation applies to the entire network that is already selected", str(cli.args.query))
         try:
             if cli.args.yes or questions.yesno("confirm delete network '{name}'".format(name=network.name), default=False):
-                with cli.spinner(text='deleting {net}'.format(net=network.name), spinner='dots12', enabled=cli.config.general.interactive):
+                spinner.text = 'deleting {net}'.format(net=network.name)
+                with spinner:
                     try:
                         network.delete_network(progress=False, wait=cli.config.delete.wait)
                     except KeyboardInterrupt as e:
@@ -551,7 +579,8 @@ def delete(cli):
             cli.log.debug("found one %s '%s'", cli.args.resource_type, str(cli.args.query))
             try:
                 if cli.args.yes or questions.yesno("confirm delete {type} '{name}'".format(type=cli.args.resource_type, name=matches[0]['name']), default=False):
-                    with cli.spinner(text="deleting {type} '{name}'".format(type=cli.args.resource_type, name=matches[0]['name']), spinner='dots12', enabled=cli.config.general.interactive):
+                    spinner.text = "deleting {type} '{name}'".format(type=cli.args.resource_type, name=matches[0]['name'])
+                    with spinner:
                         try:
                             network.delete_resource(type=cli.args.resource_type, id=matches[0]['id'])
                         except KeyboardInterrupt as e:
@@ -651,17 +680,26 @@ def use_network(organization: object, network: str=None, group: str=None, operat
             cli.log.error("failed to find a network named '{name}'.".format(name=network_identifier))
             exit(1)
 
+    spinner = cli.spinner(text=str(), spinner='dots12', stream=sys.stderr)
+    if sys.stdout.isatty():
+        spinner.enabled = True
+    else:
+        spinner.enabled = False
+        cli.log.debug("spinner disabled")
+
     # use the Network
     network = Network(network_group, network=network_identifier)
     if operation == delete:
+        spinner.text = 'waiting for {net} to have status DELETING or DELETED'.format(net=network_identifier)
         try:
-            with cli.spinner(text='waiting for {net} to have status DELETING or DELETED'.format(net=network_identifier), spinner='dots12', enabled=cli.config.general.interactive):
+            with spinner:
                 network.wait_for_statuses(["DELETING","DELETED"],wait=999,progress=False)
         except KeyboardInterrupt as e:
             cli.log.debug("wait cancelled by user")
     elif operation in ['create','read','update']:
+        spinner.text = 'waiting for {net} to have status PROVISIONED'.format(net=network_identifier)
         try:
-            with cli.spinner(text='waiting for {net} to have status PROVISIONED'.format(net=network_identifier), spinner='dots12', enabled=cli.config.general.interactive):
+            with spinner:
                 network.wait_for_status("PROVISIONED",wait=999,progress=False)
         except KeyboardInterrupt as e:
             cli.log.debug("wait cancelled by user")
@@ -670,22 +708,23 @@ def use_network(organization: object, network: str=None, group: str=None, operat
 def edit_object_as_yaml(edit: object):
     """Edit a resource object as YAML and return as object upon exit.
     
-    Configure env var EDITOR as path to executable that accepts a file to edit
-    as first positional parameter.
-
     :param obj input: a deserialized (object) to edit and return as yaml
     """
-    EDITOR = os.environ.get('EDITOR','vim')
+    EDITOR = os.environ.get('NETFOUNDRY_EDITOR',os.environ.get('EDITOR','vim'))
     yaml_dumps(edit, default_flow_style=False)
-    with tempfile.NamedTemporaryFile(suffix=".tmp") as tf:
+    with tempfile.NamedTemporaryFile(suffix=".yml") as tf:
         tf.write(yaml_dumps(edit, default_flow_style=False).encode())
         tf.flush()
-        call([EDITOR, tf.name])
+        return_code = call(EDITOR.split()+[tf.name])
 
         tf.seek(0)
         edited = tf.read()
-    edited_object = yaml_loads(edited)
-    return edited_object
+    if return_code == 0:
+        edited_object = yaml_loads(edited)
+        return edited_object
+    else:
+        cli.log.debug("error editing temporary file")
+        exit(1)
 
 if __name__ == '__main__':
     cli()
