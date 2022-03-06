@@ -717,16 +717,28 @@ class Network:
         Blindly updates the entity in self link and returns the response object.
             :param put: required dictionary with all properties required by the particular resource type's model
             :param type: optional entity type, needed if put object lacks a self link, ignored if self link present
-            :param id: optional entity ID, needed if put object lacks a self link, ignored if self link present
+            :param id: optional entity ID, needed if put object lacks a self link and id property, ignored if self link present
         """
         # prefer the self link if present, else require type and id to compose the self link
         try: 
             self_link = put['_links']['self']['href']
         except KeyError:
+            if not type:
+                logging.error('need put object with "self" link or need type param')
+                raise Exception('need put object with "self" link or need type param')
+            if not id:
+                if 'id' in put.keys():
+                    id = put['id']
+                    logging.debug("got id '%s' from put param object", id)
+                else:
+                    logging.error('missing id of {type} to update, need put object with "self" link, "id" property, or need "id" param'.format(type=type))
+                    raise Exception('missing id of {type} to update, need put object with "self" link, "id" property, or need "id" param'.format(type=type))
             try: self_link = self.session.audience+'core/v2/'+plural(type)+'/'+id
             except NameError as e:
                 raise(e)
-        else: type = self_link.split('/')[5] # e.g. endpoints, app-wans, edge-routers, etc...
+        else:
+            type = self_link.split('/')[5] # e.g. endpoints, app-wans, edge-routers, etc...
+            #id = self_link.split('/')[6] # UUIDv4 from self reference URL # not currently using this if we already have the self link
         try:
             headers = {
                 "authorization": "Bearer " + self.session.token 

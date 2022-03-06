@@ -346,16 +346,16 @@ def create(cli):
         resource = network.create_resource(type=cli.args.resource_type, properties=create_object, wait=cli.config.create.wait)
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
-@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
+@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type_name) for type_name, type_props in RESOURCES.items() if type_props['domain'] == "network"])
 # this allows us to pass the edit subcommand's cli object to function get without further modifying that functions params
 @cli.argument('-a', '--accept', arg_only=True, default='update', help=argparse.SUPPRESS)
 @cli.subcommand('edit a single resource selected by query')
 def edit(cli):
     """Edit a single resource as YAML."""
     edit_resource_object, network, network_group, organization = get(cli, echo=False)
-    cli.debug("opening %s named '%s' for editing", edit_resource_object['name'])
+    cli.log.debug("opening %s named '%s' for editing", edit_resource_object['name'])
     update_request_object = edit_object_as_yaml(edit_resource_object)
-    network.put_resource(put=update_request_object)
+    network.put_resource(put=update_request_object, type=cli.args.resource_type)
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
 @cli.argument('-a', '--accept', arg_only=True, choices=['create','update'], help="request the as=create or as=update form of the resource")
