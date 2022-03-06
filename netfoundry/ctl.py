@@ -13,15 +13,15 @@ import shutil
 import sys
 import tempfile
 import time
-from base64 import b64decode
+#from base64 import b64decode
 from json import dumps as json_dumps
 from json import loads as json_loads
 from subprocess import call
 
-from cryptography.hazmat.primitives.serialization import Encoding, pkcs7
+#from cryptography.hazmat.primitives.serialization import Encoding, pkcs7
 from jwt.exceptions import PyJWTError
 from milc import set_metadata
-from requests import get as http_get
+#from requests import get as http_get
 from tabulate import tabulate
 from yaml import dump as yaml_dumps
 from yaml import full_load as yaml_loads
@@ -32,6 +32,7 @@ from .network import Network
 from .network_group import NetworkGroup
 from .organization import Organization
 from .utility import RESOURCES, Utility, plural, singular
+from packaging import version
 
 set_metadata(version="v"+get_versions()['version']) # must precend import milc.cli
 import milc.subcommand.config
@@ -59,15 +60,15 @@ class StoreListKeys(argparse.Action):
         setattr(namespace, self.dest, values.split(','))
 
 @cli.argument('-p','--profile', default='nfctl', help='login profile for storing and retrieving concurrent, discrete sessions')
-@cli.argument('-C', '--credentials', help='API account JSON file from web console', default=None)
-@cli.argument("-O", "--organization", help="label or ID of an alternative organization (default is caller's org)" )
+@cli.argument('-C', '--credentials', help='API account JSON file from web console')
+@cli.argument('-O', '--organization', help="label or ID of an alternative organization (default is caller's org)" )
 @cli.argument('-N', '--network', help='caseless name of the network to manage')
-@cli.argument("-G", "--network-group", help="shortname or ID of a network group to search for network_identifier")
+@cli.argument('-G', '--network-group', help="shortname or ID of a network group to search for network_identifier")
 @cli.argument('-O','--output', help="object formats suppress console messages", default="text", choices=['text', 'yaml','json'])
 @cli.argument('-b','--borders', default=True, action='store_boolean', help='print cell borders in text tables')
 @cli.argument('-H','--headers', default=True, action='store_boolean', help='print column headers in text tables')
 @cli.argument('-Y', '--yes', action='store_true', arg_only=True, help='answer yes to potentially-destructive operations')
-@cli.argument('-P', '--proxy', help="like http://localhost:8080 or socks5://localhost:9046", default=None)
+@cli.argument('-P', '--proxy', help="like http://localhost:8080 or socks5://localhost:9046")
 @cli.entrypoint('configure the CLI to manage a network')
 def main(cli):
     """Configure the CLI to manage a network."""
@@ -75,16 +76,19 @@ def main(cli):
 
 @cli.argument('api', help=argparse.SUPPRESS, arg_only=True, nargs='?', default="organization", choices=['organization', 'ziti'])
 @cli.argument('-s','--shell', help=argparse.SUPPRESS, arg_only=True, action="store_true", default=False)
-@cli.argument('-z','--ziti-cli', help=argparse.SUPPRESS)
+@cli.argument('-v','--ziti-version', help=argparse.SUPPRESS, default='0.22.0') # minium ziti CLI version supports --cli-identity and --read-only
+@cli.argument('-c','--ziti-cli', help=argparse.SUPPRESS)
 @cli.subcommand('login to a management API', hidden=True)
 def login(cli, api: str=None, shell: bool=None):
     """Login to an API and cache the expiring token."""
     if api:
-        cli.args.api = api
+        cli.args['api'] = api
     if shell is not None:
-        cli.args.shell = shell
+        cli.args['shell'] = shell
+    elif cli.args.shell:
+        pass
     else:
-        cli.args.shell = False
+        cli.args['shell'] = False
     # if logging in to a NF org (default)
     if cli.args.api == "organization":
         organization = use_organization()
@@ -186,6 +190,18 @@ export MOPENV={env}
         else:
             cli.log.critical("missing executable '%s' in PATH: %s", ziti_cli, os.environ['PATH'])
             exit(1)
+        exec = cli.run([ziti_cli, '--version'])
+        if exec.returncode == 0:
+            cli.log.debug("found ziti CLI '{ziti_cli}' version '{ziti_version}'".format(ziti_cli=which_ziti, ziti_version=exec.stdout))
+        else:
+            cli.log.error("failed to get ziti CLI version: %s", exec.stderr)
+            exit(exec.returncode)
+        try:
+            assert(version.parse(exec.stdout) >= version.parse(cli.config.login.ziti_version))
+        except AssertionError as e:
+            cli.log.error("found ziti CLI '{ziti_cli}' but version is not at least {ziti_version}: {e}".format(ziti_cli=which_ziti, ziti_version=cli.config.login.ziti_version, e=e))
+            exit(1)
+
         organization = use_organization()
         network, network_group = use_network(
             organization=organization,
@@ -199,7 +215,8 @@ export MOPENV={env}
         else:
             ziti_ctrl_ip = network_controller['_embedded']['host']['ipAddress']
         try:
-            secrets = network.get_controller_secrets(network.network_controller['id'])
+            session = network.get_controller_session(network.network_controller['id'])
+            ziti_token = session['sessionToken']
         except:
             raise
         else:
@@ -210,15 +227,26 @@ export MOPENV={env}
                 }
             else:
                 proxies = dict()
-            well_known_response = http_get('https://'+ziti_ctrl_ip+'/.well-known/est/cacerts', proxies=proxies, verify=False)
-            well_known_decoding = b64decode(well_known_response.text)
-            well_known_certs = pkcs7.load_der_pkcs7_certificates(well_known_decoding)
-            well_known_pem = tempdir+'/well-known-certs.pem'
-            with open(well_known_pem, 'wb') as pem:
-                for cert in well_known_certs:
-                    pem.write(cert.public_bytes(Encoding.PEM))
-            os.system(ziti_cli+' edge login '+ziti_ctrl_ip+' -u '+secrets['zitiUserId']+' -p '+secrets['zitiPassword']+' -c '+well_known_pem)
-            os.system(ziti_cli+' edge --help')
+            ### commented because new ziti CLI has built-in certs opt-in and caching
+            # well_known_response = http_get('https://'+ziti_ctrl_ip+'/.well-known/est/cacerts', proxies=proxies, verify=False)
+            # well_known_decoding = b64decode(well_known_response.text)
+            # well_known_certs = pkcs7.load_der_pkcs7_certificates(well_known_decoding)
+            # well_known_pem = tempdir+'/well-known-certs.pem'
+            # with open(well_known_pem, 'wb') as pem:
+            #     for cert in well_known_certs:
+            #         pem.write(cert.public_bytes(Encoding.PEM))
+            network_name_safe = '_'.join(network.name.casefold().split())
+            ziti_cli_identity = '-'.join([organization.environment.casefold(), organization.label.casefold(), network_group.name.casefold(), network_name_safe])
+            ziti_mgmt_port = str(443)
+            exec = cli.run([ziti_cli, 'edge', 'login', '--read-only', '--cli-identity', ziti_cli_identity, ziti_ctrl_ip+':'+ziti_mgmt_port, '--token', ziti_token], capture_output=False)
+            if exec.returncode == 0: # if succeeded
+                exec = cli.run('{ziti} edge use {identity}'.format(ziti=ziti_cli, identity=ziti_cli_identity).split(), capture_output=False)
+                if not exec.returncode == 0: # if error
+                    cli.log.error("failed to switch default ziti login identity to '%s'", ziti_cli_identity)
+                    exit(exec.returncode)
+            else:
+                cli.log.error("failed to login")
+                exit(exec.returncode)
 
 @cli.subcommand('logout from an identity organization')
 def logout(cli):
@@ -249,23 +277,52 @@ def whoami(cli, echo: bool=True, organization: object=None):
     else:
         return caller
 
-@cli.argument('-f', '--from-file', help='JSON or YAML file')
+@cli.argument('-f', '--from-file', help='JSON or YAML file', type=argparse.FileType('r', encoding='UTF-8'))
 @cli.argument('-w','--wait', help='seconds to wait for process execution to finish', default=0)
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
 @cli.subcommand('create a resource from stdin or editor')
 def create(cli):
-    """Create a resource."""
-    create_yaml = str()
-    if sys.stdin.isatty():
+    """Create a resource.
+    
+    If interactive then open template or stdin or --from-file in EDITOR. Then
+    send create request upon EDITOR exit. If not interactive then send input
+    object as create request immediately.
+    """
+    create_input_object, create_input_lines, create_request_yaml = object(), str(), str()
+    if sys.stdin.isatty() and not cli.args.from_file:
         if 'create_template' in RESOURCES[plural(cli.args.resource_type)].keys():
-            template = RESOURCES[plural(cli.args.resource_type)]['create_template']
+            create_input_object = RESOURCES[plural(cli.args.resource_type)]['create_template']
         else:
-            template = {"hint": "No template was found for resource type {type}. Replace the contents of this buffer with the request body as YAML or JSON to create a resource. networkId will be added automatically.".format(type=cli.args.resource_type)}
-        create_yaml = edit_template(template)
+            create_input_object = {"hint": "No template was found for resource type {type}. Replace the contents of this buffer with the request body as YAML or JSON to create a resource. networkId will be added automatically.".format(type=cli.args.resource_type)}
+    elif cli.args.from_file:
+        try:
+            create_input_lines = cli.args.from_file.readlines()
+        except Exception as e:
+            cli.log.error("failed to read the input file: %s", e)
+            raise e
     else:
         for line in sys.stdin:
-            create_yaml+=line
-    create_object = yaml_loads(create_yaml)
+            create_input_lines += line
+
+    if not create_input_object and create_input_lines:
+        try:
+            create_input_object = yaml_loads(create_input_lines)
+        except Exception as e:
+            cli.log.debug("failed to parse input lines from file as YAML, trying JSON: %s", e)
+            try:
+                create_input_object = json_loads(create_input_lines)
+            except Exception as e:
+                cli.log.debug("failed to parse input lines from file as JSON: %s", e)
+    if not create_input_object:
+        cli.log.error("failed to parse input lines as an object (deserialized JSON or YAML)")
+        exit(1)
+
+    # if stdout is connected to a terminal then open the create/template input for editing and finish create on exit
+    if sys.stdout.isatty():
+        create_request_yaml = edit_object_as_yaml(create_input_object)
+    else:
+        create_request_yaml = create_input_object
+    create_object = yaml_loads(create_request_yaml)
 
     organization = use_organization()
 
@@ -295,8 +352,8 @@ def create(cli):
         if cli.config.create.wait:
             spinner.stop()
 
-@cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs", default=None)
-@cli.argument('-a', '--accept', arg_only=True, default=None, choices=['create','update'], help="request the as=create or as=update form of the resource")
+@cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
+@cli.argument('-a', '--accept', arg_only=True, choices=['create','update'], help="request the as=create or as=update form of the resource")
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
 @cli.subcommand('get a single resource by query')
 def get(cli):
@@ -370,13 +427,13 @@ def get(cli):
         exit(len(matches))
 
 
-@cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs", default="id=%")
-@cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)", default=['name','label','organizationShortName','id','createdBy','createdAt','status','zitiId','provider','locationCode','ipAddress','region','size'])
+@cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
+@cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=RESOURCES.keys())
 @cli.subcommand('find resources as lists')
 def list(cli):
     """Find resources as lists."""
-    if not sys.stdout.isatty():
+    if not sys.stdout.isatty() and not cli.config.general.interactive:
         cli.log.warn("nfctl does not have a stable CLI interface. Use with caution in scripts.")
 
     organization = use_organization()
@@ -407,15 +464,25 @@ def list(cli):
     else:
         cli.log.debug("found at least one %s '%s'", cli.args.resource_type, cli.args.query)
 
-    if cli.config.general.output == "text":
+    valid_keys = set()
+    if cli.args.keys:
         # intersection of the set of valid, observed keys in the first match
         # and the set of configured, desired keys
         valid_keys = set(matches[0].keys()) & set(cli.args.keys)
+    elif cli.config.general.output == "text":
+        valid_keys = set(matches[0].keys()) & set(['name','label','organizationShortName','id','createdBy','createdAt','status','zitiId','provider','locationCode','ipAddress','region','size'])
+
+    if valid_keys:
         cli.log.debug("valid keys: %s", str(valid_keys))
         filtered_matches = []
         for match in matches:
-            filtered_match = { key: match[key] for key in cli.args.keys if key in valid_keys}
+            filtered_match = { key: match[key] for key in match.keys() if key in valid_keys}
             filtered_matches.append(filtered_match)
+    else:
+        cli.log.debug("not filtering output keys")
+        filtered_matches = matches
+
+    if cli.config.general.output == "text":
         if cli.config.general.headers:
             table_headers = filtered_matches[0].keys()
         else:
@@ -429,11 +496,11 @@ def list(cli):
             +tabulate(tabular_data=[match.values() for match in filtered_matches], headers=table_headers, tablefmt=table_borders)
         )
     elif cli.config.general.output == "yaml":
-        cli.echo(yaml_dumps(matches, indent=4, default_flow_style=False))
+        cli.echo(yaml_dumps(filtered_matches, indent=4, default_flow_style=False))
     elif cli.config.general.output == "json":
-        cli.echo(json_dumps(matches, indent=4))
+        cli.echo(json_dumps(filtered_matches, indent=4))
 
-@cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs", default=None)
+@cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
 @cli.subcommand('delete a resource')
 def delete(cli):
@@ -512,6 +579,7 @@ def use_organization(prompt: bool=True):
                 os.environ['NETFOUNDRY_API_TOKEN'] = questions.password(prompt='Enter Bearer Token:', confirm=False, validate=None)
             except KeyboardInterrupt as e:
                 cli.log.debug("input cancelled by user")
+                exit(1)
             try:
                 organization = Organization(
                     credentials=cli.config.general.credentials if cli.config.general.credentials else None,
@@ -574,27 +642,31 @@ def use_network(organization: object, network: str=None, group: str=None, operat
 
     # use the Network
     network = Network(network_group, network=network_identifier)
-    if cli.config.general.output == "text":
+    spinner = None
+    if cli.config.general.output == "text" and sys.stdout.isatty():
         spinner = cli.spinner(text='waiting for {net} to have status PROVISIONED'.format(net=network_identifier), spinner='dots12')
         spinner.start()
-        if operation == delete:
-            try:
-                network.wait_for_statuses(["DELETING","DELETED"],wait=999,progress=False)
-            except KeyboardInterrupt as e:
-                cli.log.debug("wait cancelled by user")
-        elif operation in ['create','read','update']:
-            try:
-                network.wait_for_status("PROVISIONED",wait=999,progress=False)
-            except KeyboardInterrupt as e:
-                cli.log.debug("wait cancelled by user")
+    if operation == delete:
+        try:
+            network.wait_for_statuses(["DELETING","DELETED"],wait=999,progress=False)
+        except KeyboardInterrupt as e:
+            cli.log.debug("wait cancelled by user")
+    elif operation in ['create','read','update']:
+        try:
+            network.wait_for_status("PROVISIONED",wait=999,progress=False)
+        except KeyboardInterrupt as e:
+            cli.log.debug("wait cancelled by user")
+    if spinner:
         spinner.stop()
     return network, network_group
 
-def edit_template(template: object):
-    """
-    Edit a template and return the saved buffer.
+def edit_object_as_yaml(template: object):
+    """Edit a template and return the buffer on exit.
+    
+    Configure env var EDITOR as path to executable that accepts a file to edit
+    as first positional parameter.
 
-    :param obj template: a deserialized template to edit and return as yaml
+    :param obj input: a deserialized (object) to edit and return as yaml
     """
     EDITOR = os.environ.get('EDITOR','vim')
     yaml_dumps(template, default_flow_style=False)

@@ -2028,9 +2028,9 @@ class Network:
     def get_controller_secrets(self, id: str):
         """Return the controller management login credentials as {zitiUserId: ASDF, zitiPassword: ASDF}.
 
+        Note that this function requires privileged access to the controller and is intended for emergency, read-only operations by customer support engineers.
         :param id: the UUID of the network controller
         """
-
         try:
             headers = { "authorization": "Bearer " + self.session.token }
             entity_url = self.session.audience+'core/v2/network-controllers/'+id+'/secrets'
@@ -2057,8 +2057,52 @@ class Network:
                     response.text
                 )
             )
-
+        try:
+            ziti_secrets_keys = ['zitiUserId','zitiPassword']
+            assert(set(ziti_secrets_keys) & set(secrets.keys()) == set(ziti_secrets_keys))
+        except AssertionError as e:
+            raise e
         return(secrets)
+
+    def get_controller_session(self, id: str):
+        """Return the controller management API login session token as {sessionToken: UUID, expiresAt: DATETIME}.
+
+        Note that this function requires privileged access to the controller and is intended for emergency, read-only operations by customer support engineers.
+        :param id: the UUID of the network controller
+        """
+        try:
+            headers = { "authorization": "Bearer " + self.session.token }
+            entity_url = self.session.audience+'core/v2/network-controllers/'+id+'/session'
+            response = http.get(
+                entity_url,
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers
+            )
+            response_code = response.status_code
+        except:
+            raise
+
+        if response_code == STATUS_CODES.codes.OK: # HTTP 200
+            try:
+                session = response.json()
+            except ValueError as e:
+                logging.error('failed loading session as an object from response document')
+                raise(e)
+        else:
+            raise Exception(
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    STATUS_CODES._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
+                )
+            )
+        try:
+            ziti_session_keys = ['expiresAt','sessionToken']
+            assert(set(ziti_session_keys) & set(session.keys()) == set(ziti_session_keys))
+        except AssertionError as e:
+            raise e
+        return(session)
 
     def wait_for_property_defined(self, property_name: str, property_type: object=str, entity_type: str="network", wait: int=60, sleep: int=3, id: str=None, progress: bool=False):
         """Poll until expiry for the expected property to become defined with the any value of the expected type.
