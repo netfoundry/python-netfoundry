@@ -77,10 +77,6 @@ jobs:
       run: |
         register-python-argcomplete nfctl
 
-    - name: Install NetFoundry Support Dependencies
-      run: |
-        pip3 install -r ./requirements-nfsupport.txt
-
     - name: Run the demo script and NF CLI to smoke test installed version
       env:
         NETWORK_NAME: github_smoketest_run${{ github.run_id }}
