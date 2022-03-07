@@ -31,7 +31,7 @@ from .exceptions import NFAPINoCredentials
 from .network import Network
 from .network_group import NetworkGroup
 from .organization import Organization
-from .utility import RESOURCES, Utility, plural, singular
+from .utility import NETWORK_RESOURCES, RESOURCES, Utility, plural, singular
 from packaging import version
 
 set_metadata(version="v"+get_versions()['version']) # must precend import milc.cli
@@ -129,13 +129,13 @@ def login(cli, api: str=None, shell: bool=None):
         # configure the current shell)
         if not cli.args.shell and cli.config.general.output == "text":
             summary_table = [['domain', 'summary']]
-            summary_table.append(['organization', '"{org_name}" ({org_label}@{env}) logged in as {fullname} ({email}) until {expiry_timestamp} ({expiry_seconds}s)'.format(
+            summary_table.append(['organization', '"{org_name}" ({org_label}@{env}) logged in as {fullname} ({email}) until {expiry_timestamp} (T-{expiry_seconds}s)'.format(
                     fullname=summary_object['caller']['name'],
                     email=summary_object['caller']['email'],
                     org_label=organization.label,
                     org_name=organization.name,
                     env=organization.environment,
-                    expiry_timestamp=time.strftime('%Y-%m-%d %H:%M:%S GMT%z', time.localtime(organization.expiry)),
+                    expiry_timestamp=time.strftime('%H:%M GMT%z', time.localtime(organization.expiry)),
                     expiry_seconds=int(organization.expiry_seconds)
                 )])
             if network_group:
@@ -281,7 +281,7 @@ def whoami(cli, echo: bool=True, organization: object=None):
 
 @cli.argument('-f', '--file', help='JSON or YAML file', type=argparse.FileType('r', encoding='UTF-8'))
 @cli.argument('-w','--wait', help='seconds to wait for process execution to finish', default=0)
-@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
+@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in NETWORK_RESOURCES.keys()])
 @cli.subcommand('create a resource from stdin or file')
 def create(cli):
     """Create a resource.
@@ -293,8 +293,8 @@ def create(cli):
     # get the input object if available, else get the lines (serialized YAML or JSON) and try to deserialize
     create_input_object, create_input_lines, create_object = None, str(), None
     if sys.stdin.isatty() and not cli.args.file:
-        if 'create_template' in RESOURCES[plural(cli.args.resource_type)].keys():
-            create_input_object = RESOURCES[plural(cli.args.resource_type)]['create_template']
+        if 'create_template' in NETWORK_RESOURCES[plural(cli.args.resource_type)].keys():
+            create_input_object = NETWORK_RESOURCES[plural(cli.args.resource_type)]['create_template']
         else:
             create_input_object = {"hint": "No template was found for resource type {type}. Replace the contents of this buffer with the request body as YAML or JSON to create a resource. networkId will be added automatically.".format(type=cli.args.resource_type)}
     elif cli.args.file:
@@ -348,7 +348,7 @@ def create(cli):
         resource = network.create_resource(type=cli.args.resource_type, properties=create_object, wait=cli.config.create.wait)
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
-@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type_name) for type_name, type_props in RESOURCES.items() if type_props['domain'] == "network"])
+@cli.argument('resource_type', arg_only=True, help='type of resource', choices=NETWORK_RESOURCES.keys())
 # this allows us to pass the edit subcommand's cli object to function get without further modifying that functions params
 @cli.argument('-a', '--accept', arg_only=True, default='update', help=argparse.SUPPRESS)
 @cli.subcommand('edit a single resource selected by query with editor defined in NETFOUNDRY_EDITOR or EDITOR')
@@ -407,7 +407,7 @@ def get(cli, echo: bool=True):
                     organization=organization,
                     network=cli.config.general.network,
                 )
-                match = network.describe
+                match = organization.get_network(network_id=network.id, embed="all", accept=cli.args.accept)
             else:
                 matches = organization.get_networks_by_organization(**cli.args.query)
             if len(matches) == 1:
@@ -552,7 +552,7 @@ def list(cli):
         cli.echo(json_dumps(filtered_matches, indent=4))
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
-@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
+@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in NETWORK_RESOURCES.keys()])
 @cli.argument('-w','--wait', help='seconds to wait for confirmation of delete', default=0)
 @cli.subcommand('delete a resource in the network domain')
 def delete(cli):

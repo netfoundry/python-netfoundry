@@ -193,6 +193,8 @@ RESOURCES = {
     }
 }
 
+NETWORK_RESOURCES = {key: RESOURCES[key] for key in RESOURCES.keys() if RESOURCES[key]['domain'] == "network"}
+
 # TODO: [MOP-13441] associate locations with a short list of major geographic regions / continents
 MAJOR_REGIONS = {
     "AWS" : {

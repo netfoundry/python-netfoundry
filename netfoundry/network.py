@@ -8,7 +8,7 @@ import time
 from unicodedata import name  # enforce a timeout; sleep
 
 from .utility import (DC_PROVIDERS, EXCLUDED_PATCH_PROPERTIES,
-                      MAJOR_REGIONS, RESOURCES, STATUS_CODES, VALID_SEPARATORS,
+                      MAJOR_REGIONS, NETWORK_RESOURCES, STATUS_CODES, VALID_SEPARATORS,
                       VALID_SERVICE_PROTOCOLS, Utility, docstring_parameters,
                       eprint, http, is_uuidv4, plural, singular)
 
@@ -224,7 +224,7 @@ class Network:
 
         return(valid_port_ranges)
 
-    @docstring_parameters(resource_entity_types=str(RESOURCES.keys()))
+    @docstring_parameters(resource_entity_types=str(NETWORK_RESOURCES.keys()))
     def validate_entity_roles(self, entities: list, type: str):
         """Return a list of valid, existing entities and hashtag role attributes.
         
@@ -418,11 +418,11 @@ class Network:
             # if singular(type) == "service": 
             #     params["beta"] = ''
 
-            if not plural(type) in RESOURCES.keys():
+            if not plural(type) in NETWORK_RESOURCES.keys():
                 raise Exception("ERROR: unknown type \"{singular}\" as plural \"{plural}\". Choices: {choices}".format(
                     singular=type,
                     plural=plural(type),
-                    choices=RESOURCES.keys()
+                    choices=NETWORK_RESOURCES.keys()
                 ))
             elif plural(type) in ["edge-routers","network-controllers"]:
                 params['embed'] = "host"
@@ -456,7 +456,7 @@ class Network:
 
     get_resource = get_resource_by_id
 
-    def get_resources(self, type: str, accept: str=None, deleted: bool=False, typeId: str=None, **kwargs):
+    def get_resources(self, type: str, accept: str=None, deleted: bool=False, **kwargs):
         """Find resources by type.
 
         :param str type: plural of an entity type e.g. networks, endpoints, services, posture-checks, etc...
@@ -465,7 +465,6 @@ class Network:
                 "create" is useful for comparing an existing entity to a set of properties that are used to create the same type of
                 entity in a POST request, and "update" may be used in the same way for a PUT update.
         :param bool deleted: include resource entities that have a non-null property deletedAt
-        :param str typeId: filter results by typeId
         """
         # pluralize if singular
         if not type[-1] == "s":
@@ -491,13 +490,11 @@ class Network:
                 params["sort"] = "name,asc"
             for param in kwargs.keys():
                 params[param] = kwargs[param]
-            if typeId is not None:
-                params['typeId'] = typeId
             if deleted:
                 params['status'] = "DELETED"
 
-            if not type in RESOURCES.keys():
-                raise Exception("ERROR: unknown type \"{}\". Choices: {}".format(type, RESOURCES.keys()))
+            if not type in NETWORK_RESOURCES.keys():
+                raise Exception("ERROR: unknown type \"{}\". Choices: {}".format(type, NETWORK_RESOURCES.keys()))
             elif type == "edge-routers":
                 params['embed'] = "host"
 
@@ -2202,7 +2199,7 @@ class Network:
                 )
             )
 
-    @docstring_parameters(resource_entity_types=str(RESOURCES.keys()))
+    @docstring_parameters(resource_entity_types=str(NETWORK_RESOURCES.keys()))
     def wait_for_entity_name_exists(self, entity_name: str, entity_type: str, wait: int=60, sleep: int=3, progress: bool=False):
         """Continuously poll until expiry for the expected entity name to exist.
 
@@ -2222,10 +2219,10 @@ class Network:
                 )
             )
 
-        if not plural(entity_type) in RESOURCES.keys():
+        if not plural(entity_type) in NETWORK_RESOURCES.keys():
             raise Exception("ERROR: unknown type \"{type}\". Choices: {choices}".format(
                 type=entity_type,
-                choices=str(RESOURCES.keys())
+                choices=str(NETWORK_RESOURCES.keys())
             ))
 
         # poll for status until expiry
