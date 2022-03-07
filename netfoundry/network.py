@@ -300,7 +300,7 @@ class Network:
         return(data_center)
 
     @docstring_parameters(providers=str(DC_PROVIDERS))
-    def get_edge_router_data_centers(self, provider: str=None, location_code: str=None):
+    def get_edge_router_data_centers(self, provider: str=None, location_code: str=None, **kwargs):
         """Find data centers for hosting edge routers.
 
         :param provider:        optionally filter by data center provider, choices: {providers}
@@ -313,6 +313,12 @@ class Network:
                 "productVersion": self.product_version,
                 "hostType": "ER"
             }
+            for param in kwargs.keys():
+                if param == "locationCode" and not location_code:
+                    location_code = kwargs[param]
+                    logging.debug("got location_code from kwargs in network.get_edge_router_data_centers()")
+                else:
+                    params[param] = kwargs[param]
             if provider is not None:
                 if provider in DC_PROVIDERS:
                     params['provider'] = provider
@@ -345,6 +351,7 @@ class Network:
             )
         if location_code:
             matching_data_centers = [dc for dc in data_centers if dc['locationCode'] == location_code]
+            logging.debug("filtered %d data centers by location_code %s, %d remaining", len(data_centers), location_code, len(matching_data_centers))
             return(matching_data_centers)
         else:
             return(data_centers)
@@ -463,7 +470,8 @@ class Network:
         # pluralize if singular
         if not type[-1] == "s":
             type = plural(type)
-
+        if type == "data-centers":
+            logging.warn("don't call network.get_resources() for data centers, always use network.get_edge_router_data_centers() to filter for locations that support this network's version")
         try:
             headers = { "authorization": "Bearer " + self.session.token }
             if accept and accept in ["create", "update"]:

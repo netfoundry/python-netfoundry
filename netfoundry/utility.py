@@ -105,6 +105,10 @@ for code, titles in STATUSES_BY_CODE.items():
         setattr(CODES, title.upper(), code)
 
 RESOURCES = {
+    'data-centers': {
+        'embedded': "dataCenters",
+        'domain': "network"
+    },
     'organizations': {
         'embedded': "",
         'domain': "organization"

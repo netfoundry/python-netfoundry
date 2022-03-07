@@ -413,17 +413,30 @@ def get(cli, echo: bool=True):
             if len(matches) == 1:
                 match = organization.get_network(network_id=matches[0]['id'], embed="all", accept=cli.args.accept)
     else: # is a resource in the network domain
-        network, network_group = use_network(
-            organization=organization,
-            group=cli.config.general.network_group,
-            network=cli.config.general.network,
-        )
-        if 'id' in cli.args.query.keys():
-            match = network.get_resource_by_id(type=cli.args.resource_type, id=cli.args.query['id'], accept=cli.args.accept)
+        if cli.config.general.network:
+            network, network_group = use_network(
+                organization=organization,
+                group=cli.config.general.network_group, # None unless configured
+                network=cli.config.general.network
+            )
         else:
-            matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
-            if len(matches) == 1:
-                match = network.get_resource_by_id(type=cli.args.resource_type, id=matches[0]['id'], accept=cli.args.accept)
+            cli.log.error("first configure a network to get resources in a network e.g. --network ACMENet")
+            exit(1)
+        if cli.args.resource_type == "data-center":
+            if cli.args.accept:
+                cli.log.warn("'accept' param not applicable to data-centers")
+            if 'id' in cli.args.query.keys():
+                cli.log.warn("data centers fetched by ID may not support this network's product version, try provider or locationCode params for safety")
+                match = network.get_data_center_by_id(id=cli.args.query['id'])
+            else:
+                matches = network.get_edge_router_data_centers(**cli.args.query)
+        else:
+            if 'id' in cli.args.query.keys():
+                match = network.get_resource_by_id(type=cli.args.resource_type, id=cli.args.query['id'], accept=cli.args.accept)
+            else:
+                matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
+                if len(matches) == 1:
+                    match = network.get_resource_by_id(type=cli.args.resource_type, id=matches[0]['id'], accept=cli.args.accept)
 
     if match:
         cli.log.debug("found exactly one %s '%s'", cli.args.resource_type, cli.args.query)
@@ -466,6 +479,7 @@ def list(cli):
 
     organization = use_organization()
 
+
     if cli.args.resource_type == "organizations":
         matches = organization.get_organizations(**cli.args.query)
     elif cli.args.resource_type == "network-groups":
@@ -479,12 +493,19 @@ def list(cli):
         else:
             matches = organization.get_networks_by_organization(**cli.args.query)
     else:
-        network, network_group = use_network(
-            organization=organization,
-            group=cli.config.general.network_group,
-            network=cli.config.general.network
-        )
-        matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
+        if cli.config.general.network:
+            network, network_group = use_network(
+                organization=organization,
+                group=cli.config.general.network_group, # None unless configured
+                network=cli.config.general.network
+            )
+        else:
+            cli.log.error("first configure a network to list resources in a network e.g. --network ACMENet")
+            exit(1)
+        if cli.args.resource_type == "data-centers":
+            matches = network.get_edge_router_data_centers(**cli.args.query)
+        else:
+            matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
 
     if len(matches) == 0:
         cli.log.info("found no %s '%s'", cli.args.resource_type, cli.args.query)
