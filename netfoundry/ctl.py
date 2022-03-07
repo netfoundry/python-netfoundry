@@ -430,6 +430,8 @@ def get(cli, echo: bool=True):
                 match = network.get_data_center_by_id(id=cli.args.query['id'])
             else:
                 matches = network.get_edge_router_data_centers(**cli.args.query)
+                if len(matches) == 1:
+                    match = network.get_data_center_by_id(id=matches[0]['id'])
         else:
             if 'id' in cli.args.query.keys():
                 match = network.get_resource_by_id(type=cli.args.resource_type, id=cli.args.query['id'], accept=cli.args.accept)
@@ -519,7 +521,7 @@ def list(cli):
         # and the set of configured, desired keys
         valid_keys = set(matches[0].keys()) & set(cli.args.keys)
     elif cli.config.general.output == "text":
-        valid_keys = set(matches[0].keys()) & set(['name','label','organizationShortName','id','createdBy','createdAt','status','zitiId','provider','locationCode','ipAddress','region','size'])
+        valid_keys = set(matches[0].keys()) & set(['name','label','organizationShortName','id','createdBy','createdAt','status','zitiId','provider','locationCode','ipAddress','region','size','attributes'])
 
     if valid_keys:
         cli.log.debug("valid keys: %s", str(valid_keys))
