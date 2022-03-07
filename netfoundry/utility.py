@@ -119,7 +119,7 @@ RESOURCES = {
     },
     'networks': {
         'embedded': "networkList",
-        'domain': "network-group",
+        'domain': "network",
         'create_responses': ["ACCEPTED"],
         'create_template': {
             "name": "Name",

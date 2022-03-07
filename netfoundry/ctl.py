@@ -59,7 +59,7 @@ class StoreListKeys(argparse.Action):
         """Split comma-separated list elements."""
         setattr(namespace, self.dest, values.split(','))
 
-@cli.argument('-p','--profile', default='nfctl', help='login profile for storing and retrieving concurrent, discrete sessions')
+@cli.argument('-p','--profile', default='default', help='login profile for storing and retrieving concurrent, discrete sessions')
 @cli.argument('-C', '--credentials', help='API account JSON file from web console')
 @cli.argument('-O', '--organization', help="label or ID of an alternative organization (default is caller's org)" )
 @cli.argument('-N', '--network', help='caseless name of the network to manage')
@@ -348,7 +348,7 @@ def create(cli):
         resource = network.create_resource(type=cli.args.resource_type, properties=create_object, wait=cli.config.create.wait)
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
-@cli.argument('resource_type', arg_only=True, help='type of resource', choices=NETWORK_RESOURCES.keys())
+@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in NETWORK_RESOURCES.keys()])
 # this allows us to pass the edit subcommand's cli object to function get without further modifying that functions params
 @cli.argument('-a', '--accept', arg_only=True, default='update', help=argparse.SUPPRESS)
 @cli.subcommand('edit a single resource selected by query with editor defined in NETFOUNDRY_EDITOR or EDITOR')
@@ -591,7 +591,10 @@ def delete(cli):
         if not cli.args.query:
             cli.log.error("need query to select a resource")
             exit(1)
-        matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
+        if 'id' in cli.args.query.keys():
+            matches = [network.get_resource_by_id(type=cli.args.resource_type, id=cli.args.query['id'])]
+        else:
+            matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
         if len(matches) == 0:
             cli.log.info("found no %s '%s'", cli.args.resource_type, str(cli.args.query))
             exit(1)

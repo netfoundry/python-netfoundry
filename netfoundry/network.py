@@ -531,11 +531,11 @@ class Network:
             return([])
         # if there is one page of resources
         elif total_pages == 1:
-            all_entities = resources['_embedded'][RESOURCES[type]['embedded']]
+            all_entities = resources['_embedded'][NETWORK_RESOURCES[type]['embedded']]
         # if there are multiple pages of resources
         else:
             # initialize the list with the first page of resources
-            all_entities = resources['_embedded'][RESOURCES[type]['embedded']]
+            all_entities = resources['_embedded'][NETWORK_RESOURCES[type]['embedded']]
             # append the remaining pages of resources
             for page in range(1,total_pages):
                 try:
@@ -554,7 +554,7 @@ class Network:
                 if response_code == STATUS_CODES.codes.OK: # HTTP 200
                     try:
                         resources = json.loads(response.text)
-                        all_entities.extend(resources['_embedded'][RESOURCES[type]['embedded']])
+                        all_entities.extend(resources['_embedded'][NETWORK_RESOURCES[type]['embedded']])
                     except ValueError as e:
                         eprint('ERROR: failed to load resources object from GET response')
                         raise(e)
@@ -909,7 +909,7 @@ class Network:
         started = None
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, RESOURCES['endpoints']['create_responses']):
+        if any_in(response_code_symbols, NETWORK_RESOURCES['endpoints']['create_responses']):
             try:
                 started = json.loads(response.text)
             except ValueError as e:
@@ -1016,7 +1016,7 @@ class Network:
             raise
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, RESOURCES['edge-routers']['create_responses']):
+        if any_in(response_code_symbols, NETWORK_RESOURCES['edge-routers']['create_responses']):
             try:
                 started = json.loads(response.text)
             except ValueError as e:
@@ -1095,7 +1095,7 @@ class Network:
             raise
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, RESOURCES['edge-router-policies']['create_responses']):
+        if any_in(response_code_symbols, NETWORK_RESOURCES['edge-router-policies']['create_responses']):
             try:
                 started = json.loads(response.text)
             except ValueError as e:
@@ -1249,7 +1249,7 @@ class Network:
             raise
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, RESOURCES['services']['create_responses']):
+        if any_in(response_code_symbols, NETWORK_RESOURCES['services']['create_responses']):
             try:
                 started = json.loads(response.text)
             except ValueError as e:
@@ -1346,7 +1346,7 @@ class Network:
 
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, RESOURCES['service-policies']['create_responses']):
+        if any_in(response_code_symbols, NETWORK_RESOURCES['service-policies']['create_responses']):
             try:
                 started = json.loads(response.text)
             except ValueError as e:
@@ -1435,7 +1435,7 @@ class Network:
 
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, RESOURCES['service-edge-router-policies']['create_responses']):
+        if any_in(response_code_symbols, NETWORK_RESOURCES['service-edge-router-policies']['create_responses']):
             try:
                 started = json.loads(response.text)
             except ValueError as e:
@@ -1539,7 +1539,7 @@ class Network:
 
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, RESOURCES['services']['create_responses']):
+        if any_in(response_code_symbols, NETWORK_RESOURCES['services']['create_responses']):
             try:
                 started = json.loads(response.text)
             except ValueError as e:
@@ -1857,7 +1857,7 @@ class Network:
 
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, RESOURCES['services']['create_responses']):
+        if any_in(response_code_symbols, NETWORK_RESOURCES['services']['create_responses']):
             try:
                 started = json.loads(response.text)
             except ValueError as e:
@@ -1937,7 +1937,7 @@ class Network:
             raise
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, RESOURCES['app-wans']['create_responses']):
+        if any_in(response_code_symbols, NETWORK_RESOURCES['app-wans']['create_responses']):
             try:
                 started = json.loads(response.text)
             except ValueError as e:
@@ -1960,7 +1960,8 @@ class Network:
             return(started)
 
     def get_network_by_name(self,name: str,group: str=None):
-        """return exactly one network object
+        """Get one network by name.
+
         :param: name required name of the NF network may contain quoted whitespace
         :param: group optional string UUID to limit results by Network Group ID
         """
@@ -2001,7 +2002,7 @@ class Network:
             )
         hits = networks['page']['totalElements']
         if hits == 1:
-            network = networks['_embedded'][RESOURCES['networks']['embedded']][0]
+            network = networks['_embedded'][NETWORK_RESOURCES['networks']['embedded']][0]
             return(network)
         else:
             raise Exception("ERROR: failed to find exactly one match for {}".format(name))
@@ -2009,7 +2010,7 @@ class Network:
     def get_network_by_id(self,network_id):
         """Return the network object for a particular UUID.
 
-            :network_id [required] the UUID of the network
+        :param str network_id: the UUID of the network
         """
         try:
             headers = { 
