@@ -521,7 +521,7 @@ def list(cli):
         # and the set of configured, desired keys
         valid_keys = set(matches[0].keys()) & set(cli.args.keys)
     elif cli.config.general.output == "text":
-        valid_keys = set(matches[0].keys()) & set(['name','label','organizationShortName','id','createdBy','createdAt','status','zitiId','provider','locationCode','ipAddress','region','size','attributes'])
+        valid_keys = set(matches[0].keys()) & set(['name','label','organizationShortName','id','edgeRouterAttributes','serviceAttributes','endpointAttributes','status','zitiId','provider','locationCode','ipAddress','region','size','attributes'])
 
     if valid_keys:
         cli.log.debug("valid keys: %s", str(valid_keys))
