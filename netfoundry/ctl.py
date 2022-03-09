@@ -78,7 +78,7 @@ def main(cli):
 @cli.argument('-s','--shell', help=argparse.SUPPRESS, arg_only=True, action="store_true", default=False)
 @cli.argument('-v','--ziti-version', help=argparse.SUPPRESS, default='0.22.0') # minium ziti CLI version supports --cli-identity and --read-only
 @cli.argument('-c','--ziti-cli', help=argparse.SUPPRESS)
-@cli.subcommand('login to a management API', hidden=True)
+@cli.subcommand('login to a management API')
 def login(cli, api: str=None, shell: bool=None):
     """Login to an API and cache the expiring token."""
     if api:
@@ -116,7 +116,7 @@ def login(cli, api: str=None, shell: bool=None):
             network, network_group = None, None
 
         summary_object = dict()
-        summary_object['caller'] = whoami(cli, echo=False, organization=organization)
+        summary_object['caller'] = organization.caller
         summary_object['organization'] = organization.describe
         if network_group:
             summary_object['network_group'] = network_group.describe
@@ -263,22 +263,6 @@ def logout(cli):
         cli.log.error("failed to logout with %s", e)
         exit(1)
 
-@cli.subcommand('get caller identity')
-def whoami(cli, echo: bool=True, organization: object=None):
-    """Get caller identity."""
-    if organization is None:
-        organization = use_organization()
-    caller = organization.caller
-    caller['label'] = organization.label
-    caller['environment'] = organization.environment
-    if echo:
-        if cli.config.general.output in ["yaml","text"]:
-            cli.echo(yaml_dumps(caller, indent=4, default_flow_style=False))
-        elif cli.config.general.output == "json":
-            cli.echo(json_dumps(caller, indent=4))
-    else:
-        return caller
-
 @cli.argument('-f', '--file', help='JSON or YAML file', type=argparse.FileType('r', encoding='UTF-8'))
 @cli.argument('-w','--wait', help='seconds to wait for process execution to finish', default=0)
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in NETWORK_RESOURCES.keys()])
@@ -391,6 +375,8 @@ def get(cli, echo: bool=True):
     elif cli.args.resource_type == "identity":
         if 'id' in cli.args.query.keys():
             match = organization.get_identity(identity_id=cli.args.query['id'])
+        elif not cli.args.query.keys():
+            match = organization.caller
         else:
             matches = organization.get_identities(**cli.args.query)
             if len(matches) == 1:
@@ -521,7 +507,7 @@ def list(cli):
         # and the set of configured, desired keys
         valid_keys = set(matches[0].keys()) & set(cli.args.keys)
     elif cli.config.general.output == "text":
-        valid_keys = set(matches[0].keys()) & set(['name','label','organizationShortName','id','edgeRouterAttributes','serviceAttributes','endpointAttributes','status','zitiId','provider','locationCode','ipAddress','region','size','attributes'])
+        valid_keys = set(matches[0].keys()) & set(['name','label','organizationShortName','id','edgeRouterAttributes','serviceAttributes','endpointAttributes','status','zitiId','provider','locationCode','ipAddress','region','size','attributes','email'])
 
     if valid_keys:
         cli.log.debug("valid keys: %s", str(valid_keys))
