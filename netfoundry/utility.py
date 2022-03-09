@@ -1,8 +1,10 @@
 """Shared helper functions, constants, and classes."""
 
+import logging
 import sys  # open stderr
 import unicodedata  # case insensitive compare in Utility
 from re import sub
+from uuid import UUID  # validate UUIDv4 strings
 
 import inflect  # singular and plural nouns
 from requests import \
@@ -62,8 +64,16 @@ class LookupDict(dict):
     def get(self, key, default=None):
         return self.__dict__.get(key, default)
 
+def is_uuidv4(string: str):
+    """Test if string is valid UUIDv4."""
+    try: UUID(string, version=4)
+    except ValueError:
+        return False
+    else:
+        return True
+
 def eprint(*args, **kwargs):
-    print(*args, file=sys.stderr, **kwargs)
+    logging.debug(*args, **kwargs)
 
 p = inflect.engine()
 def plural(singular):
@@ -95,43 +105,95 @@ for code, titles in STATUSES_BY_CODE.items():
         setattr(CODES, title.upper(), code)
 
 RESOURCES = {
+    'data-centers': {
+        'embedded': "dataCenters",
+        'domain': "network"
+    },
+    'organizations': {
+        'embedded': "",
+        'domain': "organization"
+    },
+    'network-groups': {
+        'embedded': "organizations",
+        'domain': "network-group"
+    },
     'networks': {
         'embedded': "networkList",
-        'create_responses': ["ACCEPTED"]
+        'domain': "network",
+        'create_responses': ["ACCEPTED"],
+        'create_template': {
+            "name": "Name",
+            "locationCode": "us-east-1",
+            "size": "small",
+            "networkGroupId": "a7de7a6d-9b05-4e00-89e0-937498c49e0a"
+        }
+    },
+    'network-controllers': {
+        'embedded': "networkControllerList",
+        'domain': "network"
+    },
+    'identities': {
+        'embedded': "",
+        'domain': "organization"
+    },
+    'hosts': {
+        'embedded': "hostList",
+        'domain': "network"
     },
     'endpoints': {
         'embedded': "endpointList",
-        'create_responses': ["ACCEPTED"]
+        'domain': "network",
+        'create_responses': ["ACCEPTED"],
+        'create_template': {
+            "attributes": [],
+            "enrollmentMethod": {"ott": True},
+            "name": "Name"
+        }
     },
     'edge-routers': {
         'embedded': "edgeRouterList",
+        'domain': "network",
         'create_responses': ["ACCEPTED"]
     },
     'edge-router-policies': {
         'embedded': "edgeRouterPolicyList",
+        'domain': "network",
         'create_responses': ["OK", "ACCEPTED"]
     },
     'app-wans': {
         'embedded': "appWanList",
+        'domain': "network",
         'create_responses': ["OK"]
     },
     'services': {
         'embedded': "serviceList",
-        'create_responses': ["ACCEPTED"]
+        'domain': "network",
+        'create_responses': ["ACCEPTED"],
+        'create_template': {"this": 1}
     },
     'service-policies': {
         'embedded': "servicePolicyList",
+        'domain': "network",
         'create_responses': ["ACCEPTED"]
     },
     'service-edge-router-policies': {
         'embedded': "serviceEdgeRouterPolicyList",
+        'domain': "network",
         'create_responses': ["ACCEPTED"]
     },
     'posture-checks': {
         'embedded': "postureCheckList",
+        'domain': "network",
+        'create_responses': ["ACCEPTED"]
+    },
+    'certificate-authorities': {
+        'embedded': "certificateAuthorityList",
+        'domain': "network",
         'create_responses': ["ACCEPTED"]
     }
 }
+
+NETWORK_RESOURCES = {key: RESOURCES[key] for key in RESOURCES.keys() if RESOURCES[key]['domain'] == "network"}
 
 # TODO: [MOP-13441] associate locations with a short list of major geographic regions / continents
 MAJOR_REGIONS = {
@@ -143,8 +205,6 @@ MAJOR_REGIONS = {
 }
 
 DC_PROVIDERS = ["AWS", "AZURE", "GCP", "OCP"]
-
-HOST_PROPERTIES = ["ownerIdentityId", "ipAddress", "port", "provider", "providerInstanceId", "size", "locationMetadataId", "dataCenterId"]
 
 EXCLUDED_PATCH_PROPERTIES = {
     "edge-routers": ["registration"],
