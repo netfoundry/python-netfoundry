@@ -1,30 +1,39 @@
 """Use a network and find and manage its resources."""
 
 import json
+import logging
 import re  # regex
 import sys
 import time
 from unicodedata import name  # enforce a timeout; sleep
-from uuid import UUID  # validate UUIDv4 strings
 
-from .utility import (DC_PROVIDERS, EXCLUDED_PATCH_PROPERTIES, HOST_PROPERTIES,
-                      MAJOR_REGIONS, RESOURCES, STATUS_CODES, VALID_SEPARATORS,
+from .utility import (DC_PROVIDERS, EXCLUDED_PATCH_PROPERTIES,
+                      MAJOR_REGIONS, NETWORK_RESOURCES, STATUS_CODES, VALID_SEPARATORS,
                       VALID_SERVICE_PROTOCOLS, Utility, docstring_parameters,
-                      eprint, http, plural, singular)
+                      eprint, http, is_uuidv4, plural, singular)
 
 utility = Utility()
 
 class Network:
     """Describe and use a Network."""
 
-    def __init__(self, NetworkGroup: object, network_id: str=None, network_name: str=None):
+    def __init__(self, NetworkGroup: object, network_id: str=None, network_name: str=None, network: str=None):
         """Initialize Network.
         
         :param obj NetworkGroup: required parent Network Group of this Network
+        :param str network: optional identifier to resolve as UUID or name, ignored if network_id or network_name
         :param str network_name: optional name of the network to describe and use
         :param str network_id: optional UUID of the network to describe and use
         """
         self.session = NetworkGroup.session
+
+        if (not network_id and not network_name) and network:
+            if is_uuidv4(network):
+                network_id = network
+            else:
+                network_name = network
+        elif (network_id or network_name) and network:
+            logging.warn("ignoring network identifier '%s' because network_id or network_name were provided", network)
 
         if network_id:
             self.describe = self.get_network_by_id(network_id)
@@ -38,6 +47,7 @@ class Network:
         self.name = self.describe['name']
         self.network_group_id = self.describe['networkGroupId']
         self.status = self.describe['status']
+        self.network_controller = self.describe['networkController']
         self.product_version = self.describe['productVersion']
         self.owner_identity_id = self.describe['ownerIdentityId']
         self.size = self.describe['size']
@@ -214,7 +224,7 @@ class Network:
 
         return(valid_port_ranges)
 
-    @docstring_parameters(resource_entity_types=str(RESOURCES.keys()))
+    @docstring_parameters(resource_entity_types=str(NETWORK_RESOURCES.keys()))
     def validate_entity_roles(self, entities: list, type: str):
         """Return a list of valid, existing entities and hashtag role attributes.
         
@@ -236,10 +246,14 @@ class Network:
                     entity = entity[1:]
 
                 # if UUIDv4 then resolve to name, else verify the named entity exists 
-                try:
-                    UUID(entity, version=4) # assigned below under "else" if already a UUID
-                except ValueError:
-                    # else assume is a name and resolve to ID
+                if is_uuidv4(entity): # assigned below under "else" if already a UUID
+                    try:
+                        name_lookup = self.get_resource(type=singular(type),id=entity)
+                        entity_name = name_lookup['name']
+                    except Exception as e:
+                        raise Exception('ERROR: Failed to find exactly one {type} with ID "{id}". Caught exception: {e}'.format(type=singular(type), id=entity, e=e))
+                    else: valid_entities.append('@'+entity_name) # is an existing endpoint's name resolved from UUID
+                else:
                     try: 
                         name_lookup = self.get_resources(type=plural(type),name=entity)[0]
                         entity_name = name_lookup['name']
@@ -247,13 +261,7 @@ class Network:
                         raise Exception('ERROR: Failed to find exactly one {type} named "{name}". Caught exception: {e}'.format(type=singular(type), name=entity, e=e))
                     # append to list after successfully resolving name to ID
                     else: valid_entities.append('@'+entity_name) # is an existing entity's name
-                else:
-                    try:
-                        name_lookup = self.get_resource(type=singular(type),id=entity)
-                        entity_name = name_lookup['name']
-                    except Exception as e:
-                        raise Exception('ERROR: Failed to find exactly one {type} with ID "{id}". Caught exception: {e}'.format(type=singular(type), id=entity, e=e))
-                    else: valid_entities.append('@'+entity_name) # is an existing endpoint's name resolved from UUID
+
         return(valid_entities)
 
     def get_data_center_by_id(self, id: str):
@@ -292,7 +300,7 @@ class Network:
         return(data_center)
 
     @docstring_parameters(providers=str(DC_PROVIDERS))
-    def get_edge_router_data_centers(self, provider: str=None, location_code: str=None):
+    def get_edge_router_data_centers(self, provider: str=None, location_code: str=None, **kwargs):
         """Find data centers for hosting edge routers.
 
         :param provider:        optionally filter by data center provider, choices: {providers}
@@ -305,6 +313,12 @@ class Network:
                 "productVersion": self.product_version,
                 "hostType": "ER"
             }
+            for param in kwargs.keys():
+                if param == "locationCode" and not location_code:
+                    location_code = kwargs[param]
+                    logging.debug("got location_code from kwargs in network.get_edge_router_data_centers()")
+                else:
+                    params[param] = kwargs[param]
             if provider is not None:
                 if provider in DC_PROVIDERS:
                     params['provider'] = provider
@@ -337,6 +351,7 @@ class Network:
             )
         if location_code:
             matching_data_centers = [dc for dc in data_centers if dc['locationCode'] == location_code]
+            logging.debug("filtered %d data centers by location_code %s, %d remaining", len(data_centers), location_code, len(matching_data_centers))
             return(matching_data_centers)
         else:
             return(data_centers)
@@ -403,13 +418,13 @@ class Network:
             # if singular(type) == "service": 
             #     params["beta"] = ''
 
-            if not plural(type) in RESOURCES.keys():
+            if not plural(type) in NETWORK_RESOURCES.keys():
                 raise Exception("ERROR: unknown type \"{singular}\" as plural \"{plural}\". Choices: {choices}".format(
                     singular=type,
                     plural=plural(type),
-                    choices=RESOURCES.keys()
+                    choices=NETWORK_RESOURCES.keys()
                 ))
-            elif plural(type) == "edge-routers":
+            elif plural(type) in ["edge-routers","network-controllers"]:
                 params['embed'] = "host"
 
             response = http.get(
@@ -437,59 +452,49 @@ class Network:
                 )
             )
 
-        # routers are a special case because the value of entity._embedded.host.dataCenterId is expected by
-        # downstream consumers of this method to be found at entity.dataCenterId
-        if plural(type) == "edge-routers":
-            if (entity["hostId"]
-                    and "_embedded" in entity.keys()
-                    and "host" in entity['_embedded'].keys()
-                ):
-                for prop in HOST_PROPERTIES:
-                    entity[prop] = entity['_embedded']['host'][prop]
         return(entity)
 
     get_resource = get_resource_by_id
 
-    def get_resources(self, type: str,name: str=None, accept: str=None, deleted: bool=False, typeId: str=None):
+    def get_resources(self, type: str, accept: str=None, deleted: bool=False, **kwargs):
         """Find resources by type.
 
         :param str type: plural of an entity type e.g. networks, endpoints, services, posture-checks, etc...
-        :param str name: filter results by name
+        :param str kwargs: filter results by logical AND query parameters
         :param str accept: specifying the form of the desired response. Choices ["create","update"] where
                 "create" is useful for comparing an existing entity to a set of properties that are used to create the same type of
                 entity in a POST request, and "update" may be used in the same way for a PUT update.
         :param bool deleted: include resource entities that have a non-null property deletedAt
-        :param str typeId: filter results by typeId
         """
         # pluralize if singular
         if not type[-1] == "s":
             type = plural(type)
-
+        if type == "data-centers":
+            logging.warn("don't call network.get_resources() for data centers, always use network.get_edge_router_data_centers() to filter for locations that support this network's version")
         try:
             headers = { "authorization": "Bearer " + self.session.token }
             if accept and accept in ["create", "update"]:
                 headers['accept'] = "application/json;as="+accept
             elif accept:
-                raise Exception("ERROR: invalid value for param \"accept\" in {}".format(accept))
+                logging.error("invalid value for param 'accept': '%s'", accept)
+                raise Exception()
 
             params = {
                 "networkId": self.id,
                 "page": 0,
                 "size": 100,
-                "sort": "name,asc"
             }
             # if type == "services": 
             #     params["beta"] = ''
-
-            if name is not None:
-                params['name'] = name
-            if typeId is not None:
-                params['typeId'] = typeId
+            if not type == "hosts":
+                params["sort"] = "name,asc"
+            for param in kwargs.keys():
+                params[param] = kwargs[param]
             if deleted:
                 params['status'] = "DELETED"
 
-            if not type in RESOURCES.keys():
-                raise Exception("ERROR: unknown type \"{}\". Choices: {}".format(type, RESOURCES.keys()))
+            if not type in NETWORK_RESOURCES.keys():
+                raise Exception("ERROR: unknown type \"{}\". Choices: {}".format(type, NETWORK_RESOURCES.keys()))
             elif type == "edge-routers":
                 params['embed'] = "host"
 
@@ -526,11 +531,11 @@ class Network:
             return([])
         # if there is one page of resources
         elif total_pages == 1:
-            all_entities = resources['_embedded'][RESOURCES[type]['embedded']]
+            all_entities = resources['_embedded'][NETWORK_RESOURCES[type]['embedded']]
         # if there are multiple pages of resources
         else:
             # initialize the list with the first page of resources
-            all_entities = resources['_embedded'][RESOURCES[type]['embedded']]
+            all_entities = resources['_embedded'][NETWORK_RESOURCES[type]['embedded']]
             # append the remaining pages of resources
             for page in range(1,total_pages):
                 try:
@@ -549,7 +554,7 @@ class Network:
                 if response_code == STATUS_CODES.codes.OK: # HTTP 200
                     try:
                         resources = json.loads(response.text)
-                        all_entities.extend(resources['_embedded'][RESOURCES[type]['embedded']])
+                        all_entities.extend(resources['_embedded'][NETWORK_RESOURCES[type]['embedded']])
                     except ValueError as e:
                         eprint('ERROR: failed to load resources object from GET response')
                         raise(e)
@@ -561,28 +566,7 @@ class Network:
                             response.text
                         )
                     )
-
-        # prune entities with non null deletedAt unless return deleted is true
-        # TODO: remove this because the API has been changed to stop returning
-        # deleted entities unless query param status=DELETED
-        if not deleted:
-            all_entities = [entity for entity in all_entities if not entity['deletedAt']]
-
-        # routers are a special case because the value of entity._embedded.host.dataCenterId is expected by
-        # downstream consumers of this method to be found at entity.dataCenterId
-        if type == "edge-routers":
-            all_routers = list()
-            for entity in all_entities:
-                if (entity["hostId"]
-                        and "_embedded" in entity.keys()
-                        and "host" in entity['_embedded'].keys()
-                    ):
-                    for prop in HOST_PROPERTIES:
-                        entity[prop] = entity['_embedded']['host'][prop]
-                all_routers.extend([entity])
-            return(all_routers)
-        else:
-            return(all_entities)
+        return(all_entities)
 
     def resource_exists_in_network(self, name: str, type: str, deleted: bool=False):
         """Check if a resource of a particular type with a particular name exists in this network.
@@ -738,16 +722,28 @@ class Network:
         Blindly updates the entity in self link and returns the response object.
             :param put: required dictionary with all properties required by the particular resource type's model
             :param type: optional entity type, needed if put object lacks a self link, ignored if self link present
-            :param id: optional entity ID, needed if put object lacks a self link, ignored if self link present
+            :param id: optional entity ID, needed if put object lacks a self link and id property, ignored if self link present
         """
         # prefer the self link if present, else require type and id to compose the self link
         try: 
             self_link = put['_links']['self']['href']
         except KeyError:
+            if not type:
+                logging.error('need put object with "self" link or need type param')
+                raise Exception('need put object with "self" link or need type param')
+            if not id:
+                if 'id' in put.keys():
+                    id = put['id']
+                    logging.debug("got id '%s' from put param object", id)
+                else:
+                    logging.error('missing id of {type} to update, need put object with "self" link, "id" property, or need "id" param'.format(type=type))
+                    raise Exception('missing id of {type} to update, need put object with "self" link, "id" property, or need "id" param'.format(type=type))
             try: self_link = self.session.audience+'core/v2/'+plural(type)+'/'+id
             except NameError as e:
                 raise(e)
-        else: type = self_link.split('/')[5] # e.g. endpoints, app-wans, edge-routers, etc...
+        else:
+            type = self_link.split('/')[5] # e.g. endpoints, app-wans, edge-routers, etc...
+            #id = self_link.split('/')[6] # UUIDv4 from self reference URL # not currently using this if we already have the self link
         try:
             headers = {
                 "authorization": "Bearer " + self.session.token 
@@ -913,7 +909,7 @@ class Network:
         started = None
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, RESOURCES['endpoints']['create_responses']):
+        if any_in(response_code_symbols, NETWORK_RESOURCES['endpoints']['create_responses']):
             try:
                 started = json.loads(response.text)
             except ValueError as e:
@@ -1020,7 +1016,7 @@ class Network:
             raise
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, RESOURCES['edge-routers']['create_responses']):
+        if any_in(response_code_symbols, NETWORK_RESOURCES['edge-routers']['create_responses']):
             try:
                 started = json.loads(response.text)
             except ValueError as e:
@@ -1099,7 +1095,7 @@ class Network:
             raise
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, RESOURCES['edge-router-policies']['create_responses']):
+        if any_in(response_code_symbols, NETWORK_RESOURCES['edge-router-policies']['create_responses']):
             try:
                 started = json.loads(response.text)
             except ValueError as e:
@@ -1186,8 +1182,7 @@ class Network:
                 elif egress_router_id and not endpoints:
                     body['modelType'] = "TunnelerToEdgeRouter"
                     # check if UUIDv4
-                    try: UUID(egress_router_id, version=4)
-                    except ValueError:
+                    if not is_uuidv4(egress_router_id):
                         # else assume is a name and resolve to ID
                         try: 
                             name_lookup = self.get_resources(type="edge-routers",name=egress_router_id)[0]
@@ -1218,9 +1213,14 @@ class Network:
                             endpoint = endpoint[1:]
 
                         # if UUIDv4 then resolve to name, else verify the named endpoint exists 
-                        try:
-                            UUID(endpoint, version=4) # assigned below under "else" if already a UUID
-                        except ValueError:
+                        if is_uuidv4(endpoint): # assigned below under "else" if already a UUID
+                            try:
+                                name_lookup = self.get_resource(type="endpoint",id=endpoint)
+                                endpoint_name = name_lookup['name']
+                            except Exception as e:
+                                raise Exception('ERROR: Failed to find exactly one hosting endpoint with ID "{}". Caught exception: {}'.format(endpoint, e))
+                            else: bind_endpoints += ['@'+endpoint_name]
+                        else:
                             # else assume is a name and resolve to ID
                             try: 
                                 name_lookup = self.get_resources(type="endpoints",name=endpoint)[0]
@@ -1228,13 +1228,6 @@ class Network:
                             except Exception as e:
                                 raise Exception('ERROR: Failed to find exactly one hosting endpoint named "{}". Caught exception: {}'.format(endpoint, e))
                             # append to list after successfully resolving name to ID
-                            else: bind_endpoints += ['@'+endpoint_name] 
-                        else:
-                            try:
-                                name_lookup = self.get_resource(type="endpoint",id=endpoint)
-                                endpoint_name = name_lookup['name']
-                            except Exception as e:
-                                raise Exception('ERROR: Failed to find exactly one hosting endpoint with ID "{}". Caught exception: {}'.format(endpoint, e))
                             else: bind_endpoints += ['@'+endpoint_name] 
                 body['model']['bindEndpointAttributes'] = bind_endpoints
 
@@ -1256,7 +1249,7 @@ class Network:
             raise
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, RESOURCES['services']['create_responses']):
+        if any_in(response_code_symbols, NETWORK_RESOURCES['services']['create_responses']):
             try:
                 started = json.loads(response.text)
             except ValueError as e:
@@ -1353,7 +1346,7 @@ class Network:
 
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, RESOURCES['service-policies']['create_responses']):
+        if any_in(response_code_symbols, NETWORK_RESOURCES['service-policies']['create_responses']):
             try:
                 started = json.loads(response.text)
             except ValueError as e:
@@ -1442,7 +1435,7 @@ class Network:
 
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, RESOURCES['service-edge-router-policies']['create_responses']):
+        if any_in(response_code_symbols, NETWORK_RESOURCES['service-edge-router-policies']['create_responses']):
             try:
                 started = json.loads(response.text)
             except ValueError as e:
@@ -1546,7 +1539,7 @@ class Network:
 
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, RESOURCES['services']['create_responses']):
+        if any_in(response_code_symbols, NETWORK_RESOURCES['services']['create_responses']):
             try:
                 started = json.loads(response.text)
             except ValueError as e:
@@ -1805,10 +1798,14 @@ class Network:
                         endpoint = endpoint[1:]
 
                     # if UUIDv4 then resolve to name, else verify the named endpoint exists 
-                    try:
-                        UUID(endpoint, version=4) # assigned below under "else" if already a UUID
-                    except ValueError:
-                        # else assume is a name and resolve to ID
+                    if is_uuidv4(endpoint): # assigned below under "else" if already a UUID
+                        try:
+                            name_lookup = self.get_resource(type="endpoint",id=endpoint)
+                            endpoint_name = name_lookup['name']
+                        except Exception as e:
+                            raise Exception('ERROR: Failed to find exactly one hosting endpoint with ID "{}". Caught exception: {}'.format(endpoint, e))
+                        else: bind_endpoints.append('@'+endpoint_name) # is an existing endpoint's name resolved from UUID
+                    else:
                         try: 
                             name_lookup = self.get_resources(type="endpoints",name=endpoint)[0]
                             endpoint_name = name_lookup['name']
@@ -1816,13 +1813,6 @@ class Network:
                             raise Exception('ERROR: Failed to find exactly one hosting endpoint named "{}". Caught exception: {}'.format(endpoint, e))
                         # append to list after successfully resolving name to ID
                         else: bind_endpoints.append('@'+endpoint_name) # is an existing endpoint's name
-                    else:
-                        try:
-                            name_lookup = self.get_resource(type="endpoint",id=endpoint)
-                            endpoint_name = name_lookup['name']
-                        except Exception as e:
-                            raise Exception('ERROR: Failed to find exactly one hosting endpoint with ID "{}". Caught exception: {}'.format(endpoint, e))
-                        else: bind_endpoints.append('@'+endpoint_name) # is an existing endpoint's name resolved from UUID
 
             headers = { 
                 "authorization": "Bearer " + self.session.token 
@@ -1867,7 +1857,7 @@ class Network:
 
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, RESOURCES['services']['create_responses']):
+        if any_in(response_code_symbols, NETWORK_RESOURCES['services']['create_responses']):
             try:
                 started = json.loads(response.text)
             except ValueError as e:
@@ -1947,7 +1937,7 @@ class Network:
             raise
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, RESOURCES['app-wans']['create_responses']):
+        if any_in(response_code_symbols, NETWORK_RESOURCES['app-wans']['create_responses']):
             try:
                 started = json.loads(response.text)
             except ValueError as e:
@@ -1970,7 +1960,8 @@ class Network:
             return(started)
 
     def get_network_by_name(self,name: str,group: str=None):
-        """return exactly one network object
+        """Get one network by name.
+
         :param: name required name of the NF network may contain quoted whitespace
         :param: group optional string UUID to limit results by Network Group ID
         """
@@ -2011,7 +2002,7 @@ class Network:
             )
         hits = networks['page']['totalElements']
         if hits == 1:
-            network = networks['_embedded'][RESOURCES['networks']['embedded']][0]
+            network = networks['_embedded'][NETWORK_RESOURCES['networks']['embedded']][0]
             return(network)
         else:
             raise Exception("ERROR: failed to find exactly one match for {}".format(name))
@@ -2019,7 +2010,7 @@ class Network:
     def get_network_by_id(self,network_id):
         """Return the network object for a particular UUID.
 
-            :network_id [required] the UUID of the network
+        :param str network_id: the UUID of the network
         """
         try:
             headers = { 
@@ -2051,6 +2042,85 @@ class Network:
             )
 
         return(network)
+
+    def get_controller_secrets(self, id: str):
+        """Return the controller management login credentials as {zitiUserId: ASDF, zitiPassword: ASDF}.
+
+        Note that this function requires privileged access to the controller and is intended for emergency, read-only operations by customer support engineers.
+        :param id: the UUID of the network controller
+        """
+        try:
+            headers = { "authorization": "Bearer " + self.session.token }
+            entity_url = self.session.audience+'core/v2/network-controllers/'+id+'/secrets'
+            response = http.get(
+                entity_url,
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers
+            )
+            response_code = response.status_code
+        except:
+            raise
+
+        if response_code == STATUS_CODES.codes.OK:
+            try:
+                secrets = json.loads(response.text)
+            except:
+                raise Exception('ERROR parsing response as object, got:\n{}'.format(response.text))
+        else:
+            raise Exception(
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    STATUS_CODES._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
+                )
+            )
+        try:
+            ziti_secrets_keys = ['zitiUserId','zitiPassword']
+            assert(set(ziti_secrets_keys) & set(secrets.keys()) == set(ziti_secrets_keys))
+        except AssertionError as e:
+            raise e
+        return(secrets)
+
+    def get_controller_session(self, id: str):
+        """Return the controller management API login session token as {sessionToken: UUID, expiresAt: DATETIME}.
+
+        Note that this function requires privileged access to the controller and is intended for emergency, read-only operations by customer support engineers.
+        :param id: the UUID of the network controller
+        """
+        try:
+            headers = { "authorization": "Bearer " + self.session.token }
+            entity_url = self.session.audience+'core/v2/network-controllers/'+id+'/session'
+            response = http.get(
+                entity_url,
+                proxies=self.session.proxies,
+                verify=self.session.verify,
+                headers=headers
+            )
+            response_code = response.status_code
+        except:
+            raise
+
+        if response_code == STATUS_CODES.codes.OK: # HTTP 200
+            try:
+                session = response.json()
+            except ValueError as e:
+                logging.error('failed loading session as an object from response document')
+                raise(e)
+        else:
+            raise Exception(
+                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                    STATUS_CODES._codes[response_code][0].upper(),
+                    response_code,
+                    response.text
+                )
+            )
+        try:
+            ziti_session_keys = ['expiresAt','sessionToken']
+            assert(set(ziti_session_keys) & set(session.keys()) == set(ziti_session_keys))
+        except AssertionError as e:
+            raise e
+        return(session)
 
     def wait_for_property_defined(self, property_name: str, property_type: object=str, entity_type: str="network", wait: int=60, sleep: int=3, id: str=None, progress: bool=False):
         """Poll until expiry for the expected property to become defined with the any value of the expected type.
@@ -2130,7 +2200,7 @@ class Network:
                 )
             )
 
-    @docstring_parameters(resource_entity_types=str(RESOURCES.keys()))
+    @docstring_parameters(resource_entity_types=str(NETWORK_RESOURCES.keys()))
     def wait_for_entity_name_exists(self, entity_name: str, entity_type: str, wait: int=60, sleep: int=3, progress: bool=False):
         """Continuously poll until expiry for the expected entity name to exist.
 
@@ -2150,10 +2220,10 @@ class Network:
                 )
             )
 
-        if not plural(entity_type) in RESOURCES.keys():
+        if not plural(entity_type) in NETWORK_RESOURCES.keys():
             raise Exception("ERROR: unknown type \"{type}\". Choices: {choices}".format(
                 type=entity_type,
-                choices=str(RESOURCES.keys())
+                choices=str(NETWORK_RESOURCES.keys())
             ))
 
         # poll for status until expiry
@@ -2471,7 +2541,7 @@ class Network:
                 if id is None:
                     raise Exception("ERROR: need entity UUID to delete")
                 entity_url = self.session.audience+'core/v2/'+plural(type)+'/'+id
-            eprint("WARN: deleting {:s}".format(entity_url))
+            logging.debug("deleting {:s}".format(entity_url))
             params = dict()
             # if type == "service":
             #     params["beta"] = ''

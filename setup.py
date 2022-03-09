@@ -24,10 +24,13 @@ setuptools.setup(
         "Operating System :: OS Independent",
     ],
     install_requires=[
-        'requests >= 2.25.1',
-        'pysocks >= 1.7.1',
-        'pyjwt >= 2.0.0',
-        'inflect >= 5.3'
+        'requests >= 2.27',
+        'pyjwt >= 2.3',
+        'inflect >= 5.3',
+        'milc >= 1.6',
+        'pyyaml >= 5.4',
+        'platformdirs >= 2.4',
+        'tabulate >= 0.8'
     ]
 )
 
