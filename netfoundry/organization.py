@@ -672,13 +672,13 @@ class Organization:
         # if there are multiple pages of resources
         else:
             # append the remaining pages of resources
-            for page in range(1,total_pages):
+            for page in range(1,total_pages+1): # +1 to work around 1-base bug in MOP-17890
                 try:
                     params["page"] = page
                     response = http.get(
                         self.audience+'rest/v1/network-groups',
-                        proxies=self.session.proxies,
-                        verify=self.session.verify,
+                        proxies=self.proxies,
+                        verify=self.verify,
                         headers=headers,
                         params=params
                     )
