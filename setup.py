@@ -30,7 +30,8 @@ setuptools.setup(
         'milc >= 1.6',
         'pyyaml >= 5.4',
         'platformdirs >= 2.4',
-        'tabulate >= 0.8'
+        'tabulate >= 0.8',
+        'packaging >= 20.9'
     ]
 )
 
