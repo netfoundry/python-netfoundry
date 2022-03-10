@@ -671,7 +671,7 @@ def use_network(organization: object, network: str=None, group: str=None, operat
             existing_networks = network_group.networks_by_name()
         else:
             existing_networks = organization.get_networks_by_organization()
-        cli.log.error("need --network to configure a network")
+        cli.log.error("need 'nfctl --network NETWORK' or 'nfctl config general.network=NETWORK' to configure a network")
         exit(1)
     if group:
         network_group = use_network_group(organization=organization, group=group)

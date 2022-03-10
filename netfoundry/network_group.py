@@ -3,7 +3,7 @@
 import json
 import logging
 
-from .utility import RESOURCES, STATUS_CODES, Utility, eprint, http, is_uuidv4
+from .utility import RESOURCES, STATUS_CODES, Utility, http, is_uuidv4
 
 utility = Utility()
 
@@ -129,7 +129,7 @@ class NetworkGroup:
                 all_data_centers = json.loads(response.text)['_embedded']['dataCenters']
                 aws_data_centers = [dc for dc in all_data_centers if dc['provider'] == "AWS"]
             except ValueError as e:
-                eprint('ERROR getting data centers')
+                logging.error('failed to find data centers')
                 raise(e)
         else:
             raise Exception(
@@ -161,7 +161,7 @@ class NetworkGroup:
             try:
                 product_metadata = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR getting product metadata')
+                logging.error('failed to find product metadata')
                 raise(e)
         else:
             raise Exception(
