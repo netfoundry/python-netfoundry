@@ -623,7 +623,10 @@ class Organization:
 
         :param str kwargs: filter results by any supported query param
         """
-        params = dict()
+        params = {
+            'size': 1000,
+            'page': 0
+        }
         for param in kwargs.keys():
             params[param] = kwargs[param]            
         try:
@@ -642,10 +645,10 @@ class Organization:
 
         if response_code == STATUS_CODES.codes.OK: # HTTP 200
             try:
-                network_groups = json.loads(response.text)['_embedded']['organizations']
-            except ValueError as e:
+                response_object = response.json()
+            except ValueError:
                 logging.error('failed loading list of network groups as object')
-                raise(e)
+                raise ValueError("response is not JSON")
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
@@ -654,6 +657,50 @@ class Organization:
                     response.text
                 )
             )
+
+        total_pages = response_object['page']['totalPages']
+        total_elements = response_object['page']['totalElements']
+        # if there are no resources
+        if total_elements == 0:
+            return([])
+        else:
+            network_groups = response_object['_embedded'][RESOURCES['network-groups']['embedded']]
+
+        # if there is one page of resources
+        if total_pages == 1:
+            return network_groups
+        # if there are multiple pages of resources
+        else:
+            # append the remaining pages of resources
+            for page in range(1,total_pages+1): # +1 to work around 1-base bug in MOP-17890
+                try:
+                    params["page"] = page
+                    response = http.get(
+                        self.audience+'rest/v1/network-groups',
+                        proxies=self.proxies,
+                        verify=self.verify,
+                        headers=headers,
+                        params=params
+                    )
+                    response_code = response.status_code
+                except:
+                    raise
+                if response_code == STATUS_CODES.codes.OK: # HTTP 200
+                    try:
+                        response_object = response.json()
+                        network_groups.extend(response_object['_embedded'][RESOURCES['network-groups']['embedded']])
+                    except ValueError:
+                        logging.error('failed loading list of network groups as object')
+                        raise ValueError("response is not JSON")
+                else:
+                    raise Exception(
+                        'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                            STATUS_CODES._codes[response_code][0].upper(),
+                            response_code,
+                            response.text
+                        )
+                    )
+
         return(network_groups)
 
     network_groups = get_network_groups_by_organization

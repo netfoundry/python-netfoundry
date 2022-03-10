@@ -482,7 +482,7 @@ class Network:
             params = {
                 "networkId": self.id,
                 "page": 0,
-                "size": 100,
+                "size": 1000,
             }
             # if type == "services": 
             #     params["beta"] = ''
