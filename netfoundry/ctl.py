@@ -31,7 +31,7 @@ from .exceptions import NFAPINoCredentials
 from .network import Network
 from .network_group import NetworkGroup
 from .organization import Organization
-from .utility import NETWORK_RESOURCES, RESOURCES, Utility, plural, singular
+from .utility import MUTABLE_NETWORK_RESOURCES, NETWORK_RESOURCES, RESOURCES, Utility, plural, singular
 from packaging import version
 
 set_metadata(version="v"+get_versions()['version']) # must precend import milc.cli
@@ -265,7 +265,7 @@ def logout(cli):
 
 @cli.argument('-f', '--file', help='JSON or YAML file', type=argparse.FileType('r', encoding='UTF-8'))
 @cli.argument('-w','--wait', help='seconds to wait for process execution to finish', default=0)
-@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in NETWORK_RESOURCES.keys()])
+@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in MUTABLE_NETWORK_RESOURCES.keys()])
 @cli.subcommand('create a resource from stdin or file')
 def create(cli):
     """Create a resource.
@@ -277,10 +277,7 @@ def create(cli):
     # get the input object if available, else get the lines (serialized YAML or JSON) and try to deserialize
     create_input_object, create_input_lines, create_object = None, str(), None
     if sys.stdin.isatty() and not cli.args.file:
-        if 'create_template' in NETWORK_RESOURCES[plural(cli.args.resource_type)].keys():
-            create_input_object = NETWORK_RESOURCES[plural(cli.args.resource_type)]['create_template']
-        else:
-            create_input_object = {"hint": "No template was found for resource type {type}. Replace the contents of this buffer with the request body as YAML or JSON to create a resource. networkId will be added automatically.".format(type=cli.args.resource_type)}
+        create_input_object = MUTABLE_NETWORK_RESOURCES[plural(cli.args.resource_type)].create_template
     elif cli.args.file:
         try:
             create_input_lines = cli.args.file.read()
@@ -332,7 +329,7 @@ def create(cli):
         resource = network.create_resource(type=cli.args.resource_type, properties=create_object, wait=cli.config.create.wait)
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
-@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in NETWORK_RESOURCES.keys()])
+@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in MUTABLE_NETWORK_RESOURCES.keys()])
 # this allows us to pass the edit subcommand's cli object to function get without further modifying that functions params
 @cli.argument('-a', '--accept', arg_only=True, default='update', help=argparse.SUPPRESS)
 @cli.subcommand('edit a single resource selected by query with editor defined in NETFOUNDRY_EDITOR or EDITOR')
@@ -432,8 +429,8 @@ def get(cli, echo: bool=True):
             return match, network, network_group, organization
         else:
             if cli.args.keys:
-                # intersection of the set of valid, observed keys in the match
-                # and the set of configured, desired keys
+                # intersection of the set of observed, present keys in the
+                # match and the set of configured, desired keys
                 valid_keys = set(match.keys()) & set(cli.args.keys)
                 if valid_keys: # if at least one element in intersection set
                     cli.log.debug("valid keys: %s", str(valid_keys))
@@ -458,7 +455,7 @@ def get(cli, echo: bool=True):
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
-@cli.argument('resource_type', arg_only=True, help='type of resource', choices=RESOURCES.keys())
+@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[type for type in RESOURCES.keys()])
 @cli.subcommand('find resources as lists')
 def list(cli):
     """Find resources as lists."""
@@ -538,7 +535,7 @@ def list(cli):
         cli.echo(json_dumps(filtered_matches, indent=4))
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
-@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in NETWORK_RESOURCES.keys()])
+@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in MUTABLE_NETWORK_RESOURCES.keys()])
 @cli.argument('-w','--wait', help='seconds to wait for confirmation of delete', default=0)
 @cli.subcommand('delete a resource in the network domain')
 def delete(cli):

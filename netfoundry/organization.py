@@ -11,8 +11,10 @@ from pathlib import Path
 import jwt
 from platformdirs import user_cache_path, user_config_path
 
-from .utility import RESOURCES, STATUS_CODES, Utility, eprint, http, is_uuidv4
 from .exceptions import NFAPINoCredentials
+from .utility import (MUTABLE_NETWORK_RESOURCES, NETWORK_RESOURCES,
+                      RESOURCES, STATUS_CODES, Utility, eprint, http,
+                      is_uuidv4)
 
 utility = Utility()
 
@@ -465,7 +467,6 @@ class Organization:
         params = dict()
         for param in kwargs.keys():
             params[param] = kwargs[param]
-
         try:
             headers = { "authorization": "Bearer " + self.token }
             response = http.get(
@@ -580,13 +581,13 @@ class Organization:
         headers["authorization"] = "Bearer " + self.token
         params = dict()
         if embed == "all":
-            params['embed'] = ','.join([type for type in RESOURCES.keys() if RESOURCES[type]['domain'] == "network"])
+            params['embed'] = ','.join(MUTABLE_NETWORK_RESOURCES)
             logging.debug("requesting embed all resource types in network domain: {:s}".format(params['embed']))
         elif embed:
             params['embed'] = ','.join([type for type in embed.split(',') if RESOURCES[type]['domain'] == "network"])
             logging.debug("requesting embed some resource types in network domain: {:s}".format(params['embed']))
             for type in embed.split(','):
-                if not type in [type for type in RESOURCES.keys() if RESOURCES[type]['domain'] == "network"]:
+                if not type in NETWORK_RESOURCES.keys():
                     logging.debug("not requesting embed of resource type '{:s}' because not a valid resource type or not in network domain".format(type))
         try:
             response = http.get(
@@ -664,7 +665,7 @@ class Organization:
         if total_elements == 0:
             return([])
         else:
-            network_groups = response_object['_embedded'][RESOURCES['network-groups']['embedded']]
+            network_groups = response_object['_embedded'][RESOURCES['network-groups']._embedded]
 
         # if there is one page of resources
         if total_pages == 1:
@@ -688,7 +689,7 @@ class Organization:
                 if response_code == STATUS_CODES.codes.OK: # HTTP 200
                     try:
                         response_object = response.json()
-                        network_groups.extend(response_object['_embedded'][RESOURCES['network-groups']['embedded']])
+                        network_groups.extend(response_object['_embedded'][RESOURCES['network-groups']._embedded])
                     except ValueError:
                         logging.error('failed loading list of network groups as object')
                         raise ValueError("response is not JSON")
@@ -761,11 +762,11 @@ class Organization:
             return([])
         # if there is one page of resources
         elif total_pages == 1:
-            all_entities = resources['_embedded'][RESOURCES['networks']['embedded']]
+            all_entities = resources['_embedded'][RESOURCES['networks']._embedded]
         # if there are multiple pages of resources
         else:
             # initialize the list with the first page of resources
-            all_entities = resources['_embedded'][RESOURCES['networks']['embedded']]
+            all_entities = resources['_embedded'][RESOURCES['networks']._embedded]
             # append the remaining pages of resources
             for page in range(1,total_pages):
                 try:
@@ -784,7 +785,7 @@ class Organization:
                 if response_code == STATUS_CODES.codes.OK: # HTTP 200
                     try:
                         resources = json.loads(response.text)
-                        all_entities.extend(resources['_embedded'][RESOURCES['networks']['embedded']])
+                        all_entities.extend(resources['_embedded'][RESOURCES['networks']._embedded])
                     except ValueError as e:
                         eprint('ERROR: failed to load resources object from GET response')
                         raise(e)
@@ -864,7 +865,7 @@ class Organization:
                 logging.error("response is not JSON")
                 raise ValueError("response is not JSON")
             try:
-                networks = embedded['_embedded'][RESOURCES['networks']['embedded']]
+                networks = embedded['_embedded'][RESOURCES['networks']._embedded]
             except KeyError:
                 networks = list()
         else:

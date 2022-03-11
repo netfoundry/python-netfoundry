@@ -255,7 +255,7 @@ class NetworkGroup:
 
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, RESOURCES['networks']['create_responses']):
+        if any_in(response_code_symbols, RESOURCES['networks'].create_responses):
             try:
                 network = json.loads(response.text)
             except ValueError as e:
