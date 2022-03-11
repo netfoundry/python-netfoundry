@@ -8,7 +8,6 @@ import stat
 import time  # enforce a timeout; sleep
 from pathlib import Path
 
-import jwt
 from platformdirs import user_cache_path, user_config_path
 
 from .exceptions import NFAPINoCredentials
@@ -41,6 +40,7 @@ class Organization:
         organization_label: str=None,
         profile: str="default",
         token: str=None,
+        authorization: dict=dict(),
         expiry_minimum: int=600,
         proxy: str=None):
         """Initialize an instance of organization."""
@@ -110,9 +110,8 @@ class Organization:
         # if the token was found then extract the expiry
         if self.token:
             try:
-                claim = jwt.decode(jwt=self.token, algorithms=["RS256"], options={"verify_signature": False})
-            except jwt.exceptions.PyJWTError:
-                logging.error("failed to parse bearer token as JWT")
+                claim = utility.jwt_decode(self.token)
+            except:
                 raise
             else:
                 self.expiry = claim['exp']
@@ -206,10 +205,10 @@ class Organization:
         # renew token if not existing or imminent expiry, else continue
         if not self.token or self.expiry_seconds < expiry_minimum:
             if self.token and self.expiry_seconds < expiry_minimum:
-                logging.warn("token expiry %ds is less than configured minimum %ds", self.expiry_seconds, expiry_minimum)
+                logging.debug("token expiry %ds is less than configured minimum %ds", self.expiry_seconds, expiry_minimum)
             if not credentials_configured:
-                logging.error("credentials needed to renew token")
-                raise NFAPINoCredentials
+                logging.debug("credentials needed to renew token")
+                raise NFAPINoCredentials("credentials needed to renew token")
             else:
                 logging.debug("renewing token")
 
@@ -245,6 +244,7 @@ class Organization:
                 try:
                     token_text = json.loads(response.text)
                     self.token = token_text['access_token']
+                    self.expiry = token_text['expires_in']
                 except:
                     raise Exception(
                         'ERROR: failed to find an access_token in the response and instead got: {}'.format(
@@ -262,7 +262,7 @@ class Organization:
 
         # learn about the environment from the token
         try:
-            claim = jwt.decode(jwt=self.token, algorithms=["RS256"], options={"verify_signature": False})
+            claim = utility.jwt_decode(self.token)
             iss = claim['iss']
             if re.match(r'https://cognito-', iss):
                 self.environment = re.sub(r'https://gateway\.([^.]+)\.netfoundry\.io.*',r'\1',claim['scope'])

@@ -253,15 +253,12 @@ export MOPENV={env}
 @cli.subcommand('logout from an identity organization')
 def logout(cli):
     """Logout by deleting the cached token."""
-    organization = use_organization(prompt=False)
     try:
+        organization = use_organization(prompt=False)
+    except NFAPINoCredentials:
+        cli.log.debug("no need to logout profile '%s'", cli.config.general.profile)
+    else:
         organization.logout()
-    except NFAPINoCredentials as e:
-        cli.log.debug("no need to logout because not logged in")
-        return True
-    except Exception as e:
-        cli.log.error("failed to logout with %s", e)
-        exit(1)
 
 @cli.argument('-f', '--file', help='JSON or YAML file', type=argparse.FileType('r', encoding='UTF-8'))
 @cli.argument('-w','--wait', help='seconds to wait for process execution to finish', default=0)
@@ -625,7 +622,7 @@ def use_organization(prompt: bool=True):
         if prompt:
             cli.log.debug("caught no credentials exception from organization, prompting for token")
             try:
-                os.environ['NETFOUNDRY_API_TOKEN'] = questions.password(prompt='Enter Bearer Token:', confirm=False, validate=None)
+                os.environ['NETFOUNDRY_API_TOKEN'] = questions.password(prompt='Enter Bearer Token:', confirm=False, validate=utility.is_jwt)
             except KeyboardInterrupt as e:
                 cli.log.debug("input cancelled by user")
                 exit(1)

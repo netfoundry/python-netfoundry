@@ -8,6 +8,7 @@ from re import sub
 from uuid import UUID  # validate UUIDv4 strings
 
 import inflect  # singular and plural nouns
+import jwt
 from requests import \
     Session  # HTTP user agent will not emit server cert warnings if verify=False
 from requests import status_codes
@@ -19,7 +20,7 @@ from urllib3.util.retry import Retry
 disable_warnings(InsecureRequestWarning)
 
 class Utility:
-    """Shared functions intended for use within the module and without."""
+    """Shared functions intended for use with and within the module."""
 
     def __init__(self):
         """No-op."""
@@ -46,6 +47,33 @@ class Utility:
         """Compare the KD normal form of left, right strings."""
         return self.normalize_caseless(left) == self.normalize_caseless(right)
 
+    def jwt_decode(self, token):
+        # TODO: figure out how to stop doing this because the token is for the
+        # API, not this app, and so may change algorithm unexpectedly or stop
+        # being a JWT altogether, currently needed to build the URL for HTTP
+        # requests, might need to start using env config
+        """Parse the token and return claimset."""
+        try:
+            claim = jwt.decode(jwt=token, algorithms=["RS256"], options={"verify_signature": False})
+        except jwt.exceptions.PyJWTError:
+            logging.error("failed to parse bearer token as JWT")
+            raise
+        except:
+            logging.error("unexpect error parsing JWT")
+            raise
+        return claim
+
+    def is_jwt(self, token):
+        """If is a JWT then True."""
+        try:
+            self.jwt_decode(token)
+        except jwt.exceptions.PyJWTError:
+            return False
+        except:
+            logging.error("unexpect error parsing JWT")
+            raise
+        else:
+            return True
 class LookupDict(dict):
     """Helper class to create a lookup dictionary from a set."""
 
