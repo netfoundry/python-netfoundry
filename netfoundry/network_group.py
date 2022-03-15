@@ -199,7 +199,7 @@ class NetworkGroup:
         from distutils.version import LooseVersion
         return sorted(product_versions, key=LooseVersion)[-1]
 
-    def create_network(self, name: str, network_group_id: str=None, location: str="us-east-1", version: str=None, size: str="small"):
+    def create_network(self, name: str, network_group_id: str=None, location: str="us-east-1", version: str=None, size: str="small", **kwargs):
         """
         Create a network in this network group.
 
@@ -213,11 +213,29 @@ class NetworkGroup:
         if not location in my_nc_data_centers_by_location.keys():
             raise Exception("ERROR: unexpected Network location '{:s}'. Valid locations include: {}.".format(location, my_nc_data_centers_by_location.keys()))
 
+        # map incongruent api keys from kwargs to function params ("name", "size" are congruent)
+        for param,value in kwargs.items():
+            if param == 'networkGroupId':
+                if network_group_id:
+                    logging.debug("clobbering param 'network_group_id' with kwarg 'networkGroupId'")
+                network_group_id = value
+            elif param == 'locationCode':
+                if location:
+                    logging.debug("clobbering param 'location' with kwarg 'locationCode'")
+                location = value
+            elif param == 'productVersion':
+                if version:
+                    logging.debug("clobbering param 'version' with kwarg 'productVersion'")
+                version == value
+            else:
+                logging.warn("ignoring unexpected keyword argument '%s'", param)
+
         request = {
             "name": name,
             "locationCode": location,
             "size": size,
         }
+
         if network_group_id:
             request["networkGroupId"] = network_group_id
         else:
