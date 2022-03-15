@@ -25,6 +25,7 @@ from milc import set_metadata
 from tabulate import tabulate
 from yaml import dump as yaml_dumps
 from yaml import full_load as yaml_loads
+from yaml import parser
 
 from ._version import get_versions
 from .exceptions import NFAPINoCredentials
@@ -501,7 +502,7 @@ def list(cli):
         # and the set of configured, desired keys
         valid_keys = set(matches[0].keys()) & set(cli.args.keys)
     elif cli.config.general.output == "text":
-        valid_keys = set(matches[0].keys()) & set(['name','label','organizationShortName','id','edgeRouterAttributes','serviceAttributes','endpointAttributes','status','zitiId','provider','locationCode','ipAddress','region','size','attributes','email'])
+        valid_keys = set(matches[0].keys()) & set(['name','label','organizationShortName','id','edgeRouterAttributes','serviceAttributes','endpointAttributes','status','zitiId','provider','locationCode','ipAddress','region','size','attributes','email','productVersion'])
 
     if valid_keys:
         cli.log.debug("valid keys: %s", str(valid_keys))
@@ -716,18 +717,30 @@ def edit_object_as_yaml(edit: object):
     
     :param obj input: a deserialized (object) to edit and return as yaml
     """
+    if cli.args.yes:
+        return edit
     EDITOR = os.environ.get('NETFOUNDRY_EDITOR',os.environ.get('EDITOR','vim'))
-    yaml_dumps(edit, default_flow_style=False)
     with tempfile.NamedTemporaryFile(suffix=".yml") as tf:
-        tf.write(yaml_dumps(edit, default_flow_style=False).encode())
+        tf.write(yaml_dumps(edit, default_flow_style=False))
         tf.flush()
         return_code = call(EDITOR.split()+[tf.name])
 
         tf.seek(0)
         edited = tf.read()
     if return_code == 0:
-        edited_object = yaml_loads(edited)
-        return edited_object
+        try:
+            edited_object = yaml_loads(edited)
+        except parser.ParserError as e:
+            cli.log.error("invalid YAML or JSON: %s", e)
+            with tempfile.NamedTemporaryFile(suffix=".yml") as tf:
+                tf.write(edited)
+                cli.log.warn("your buffer was saved in %s and you may edit and redirect to the same command as stdin or --file", tf.name)
+            exit(1)
+        except Exception as e:
+            cli.log.error("unknown error in %s", e)
+            exit(1)
+        else:
+            return edited_object
     else:
         cli.log.debug("error editing temporary file")
         exit(1)
