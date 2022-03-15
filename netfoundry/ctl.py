@@ -128,8 +128,8 @@ def login(cli, api: str=None, shell: bool=None):
         # json (unless shell which means to suppress normal output and only
         # configure the current shell)
         if not cli.args.shell and cli.config.general.output == "text":
-            summary_table = [['domain', 'summary']]
-            summary_table.append(['organization', '"{org_name}" ({org_label}@{env}) logged in as {fullname} ({email}) until {expiry_timestamp} (T-{expiry_seconds}s)'.format(
+            summary_table = []
+            summary_table.append(['organization', '"{org_name}" ({org_label}@{env}) logged in \n{fullname} ({email}) \nuntil {expiry_timestamp} (T-{expiry_seconds}s)'.format(
                     fullname=summary_object['caller']['name'],
                     email=summary_object['caller']['email'],
                     org_label=organization.label,
@@ -139,25 +139,25 @@ def login(cli, api: str=None, shell: bool=None):
                     expiry_seconds=int(organization.expiry_seconds)
                 )])
             if network_group:
-                    summary_table.append(['network group', '"{fullname}" ({shortname}) configured with {count} networks'.format(
+                    summary_table.append(['network group', '"{fullname}" ({shortname}) \n with {count} networks'.format(
                         fullname=summary_object['network_group']['name'],
                         shortname=summary_object['network_group']['organizationShortName'],
                         count=summary_object['network_group']['networks_count']
                 )])
             if network:
-                    summary_table.append(['network', '"{fullname}" ({data_center}) with version {version} and status {status} configured'.format(
+                    summary_table.append(['network', '"{fullname}" ({data_center}) \n is {version} and status {status}'.format(
                         fullname=summary_object['network']['name'],
                         data_center=summary_object['network']['region'],
                         version=summary_object['network']['productVersion'],
                         status=summary_object['network']['status']
                 )])
             if cli.config.general.borders:
-                table_borders = "github"
+                table_borders = "presto"
             else:
                 table_borders = "plain"
             cli.echo(
                 '{fg_lightgreen_ex}'
-                +tabulate(tabular_data=summary_table, headers='firstrow', tablefmt=table_borders)
+                +tabulate(tabular_data=summary_table, headers=['domain', 'summary'], tablefmt=table_borders)
             )
 
         elif not cli.args.shell and cli.config.general.output == "yaml":
@@ -519,7 +519,7 @@ def list(cli):
         else:
             table_headers = []
         if cli.config.general.borders:
-            table_borders = "github"
+            table_borders = "presto"
         else:
             table_borders = "plain"
         cli.echo(
