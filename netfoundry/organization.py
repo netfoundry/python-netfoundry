@@ -11,9 +11,9 @@ from pathlib import Path
 from platformdirs import user_cache_path, user_config_path
 
 from .exceptions import NFAPINoCredentials
-from .utility import (MUTABLE_NETWORK_RESOURCES, NETWORK_RESOURCES,
-                      RESOURCES, STATUS_CODES, Utility, eprint, http,
-                      is_uuidv4)
+from .utility import (DEFAULT_TOKEN_EXPIRY, ENVIRONMENTS, MUTABLE_NETWORK_RESOURCES,
+                      NETWORK_RESOURCES, RESOURCES, STATUS_CODES, Utility,
+                      eprint, http, is_uuidv4)
 
 utility = Utility()
 
@@ -30,6 +30,7 @@ class Organization:
     :param str token: continue using a session with this optional token from an existing instance of organization
     :param str credentials: optional alternative path to API account credentials file, default is project, user, or device default directories containing file name credentials.json
     :param int expiry_minimum: renew if possible else reject token with error if expires in < N seconds, ignore if N=0
+    :param str environment: base name of Gateway Service audience URL e.g. "production" may be configured here because token issuer URL and claimset schema are unpredictable
     :param str proxy: optional HTTP proxy, e.g., http://localhost:8080
     """
 
@@ -42,6 +43,7 @@ class Organization:
         token: str=None,
         authorization: dict=dict(),
         expiry_minimum: int=600,
+        environment: str=None,
         proxy: str=None):
         """Initialize an instance of organization."""
         # verify auth endpoint's server certificate if proxy is type SOCKS or None
@@ -59,19 +61,26 @@ class Organization:
             else:
                 self.verify = False
         
-        epoch = None
-        self.expiry_seconds = 0
+        epoch = time.time()
+        self.expiry_seconds = 0 # initialize a placeholder for remaining seconds until expiry
         client_id = None
         password = None
         token_endpoint = None
         credentials_configured = False
+        write_token_cache = False # will set True if token is renewed
 
         if profile is None:
             profile = "default"
         self.profile = profile
+        if environment is None:
+            self.environment = None
+        else:
+            self.environment = environment
 
+        # the token_cache dict is the schema for the file that persists what we think we know about the session
+        token_cache = dict() # { 'access_token': JWT, 'expires_in': SECONDS_UNTIL_EXPIRY, 'audience': GATEWAY_SERVICE_URL }
         cache_dir_path = user_cache_path(appname='netfoundry')
-        token_cache_file_name = self.profile+'.jwt'
+        token_cache_file_name = self.profile+'.json'
         config_dir_path = user_config_path(appname='netfoundry')
 
         try:
@@ -87,38 +96,39 @@ class Organization:
         self.token_cache_file_path = Path(cache_dir_path / token_cache_file_name)
         logging.debug("cache file path is computed '%s'", self.token_cache_file_path.__str__())
 
-        # if not token then use standard env var if defined
+        # if not token then use standard env var if defined, else look for cached token in file
         if token is not None:
             self.token = token
+            self.expiry = None
+            self.audience = None
             logging.debug("got token as param to Organization")
         elif 'NETFOUNDRY_API_TOKEN' in os.environ:
             self.token = os.environ['NETFOUNDRY_API_TOKEN']
-            logging.debug("got token from env NETFOUNDRY_API_TOKEN")
+            self.expiry = None
+            self.audience = None
+            logging.debug("got token from env NETFOUNDRY_API_TOKEN as %dB", len(self.token))
         else:
             try:
-                self.token = self.token_cache_file_path.read_text()
-            except FileNotFoundError as e:
-                logging.debug("cache file '%s' not found", self.token_cache_file_path.__str__())
-                self.token = None
+                token_cache = utility.get_token_cache(self.token_cache_file_path)
             except Exception as e:
-                logging.debug("failed to read cache file '%s', got %s", self.token_cache_file_path.__str__(), e)
+                logging.debug("failed to get cache from file '%s', got %s", self.token_cache_file_path.__str__(), e)
+                self.token = None
+                self.expiry = None
+                self.audience = None
             else:
-                cache_file_stats = os.stat(self.token_cache_file_path)
-                logging.debug("read token as %dB from cache file '%s' with mode %s", len(self.token), self.token_cache_file_path.__str__(), stat.filemode(cache_file_stats.st_mode))
+                self.token = token_cache['token']
+                self.expiry = token_cache['expiry']
+                self.audience = token_cache['audience']
 
-
-        # if the token was found then extract the expiry
-        if self.token:
+        # if the token was found but not the expiry then try to parse to extract the expiry so we can enforce minimum lifespan seconds
+        if self.token and not self.expiry:
             try:
-                claim = utility.jwt_decode(self.token)
+                self.expiry = utility.jwt_expiry(self.token)
             except:
-                raise
-            else:
-                self.expiry = claim['exp']
-                epoch = time.time()
-                self.expiry_seconds = self.expiry - epoch
-        else:
-            logging.debug("no bearer token found in param, env, or cache")
+                self.expiry = epoch + DEFAULT_TOKEN_EXPIRY
+                logging.debug("failed to parse token as JWT, estimating expiry in %ds", DEFAULT_TOKEN_EXPIRY)
+        elif not self.token:
+            logging.debug("no bearer token found in param, env, or cache, looking for credentials to renew token")
 
         # find credentials from param or env so we can renew the token later
         if credentials is not None:
@@ -189,8 +199,8 @@ class Organization:
             try: 
                 file = open(self.credentials, 'r')
             except FileNotFoundError:
-                logging.debug("failed to open credentials file '%s' for reading", self.credentials)
-                pass # this means we can't renew the token, but it's not fatal
+                logging.debug("credentials file '%s' does not exist", self.credentials)
+                # this means we can't renew the token, but it's not fatal
             else:
                 account = json.load(file)
                 token_endpoint = account['authenticationUrl']
@@ -200,7 +210,7 @@ class Organization:
                 logging.debug("configured credentials from file '%s'", self.credentials)
 
         if not credentials_configured:
-            logging.debug("token renewal is disabled because API account credentials are not configured")
+            logging.debug("token renewal impossible because API account credentials are not configured")
 
         # renew token if not existing or imminent expiry, else continue
         if not self.token or self.expiry_seconds < expiry_minimum:
@@ -210,16 +220,19 @@ class Organization:
                 logging.debug("credentials needed to renew token")
                 raise NFAPINoCredentials("credentials needed to renew token")
             else:
-                logging.debug("renewing token")
+                logging.debug("renewing token with credentials")
+                write_token_cache = True
 
             # extract the environment name from the authorization URL aka token API endpoint
-            self.environment = re.sub(r'https://netfoundry-([^-]+)-.*', r'\1', token_endpoint, re.IGNORECASE)
+            if self.environment is None:
+                self.environment = re.sub(r'https://netfoundry-([^-]+)-.*', r'\1', token_endpoint, re.IGNORECASE)
             # re: scope: we're not using scopes with Cognito, but a non-empty value is required;
             #  hence "/ignore-scope"
             scope = "https://gateway."+self.environment+".netfoundry.io//ignore-scope"
             # we can gather the URL of the API from the first part of the scope string by
             #  dropping the scope suffix
             self.audience = scope.replace('/ignore-scope','')
+            logging.debug("using audience parsed from identity provider URL %s", self.audience)
             # e.g. https://gateway.production.netfoundry.io/
             assertion = {
                 "scope": scope,
@@ -235,16 +248,14 @@ class Organization:
                     proxies=self.proxies)
                 response_code = response.status_code
             except:
-                eprint(
-                    'ERROR: failed to contact the authentication endpoint: {}'.format(token_endpoint)
-                )
+                logging.error('failed to contact the authentication endpoint: {}'.format(token_endpoint))
                 raise
 
             if response_code == STATUS_CODES.codes.OK:
                 try:
                     token_text = json.loads(response.text)
                     self.token = token_text['access_token']
-                    self.expiry = token_text['expires_in']
+                    self.expiry = token_text['expires_in'] + epoch
                 except:
                     raise Exception(
                         'ERROR: failed to find an access_token in the response and instead got: {}'.format(
@@ -260,35 +271,64 @@ class Organization:
                     )
                 )
 
-        # learn about the environment from the token
-        try:
-            claim = utility.jwt_decode(self.token)
-            iss = claim['iss']
-            if re.match(r'https://cognito-', iss):
-                self.environment = re.sub(r'https://gateway\.([^.]+)\.netfoundry\.io.*',r'\1',claim['scope'])
-            elif re.match(r'.*\.auth0\.com', iss):
-                self.environment = re.sub(r'https://netfoundry-([^.]+)\.auth0\.com.*',r'\1',claim['iss'])
-            self.audience = 'https://gateway.'+self.environment+'.netfoundry.io/'
-            self.expiry = claim['exp']
-            epoch = time.time()
-            self.expiry_seconds = self.expiry - epoch
-            logging.debug("bearer token expiry in %ds", self.expiry_seconds)
-        except: raise
+        # the purpose of this try-except block is to soft-fail all attempts
+        # to parse the JWT, which is intended for the API, not this
+        # application
+        if not self.environment:
+            try:
+                self.environment = utility.jwt_environment(self.token)
+            except:
+                # an exception here is very unlikely because the called
+                # function is designed to provide a sane default in case the
+                # token can't be parsed
+                logging.debug("unexpected error extracting environment from JWT")
+                raise
+            else:
+                logging.debug("parsed token as JWT and found environment %s", self.environment)
+            finally:
+                if not self.environment in ENVIRONMENTS:
+                    logging.warn("unexpected environment '%s'", self.environment)
 
-        try:
-            # set file mode 0o600 at creation
-            self.token_cache_file_path.touch(mode=stat.S_IRUSR|stat.S_IWUSR)
-            self.token_cache_file_path.write_text(self.token)
-        except:
-            logging.warn("failed to cache token in '%s'", self.token_cache_file_path.__str__())
-            import epdb; epdb.serve()
-        else:
-            logging.debug("cached token in '%s'", self.token_cache_file_path.__str__())
+        if not self.audience:
+            self.audience = 'https://gateway.{env}.netfoundry.io/'.format(env=self.environment)
+
+        if not re.search(self.environment, self.audience):
+            logging.error("mismatched audience URL '%s' and environment '%s'", self.audience, self.environment)
+            exit(1)
+
+        # the purpose of this try-except block is to soft-fail all attempts
+        # to parse the JWT, which is intended for the API, not this
+        # application
+        if not self.expiry: # if token was obtained in this pass then expiry is already defined by response 'expires_in' property 
+            try:
+                self.expiry = utility.jwt_expiry(self.token)
+            except:
+                logging.debug("unexpected error getting expiry from token")
+                raise
+        self.expiry_seconds = self.expiry - epoch
+        logging.debug("bearer token expiry in %ds", self.expiry_seconds)
+
+        if write_token_cache:
+            # cache token state w/ expiry and Gateway Service audience URL
+            try:
+                # set file mode 0o600 at creation
+                self.token_cache_file_path.touch(mode=stat.S_IRUSR|stat.S_IWUSR)
+                token_cache_out = {
+                    'token': self.token,
+                    'expiry': self.expiry,
+                    'audience': self.audience
+                }
+                self.token_cache_file_path.write_text(json.dumps(token_cache_out, indent=4))
+            except:
+                logging.warn("failed to cache token in '%s'", self.token_cache_file_path.__str__())
+            else:
+                logging.debug("cached token in '%s'", self.token_cache_file_path.__str__())
+
+        # Obtain a session token and find own `.caller` identity and `.organizations`
+        self.caller = self.get_caller_identity()
 
         # always resolve Network Groups so we can specify either name or ID when calling super()
         self.network_groups = self.get_network_groups_by_organization()
-        # Obtain a session token and find own `.caller` identity and `.organizations`
-        self.caller = self.get_caller_identity()
 
         if (not organization_id and not organization_label) and organization:
             if is_uuidv4(organization):

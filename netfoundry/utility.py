@@ -1,9 +1,15 @@
 """Shared helper functions, constants, and classes."""
 
+import json
 import logging
-import sys  # open stderr
+import os
+from stat import filemode
+import re  # regex
+#import sys  # open stderr
+import time  # enforce a timeout; sleep
 import unicodedata  # case insensitive compare in Utility
 from dataclasses import dataclass, field
+from lib2to3.pgen2 import token
 from re import sub
 from uuid import UUID  # validate UUIDv4 strings
 
@@ -46,6 +52,80 @@ class Utility:
     def caseless_equal(self, left, right):
         """Compare the KD normal form of left, right strings."""
         return self.normalize_caseless(left) == self.normalize_caseless(right)
+
+    def get_token_cache(self, path):
+        """Try to read the token cache file and return the object."""
+        try:
+            token_cache = json.loads(path.read_text())
+        except FileNotFoundError as e:
+            logging.debug("cache file '%s' not found", path.__str__())
+            raise
+        except json.JSONDecodeError as e:
+            logging.debug("failed to parse cache file '%s' as JSON, got %s", path.__str__(), e)
+            raise
+        except Exception as e:
+            logging.debug("failed to read cache file '%s', got %s", path.__str__(), e)
+            raise
+        else:
+            cache_file_stats = os.stat(path)
+            logging.debug("parsed token cache file '%s' as JSON with mode %s", path.__str__(), filemode(cache_file_stats.st_mode))
+        
+        if all(k in token_cache for k in ['token', 'expiry', 'audience']):
+            return token_cache
+        else:
+            raise Exception("not all expected token cache file keys were found: token, expiry, audience")
+
+    def jwt_expiry(self, token):
+        """Return an epoch timestampt when the token will be expired.
+        
+        First, try to parse JWT to extract expiry. If that fails then estimate +1h.
+        """
+        try:
+            claim = self.jwt_decode(token)
+            expiry = claim['exp']
+        except jwt.exceptions.PyJWTError:
+            logging.debug("error parsing JWT to extract expiry, estimating +%ds", DEFAULT_TOKEN_EXPIRY)
+            expiry = time.time() + DEFAULT_TOKEN_EXPIRY
+        except KeyError:
+            logging.debug("failed to extract expiry epoch from claimset as key 'exp', estimating +%ds", DEFAULT_TOKEN_EXPIRY)
+            expiry = time.time() + DEFAULT_TOKEN_EXPIRY
+        except:
+            logging.error("unexpect error")
+            raise
+        else:
+            logging.debug("successfully extracted expiry from JWT")
+        finally:
+            return expiry
+
+    def jwt_environment(self, token):
+        """Try to extract the environment name from a JWT.
+        
+        First, try to parse JWT to extract the audience. If that fails then assume "production".
+        """
+        try:
+            claim = self.jwt_decode(token)
+            iss = claim['iss']
+        except jwt.exceptions.PyJWTError:
+            environment = "production"
+            logging.debug("error parsing JWT to extract audience, assuming environment is Production")
+        except KeyError:
+            environment = "production"
+            logging.debug("failed to extract the issuer URL from claimset as key 'iss', assuming environment is Production")
+        except:
+            logging.error("unexpect error")
+            raise
+        else:
+            if re.match(r'https://cognito-', iss):
+                environment = re.sub(r'https://gateway\.([^.]+)\.netfoundry\.io.*',r'\1',claim['scope'])
+                logging.debug("matched Cognito issuer URL convention, found environment '%s'", environment)
+            elif re.match(r'.*\.auth0\.com', iss):
+                environment = re.sub(r'https://netfoundry-([^.]+)\.auth0\.com.*',r'\1',claim['iss'])
+                logging.debug("matched Auth0 issuer URL convention, found environment '%s'", environment)
+            else:
+                environment = "production"
+                logging.debug("failed to match Auth0 and Cognito issuer URL conventions, assuming environment is '%s'", environment)
+        finally:
+            return environment
 
     def jwt_decode(self, token):
         # TODO: figure out how to stop doing this because the token is for the
@@ -366,3 +446,7 @@ http.mount("https://", adapter)
 http.mount("http://", adapter)
 
 STATUS_CODES = status_codes
+
+DEFAULT_TOKEN_EXPIRY = 3600
+
+ENVIRONMENTS = ['production','staging','sandbox']

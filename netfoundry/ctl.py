@@ -133,7 +133,7 @@ def login(cli, api: str=None, shell: bool=None):
         # configure the current shell)
         if not cli.args.shell and cli.config.general.output == "text":
             summary_table = []
-            summary_table.append(['organization', '"{org_name}" ({org_label}@{env}) logged in \n{fullname} ({email}) \nuntil {expiry_timestamp} (T-{expiry_seconds}s)'.format(
+            summary_table.append(['organization', 'logged in to "{org_name}" ({org_label}@{env}) \nas {fullname} ({email}) \nuntil {expiry_timestamp} (T-{expiry_seconds}s)'.format(
                     fullname=summary_object['caller']['name'],
                     email=summary_object['caller']['email'],
                     org_label=organization.label,
@@ -651,16 +651,17 @@ def use_organization(prompt: bool=True):
         if prompt:
             cli.log.debug("caught no credentials exception from organization, prompting for token")
             try:
-                os.environ['NETFOUNDRY_API_TOKEN'] = questions.password(prompt='Enter Bearer Token:', confirm=False, validate=utility.is_jwt)
+                token_from_prompt = questions.password(prompt='Enter Bearer Token:', confirm=False, validate=utility.is_jwt)
             except KeyboardInterrupt as e:
                 cli.log.debug("input cancelled by user")
                 exit(1)
             except Exception as e:
                 cli.log.error("unknown error in %s", e)
                 exit(1)
+
             try:
                 organization = Organization(
-                    credentials=cli.config.general.credentials if cli.config.general.credentials else None,
+                    token=token_from_prompt,
                     organization=cli.config.general.organization if cli.config.general.organization else None,
                     profile=cli.config.general.profile,
                     expiry_minimum=0,
