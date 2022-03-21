@@ -18,7 +18,7 @@ setuptools.setup(
     author='Kenneth Bingham',
     author_email='support@netfoundry.io',
     packages=setuptools.find_packages(),
-    python_requires='>=3.6',
+    python_requires='>=3.7',
     classifiers=[
         "Programming Language :: Python :: 3",
         "Operating System :: OS Independent",

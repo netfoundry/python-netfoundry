@@ -3,10 +3,12 @@
 import logging
 import sys  # open stderr
 import unicodedata  # case insensitive compare in Utility
+from dataclasses import dataclass, field
 from re import sub
 from uuid import UUID  # validate UUIDv4 strings
 
 import inflect  # singular and plural nouns
+import jwt
 from requests import \
     Session  # HTTP user agent will not emit server cert warnings if verify=False
 from requests import status_codes
@@ -18,7 +20,7 @@ from urllib3.util.retry import Retry
 disable_warnings(InsecureRequestWarning)
 
 class Utility:
-    """Shared functions intended for use within the module and without."""
+    """Shared functions intended for use with and within the module."""
 
     def __init__(self):
         """No-op."""
@@ -45,6 +47,33 @@ class Utility:
         """Compare the KD normal form of left, right strings."""
         return self.normalize_caseless(left) == self.normalize_caseless(right)
 
+    def jwt_decode(self, token):
+        # TODO: figure out how to stop doing this because the token is for the
+        # API, not this app, and so may change algorithm unexpectedly or stop
+        # being a JWT altogether, currently needed to build the URL for HTTP
+        # requests, might need to start using env config
+        """Parse the token and return claimset."""
+        try:
+            claim = jwt.decode(jwt=token, algorithms=["RS256"], options={"verify_signature": False})
+        except jwt.exceptions.PyJWTError:
+            logging.error("failed to parse bearer token as JWT")
+            raise
+        except:
+            logging.error("unexpect error parsing JWT")
+            raise
+        return claim
+
+    def is_jwt(self, token):
+        """If is a JWT then True."""
+        try:
+            self.jwt_decode(token)
+        except jwt.exceptions.PyJWTError:
+            return False
+        except:
+            logging.error("unexpect error parsing JWT")
+            raise
+        else:
+            return True
 class LookupDict(dict):
     """Helper class to create a lookup dictionary from a set."""
 
@@ -73,6 +102,7 @@ def is_uuidv4(string: str):
         return True
 
 def eprint(*args, **kwargs):
+    """Adapt legacy function to logging."""
     logging.debug(*args, **kwargs)
 
 p = inflect.engine()
@@ -88,112 +118,189 @@ def singular(plural):
     """Singularize a plural form."""
     return(p.singular_noun(plural))
 
-STATUSES_BY_CODE = {
-    100: ('new', 'created'),
-    200: ('building', 'incomplete', 'allocated'),
-    300: ('active', 'complete', 'provisioned'),
-    400: ('registered', 'enrolled'),
-    500: ('error', 'server_error'),
-    600: ('updating', 'modifying'),
-    800: ('deleting', 'released', 'decommissioned'),
-    900: ('defunct', 'deleted')
-}
+def camel(kebab, case: str="lower"):                # "lower" dromedary or "upper" Pascal 
+    kebab_words = kebab.split('-')
+    camel_words = list()
+    if case in ["lower","dromedary"]:
+        camel_words.append(kebab_words[0].lower())  # first word is lowercase 
+    elif case in ["upper","pascal"]:
+        camel_words.append(kebab_words[0].upper())  # first word is uppercase
+    else:
+        raise Exception("param 'case' wants 'lower' or 'upper'")
+    for word in kebab_words[1:]:                    # subsequent words are capitalized (cameled)
+        lower_word = word.lower()
+        capital = lower_word[0].upper()
+        camel_word = capital+lower_word[1:]
+        camel_words.append(camel_word)
+    camel = ''.join(camel_words)
+    return camel
 
-CODES = LookupDict(name='statuses')
-for code, titles in STATUSES_BY_CODE.items():
-    for title in titles:
-        setattr(CODES, title.upper(), code)
+
+# parent class so that type checking be re-used for other child classes
+@dataclass
+class ResourceTypeParent:
+    """Parent class for ResourceType class."""
+    
+    def __post_init__(self):
+        """Enforce typed fields in resource spec."""
+        for (name, field_type) in self.__annotations__.items():
+            if not isinstance(self.__dict__[name], field_type):
+                current_type = type(self.__dict__[name])
+                raise TypeError(f"The field `{name}` was assigned by `{current_type}` instead of `{field_type}`")
+
+# the instance's attributes can not be frozen because we're computing the
+# _embedded key and assigning post-init
+@dataclass(frozen=False)
+class ResourceType(ResourceTypeParent):
+    """Typed resource type spec.
+    
+    As close as I could get to a Go struct. This helps us to suggest possible
+    operations such as all resource types in the network domain that can be
+    mutated (C_UD).
+    """
+
+    name: str                                               # plural form as kebab-case e.g. edge-routers
+    domain: str                                             # most are in network, organization
+    mutable: bool                                           # createable, editable, or deletable
+    embeddable: bool                                        # legal to request embedding in a parent resource in same domain
+    _embedded: str = field(default='default')               # the key under which lists are found in the API e.g. networkControllerList 
+                                                            #   (computed if not provided as dromedary case singular)
+    create_responses: list = field(default_factory=list)    # expected HTTP response codes for create operation
+    create_template: dict = field(default_factory=lambda: {
+        'hint': "No template was found for this resource type. Replace the contents of this buffer with the request body as YAML or JSON to create a resource. networkId will be added automatically."
+    })                                                      # object to load when creating from scratch in nfctl
+
+    def __post_init__(self):
+        """Compute and assign _embedded if not supplied and then check types in parent class."""
+        if self._embedded == 'default':
+            singular_name = singular(self.name)
+            camel_name = camel(singular_name)+'List'       # edgeRouterList
+            self._embedded = camel_name
+        return super().__post_init__()
 
 RESOURCES = {
-    'data-centers': {
-        'embedded': "dataCenters",
-        'domain': "network"
-    },
-    'organizations': {
-        'embedded': "",
-        'domain': "organization"
-    },
-    'network-groups': {
-        'embedded': "organizations",
-        'domain': "network-group"
-    },
-    'networks': {
-        'embedded': "networkList",
-        'domain': "network",
-        'create_responses': ["ACCEPTED"],
-        'create_template': {
+    'data-centers': ResourceType(
+        name='data-centers',
+        domain='network',
+        _embedded='dataCenters',      # TODO: raise a bug report because this inconcistency forces consumers to make an exception for this type
+        mutable=False,
+        embeddable=False
+    ),
+    'organizations': ResourceType(
+        name='organizations',
+        domain='organization',
+        mutable=False,
+        embeddable=False
+    ),
+    'network-groups': ResourceType(
+        name='network-groups',
+        domain='network-group',
+        _embedded='organizations',    # TODO: prune this exception when groups migrate to the Core network domain
+        mutable=False,
+        embeddable=False
+    ),
+    'networks': ResourceType(
+        name='networks',
+        domain='network',
+        mutable=True,
+        embeddable=False,
+        create_responses=["ACCEPTED"],
+        create_template={
             "name": "Name",
             "locationCode": "us-east-1",
             "size": "small",
-            "networkGroupId": "a7de7a6d-9b05-4e00-89e0-937498c49e0a"
+            "networkGroupId": None
         }
-    },
-    'network-controllers': {
-        'embedded': "networkControllerList",
-        'domain': "network"
-    },
-    'identities': {
-        'embedded': "",
-        'domain': "organization"
-    },
-    'hosts': {
-        'embedded': "hostList",
-        'domain': "network"
-    },
-    'endpoints': {
-        'embedded': "endpointList",
-        'domain': "network",
-        'create_responses': ["ACCEPTED"],
-        'create_template': {
+    ),
+    'network-controllers': ResourceType(
+        name='network-controllers',
+        domain="network",
+        mutable=False,
+        embeddable=True,
+    ),
+    'identities': ResourceType(
+        name='identities',
+        domain='organization',
+        mutable=False,              # TODO: C_UD not yet implemented here in client for org domain
+        embeddable=False            # TODO: embedding not yet implemented in API for org domain
+    ),
+    'hosts': ResourceType(
+        name='hosts',
+        domain='network',
+        mutable=False,
+        embeddable=True
+    ),
+    'endpoints': ResourceType(
+        name='endpoints',
+        domain='network',
+        mutable=True,
+        embeddable=True,
+        create_responses=["ACCEPTED"],
+        create_template={
             "attributes": [],
             "enrollmentMethod": {"ott": True},
             "name": "Name"
-        }
-    },
-    'edge-routers': {
-        'embedded': "edgeRouterList",
-        'domain': "network",
-        'create_responses': ["ACCEPTED"]
-    },
-    'edge-router-policies': {
-        'embedded': "edgeRouterPolicyList",
-        'domain': "network",
-        'create_responses': ["OK", "ACCEPTED"]
-    },
-    'app-wans': {
-        'embedded': "appWanList",
-        'domain': "network",
-        'create_responses': ["OK"]
-    },
-    'services': {
-        'embedded': "serviceList",
-        'domain': "network",
-        'create_responses': ["ACCEPTED"],
-        'create_template': {"this": 1}
-    },
-    'service-policies': {
-        'embedded': "servicePolicyList",
-        'domain': "network",
-        'create_responses': ["ACCEPTED"]
-    },
-    'service-edge-router-policies': {
-        'embedded': "serviceEdgeRouterPolicyList",
-        'domain': "network",
-        'create_responses': ["ACCEPTED"]
-    },
-    'posture-checks': {
-        'embedded': "postureCheckList",
-        'domain': "network",
-        'create_responses': ["ACCEPTED"]
-    },
-    'certificate-authorities': {
-        'embedded': "certificateAuthorityList",
-        'domain': "network",
-        'create_responses': ["ACCEPTED"]
-    }
+        }),
+    'edge-routers': ResourceType(
+        name='edge-routers',
+        domain='network',
+        mutable=True,
+        embeddable=True,
+        create_responses=["ACCEPTED"],
+    ),
+    'edge-router-policies': ResourceType(
+        name='edge-router-policies',
+        domain='network',
+        mutable=True,
+        embeddable=True,
+        create_responses=["OK", "ACCEPTED"]
+    ),
+    'app-wans': ResourceType(
+        name='app-wans',
+        domain='network',
+        mutable=True,
+        embeddable=True,
+        create_responses=["OK", "ACCEPTED"]
+    ),
+    'services': ResourceType(
+        name='services',
+        domain='network',
+        mutable=True,
+        embeddable=True,
+        create_responses=["ACCEPTED"]
+    ),
+    'service-policies': ResourceType(
+        name='service-policies',
+        domain='network',
+        mutable=True,
+        embeddable=True,
+        create_responses=["ACCEPTED"]
+    ),
+    'service-edge-router-policies': ResourceType(
+        name='service-edge-router-policies',
+        domain='network',
+        mutable=True,
+        embeddable=True,
+        create_responses=["ACCEPTED"]
+    ),
+    'posture-checks': ResourceType(
+        name='posture-checks',
+        domain='network',
+        mutable=True,
+        embeddable=True,
+        create_responses=["ACCEPTED"]
+    ),
+    'certificate-authorities': ResourceType(
+        name='certificate-authorities',
+        domain='network',
+        mutable=True,
+        embeddable=True,
+        create_responses=["ACCEPTED"]
+    )
 }
 
-NETWORK_RESOURCES = {key: RESOURCES[key] for key in RESOURCES.keys() if RESOURCES[key]['domain'] == "network"}
+NETWORK_RESOURCES = {type:spec for type,spec in RESOURCES.items() if spec.domain == "network"}
+MUTABLE_NETWORK_RESOURCES = {type:spec for type,spec in RESOURCES.items() if spec.domain == "network" and spec.mutable}
 
 # TODO: [MOP-13441] associate locations with a short list of major geographic regions / continents
 MAJOR_REGIONS = {
