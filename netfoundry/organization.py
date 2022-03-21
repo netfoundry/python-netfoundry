@@ -212,6 +212,59 @@ class Organization:
         if not credentials_configured:
             logging.debug("token renewal impossible because API account credentials are not configured")
 
+        # the purpose of this try-except block is to soft-fail all attempts
+        # to parse the JWT, which is intended for the API, not this
+        # application
+        if not self.environment:
+            try:
+                self.environment = utility.jwt_environment(self.token)
+            except:
+                # an exception here is very unlikely because the called
+                # function is designed to provide a sane default in case the
+                # token can't be parsed
+                logging.debug("unexpected error extracting environment from JWT")
+                raise
+            else:
+                logging.debug("parsed token as JWT and found environment %s", self.environment)
+            finally:
+                if not self.environment in ENVIRONMENTS:
+                    logging.warn("unexpected environment '%s'", self.environment)
+
+        if not self.audience:
+            self.audience = 'https://gateway.{env}.netfoundry.io/'.format(env=self.environment)
+
+        if not re.search(self.environment, self.audience):
+            logging.error("mismatched audience URL '%s' and environment '%s'", self.audience, self.environment)
+            exit(1)
+
+        # the purpose of this try-except block is to soft-fail all attempts
+        # to parse the JWT, which is intended for the API, not this
+        # application
+        if not self.expiry: # if token was obtained in this pass then expiry is already defined by response 'expires_in' property 
+            try:
+                self.expiry = utility.jwt_expiry(self.token)
+            except:
+                logging.debug("unexpected error getting expiry from token")
+                raise
+        self.expiry_seconds = self.expiry - epoch
+        logging.debug("bearer token expiry in %ds", self.expiry_seconds)
+
+        if write_token_cache:
+            # cache token state w/ expiry and Gateway Service audience URL
+            try:
+                # set file mode 0o600 at creation
+                self.token_cache_file_path.touch(mode=stat.S_IRUSR|stat.S_IWUSR)
+                token_cache_out = {
+                    'token': self.token,
+                    'expiry': self.expiry,
+                    'audience': self.audience
+                }
+                self.token_cache_file_path.write_text(json.dumps(token_cache_out, indent=4))
+            except:
+                logging.warn("failed to cache token in '%s'", self.token_cache_file_path.__str__())
+            else:
+                logging.debug("cached token in '%s'", self.token_cache_file_path.__str__())
+
         # renew token if not existing or imminent expiry, else continue
         if not self.token or self.expiry_seconds < expiry_minimum:
             if self.token and self.expiry_seconds < expiry_minimum:
@@ -270,59 +323,8 @@ class Organization:
                         response.text
                     )
                 )
-
-        # the purpose of this try-except block is to soft-fail all attempts
-        # to parse the JWT, which is intended for the API, not this
-        # application
-        if not self.environment:
-            try:
-                self.environment = utility.jwt_environment(self.token)
-            except:
-                # an exception here is very unlikely because the called
-                # function is designed to provide a sane default in case the
-                # token can't be parsed
-                logging.debug("unexpected error extracting environment from JWT")
-                raise
-            else:
-                logging.debug("parsed token as JWT and found environment %s", self.environment)
-            finally:
-                if not self.environment in ENVIRONMENTS:
-                    logging.warn("unexpected environment '%s'", self.environment)
-
-        if not self.audience:
-            self.audience = 'https://gateway.{env}.netfoundry.io/'.format(env=self.environment)
-
-        if not re.search(self.environment, self.audience):
-            logging.error("mismatched audience URL '%s' and environment '%s'", self.audience, self.environment)
-            exit(1)
-
-        # the purpose of this try-except block is to soft-fail all attempts
-        # to parse the JWT, which is intended for the API, not this
-        # application
-        if not self.expiry: # if token was obtained in this pass then expiry is already defined by response 'expires_in' property 
-            try:
-                self.expiry = utility.jwt_expiry(self.token)
-            except:
-                logging.debug("unexpected error getting expiry from token")
-                raise
-        self.expiry_seconds = self.expiry - epoch
-        logging.debug("bearer token expiry in %ds", self.expiry_seconds)
-
-        if write_token_cache:
-            # cache token state w/ expiry and Gateway Service audience URL
-            try:
-                # set file mode 0o600 at creation
-                self.token_cache_file_path.touch(mode=stat.S_IRUSR|stat.S_IWUSR)
-                token_cache_out = {
-                    'token': self.token,
-                    'expiry': self.expiry,
-                    'audience': self.audience
-                }
-                self.token_cache_file_path.write_text(json.dumps(token_cache_out, indent=4))
-            except:
-                logging.warn("failed to cache token in '%s'", self.token_cache_file_path.__str__())
-            else:
-                logging.debug("cached token in '%s'", self.token_cache_file_path.__str__())
+        else:
+            logging.debug("found token with %ss until expiry", self.expiry_seconds)
 
         # Obtain a session token and find own `.caller` identity and `.organizations`
         self.caller = self.get_caller_identity()
