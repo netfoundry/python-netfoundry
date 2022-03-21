@@ -305,6 +305,9 @@ def create(cli):
 
     create_object = edit_object_as_yaml(create_input_object)
 
+    if not create_object: # is False if editing cancelled by empty buffer
+        return True
+
     organization = use_organization()
 
     if cli.args.resource_type == "network":
@@ -342,6 +345,9 @@ def edit(cli):
     edit_resource_object, network, network_group, organization = get(cli, echo=False)
     cli.log.debug("opening %s named '%s' for editing", cli.args.resource_type, edit_resource_object['name'])
     update_request_object = edit_object_as_yaml(edit_resource_object)
+    if not update_request_object: # is False if editing cancelled by empty buffer
+        return True
+
     network.put_resource(put=update_request_object, type=cli.args.resource_type)
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
@@ -774,16 +780,20 @@ def edit_object_as_yaml(edit: object):
         tf.seek(0)
         edited = tf.read()
     if return_code == 0:
-        try:
-            edited_object = yaml_loads(edited)
-        except parser.ParserError as e:
-            cli.log.error("invalid YAML or JSON: %s", e)
-            save_error = True
-        except Exception as e:
-            cli.log.error("unknown error in %s", e)
-            save_error = True
+        if len(edited) == 0:
+            cli.log.info("cancelled due to empty file")
+            return False
         else:
-            return edited_object
+            try:
+                edited_object = yaml_loads(edited)
+            except parser.ParserError as e:
+                cli.log.error("invalid YAML or JSON: %s", e)
+                save_error = True
+            except Exception as e:
+                cli.log.error("unknown error in %s", e)
+                save_error = True
+            else:
+                return edited_object
     else:
         cli.log.error("editor returned an error")
         save_error = True
@@ -791,6 +801,7 @@ def edit_object_as_yaml(edit: object):
         with tempfile.NamedTemporaryFile(suffix=".yml") as tf:
             tf.write(edited.encode())
             cli.log.warn("your buffer was saved in %s and you may edit and redirect to the same command as stdin or --file", tf.name)
+        exit(1)
 
 
 if __name__ == '__main__':
