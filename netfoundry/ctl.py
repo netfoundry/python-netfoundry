@@ -13,26 +13,30 @@ import shutil
 import sys
 import tempfile
 import time
+import logging
 #from base64 import b64decode
 from json import dumps as json_dumps
 from json import loads as json_loads
+from re import sub
 from subprocess import call
 
 #from cryptography.hazmat.primitives.serialization import Encoding, pkcs7
 from jwt.exceptions import PyJWTError
 from milc import set_metadata
+from packaging import version
 #from requests import get as http_get
 from tabulate import tabulate
 from yaml import dump as yaml_dumps
 from yaml import full_load as yaml_loads
+from yaml import parser
 
 from ._version import get_versions
 from .exceptions import NFAPINoCredentials
 from .network import Network
 from .network_group import NetworkGroup
 from .organization import Organization
-from .utility import NETWORK_RESOURCES, RESOURCES, Utility, plural, singular
-from packaging import version
+from .utility import (MUTABLE_NETWORK_RESOURCES, NETWORK_RESOURCES, RESOURCES,
+                      Utility, plural, singular)
 
 set_metadata(version="v"+get_versions()['version']) # must precend import milc.cli
 import milc.subcommand.config
@@ -128,8 +132,8 @@ def login(cli, api: str=None, shell: bool=None):
         # json (unless shell which means to suppress normal output and only
         # configure the current shell)
         if not cli.args.shell and cli.config.general.output == "text":
-            summary_table = [['domain', 'summary']]
-            summary_table.append(['organization', '"{org_name}" ({org_label}@{env}) logged in as {fullname} ({email}) until {expiry_timestamp} (T-{expiry_seconds}s)'.format(
+            summary_table = []
+            summary_table.append(['organization', '"{org_name}" ({org_label}@{env}) logged in \n{fullname} ({email}) \nuntil {expiry_timestamp} (T-{expiry_seconds}s)'.format(
                     fullname=summary_object['caller']['name'],
                     email=summary_object['caller']['email'],
                     org_label=organization.label,
@@ -139,25 +143,25 @@ def login(cli, api: str=None, shell: bool=None):
                     expiry_seconds=int(organization.expiry_seconds)
                 )])
             if network_group:
-                    summary_table.append(['network group', '"{fullname}" ({shortname}) configured with {count} networks'.format(
+                    summary_table.append(['network group', '"{fullname}" ({shortname}) \n with {count} networks'.format(
                         fullname=summary_object['network_group']['name'],
                         shortname=summary_object['network_group']['organizationShortName'],
                         count=summary_object['network_group']['networks_count']
                 )])
             if network:
-                    summary_table.append(['network', '"{fullname}" ({data_center}) with version {version} and status {status} configured'.format(
+                    summary_table.append(['network', '"{fullname}" ({data_center}) \n is {version} and status {status}'.format(
                         fullname=summary_object['network']['name'],
                         data_center=summary_object['network']['region'],
                         version=summary_object['network']['productVersion'],
                         status=summary_object['network']['status']
                 )])
             if cli.config.general.borders:
-                table_borders = "github"
+                table_borders = "presto"
             else:
                 table_borders = "plain"
             cli.echo(
                 '{fg_lightgreen_ex}'
-                +tabulate(tabular_data=summary_table, headers='firstrow', tablefmt=table_borders)
+                +tabulate(tabular_data=summary_table, headers=['domain', 'summary'], tablefmt=table_borders)
             )
 
         elif not cli.args.shell and cli.config.general.output == "yaml":
@@ -253,19 +257,16 @@ export MOPENV={env}
 @cli.subcommand('logout from an identity organization')
 def logout(cli):
     """Logout by deleting the cached token."""
-    organization = use_organization(prompt=False)
     try:
+        organization = use_organization(prompt=False)
+    except NFAPINoCredentials:
+        cli.log.debug("no need to logout profile '%s'", cli.config.general.profile)
+    else:
         organization.logout()
-    except NFAPINoCredentials as e:
-        cli.log.debug("no need to logout because not logged in")
-        return True
-    except Exception as e:
-        cli.log.error("failed to logout with %s", e)
-        exit(1)
 
 @cli.argument('-f', '--file', help='JSON or YAML file', type=argparse.FileType('r', encoding='UTF-8'))
 @cli.argument('-w','--wait', help='seconds to wait for process execution to finish', default=0)
-@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in NETWORK_RESOURCES.keys()])
+@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in MUTABLE_NETWORK_RESOURCES.keys()])
 @cli.subcommand('create a resource from stdin or file')
 def create(cli):
     """Create a resource.
@@ -277,10 +278,7 @@ def create(cli):
     # get the input object if available, else get the lines (serialized YAML or JSON) and try to deserialize
     create_input_object, create_input_lines, create_object = None, str(), None
     if sys.stdin.isatty() and not cli.args.file:
-        if 'create_template' in NETWORK_RESOURCES[plural(cli.args.resource_type)].keys():
-            create_input_object = NETWORK_RESOURCES[plural(cli.args.resource_type)]['create_template']
-        else:
-            create_input_object = {"hint": "No template was found for resource type {type}. Replace the contents of this buffer with the request body as YAML or JSON to create a resource. networkId will be added automatically.".format(type=cli.args.resource_type)}
+        create_input_object = MUTABLE_NETWORK_RESOURCES[plural(cli.args.resource_type)].create_template
     elif cli.args.file:
         try:
             create_input_lines = cli.args.file.read()
@@ -305,24 +303,25 @@ def create(cli):
         cli.log.error("failed to parse input lines as an object (deserialized JSON or YAML)")
         exit(1)
 
-    # if stdout is connected to a terminal then open the create/template input for editing and finish create on exit
-    if sys.stdout.isatty():
-        create_object = edit_object_as_yaml(create_input_object)
-    else:
-        create_object = create_input_object
+    create_object = edit_object_as_yaml(create_input_object)
+
+    if not create_object: # is False if editing cancelled by empty buffer
+        return True
 
     organization = use_organization()
 
     if cli.args.resource_type == "network":
         if cli.config.general.network_group:
             network_group = use_network_group(organization=organization)
-        elif len(organization.get_network_groups_by_organization()) > 1:
-            cli.log.error("specify --network-group because there is more than one available to caller's identity")
-            raise SystemExit()
         else:
-            network_group_id = organization.get_network_groups_by_organization()[0]['id']
-            network_group = use_network_group(organization=organization, id=network_group_id)
-        resource = network.create_resource(type=cli.args.resource_type, properties=create_object, wait=cli.config.create.wait)
+            org_count = len(organization.get_network_groups_by_organization())
+            if org_count > 1:
+                cli.log.error("specify --network-group because there is more than one available to caller's identity")
+                exit(org_count)
+            else: # use the only available group
+                network_group_id = organization.get_network_groups_by_organization()[0]['id']
+                network_group = use_network_group(organization=organization, group=network_group_id)
+        network = network_group.create_network(**create_object)
     else:
         network, network_group = use_network(
             organization=organization,
@@ -332,7 +331,7 @@ def create(cli):
         resource = network.create_resource(type=cli.args.resource_type, properties=create_object, wait=cli.config.create.wait)
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
-@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in NETWORK_RESOURCES.keys()])
+@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in MUTABLE_NETWORK_RESOURCES.keys()])
 # this allows us to pass the edit subcommand's cli object to function get without further modifying that functions params
 @cli.argument('-a', '--accept', arg_only=True, default='update', help=argparse.SUPPRESS)
 @cli.subcommand('edit a single resource selected by query with editor defined in NETFOUNDRY_EDITOR or EDITOR')
@@ -346,6 +345,9 @@ def edit(cli):
     edit_resource_object, network, network_group, organization = get(cli, echo=False)
     cli.log.debug("opening %s named '%s' for editing", cli.args.resource_type, edit_resource_object['name'])
     update_request_object = edit_object_as_yaml(edit_resource_object)
+    if not update_request_object: # is False if editing cancelled by empty buffer
+        return True
+
     network.put_resource(put=update_request_object, type=cli.args.resource_type)
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
@@ -354,7 +356,8 @@ def edit(cli):
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
 @cli.subcommand('get a single resource by query')
 def get(cli, echo: bool=True):
-    """Get a single resource as a dictionary."""
+    """Get a single resource as YAML or JSON"""
+    cli.log.setLevel(logging.WARN) # don't emit INFO messages to stdout because they will break deserialization
     organization = use_organization()
     match = {}
     matches = []
@@ -432,8 +435,8 @@ def get(cli, echo: bool=True):
             return match, network, network_group, organization
         else:
             if cli.args.keys:
-                # intersection of the set of valid, observed keys in the match
-                # and the set of configured, desired keys
+                # intersection of the set of observed, present keys in the
+                # match and the set of configured, desired keys
                 valid_keys = set(match.keys()) & set(cli.args.keys)
                 if valid_keys: # if at least one element in intersection set
                     cli.log.debug("valid keys: %s", str(valid_keys))
@@ -458,12 +461,16 @@ def get(cli, echo: bool=True):
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
-@cli.argument('resource_type', arg_only=True, help='type of resource', choices=RESOURCES.keys())
+@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[type for type in RESOURCES.keys()])
 @cli.subcommand('find resources as lists')
 def list(cli):
     """Find resources as lists."""
-    if not sys.stdout.isatty():
-        cli.log.warn("nfctl does not have a stable CLI interface. Use with caution in scripts.")
+    if cli.config.general.output == "text":
+        if not sys.stdout.isatty():
+            cli.log.warn("nfctl does not have a stable CLI interface. Use with caution in scripts.")
+    else: # output is YAML or JSON
+        # don't emit INFO messages to stdout because they will break deserialization
+        cli.log.setLevel(logging.WARN)
 
     organization = use_organization()
 
@@ -507,7 +514,7 @@ def list(cli):
         # and the set of configured, desired keys
         valid_keys = set(matches[0].keys()) & set(cli.args.keys)
     elif cli.config.general.output == "text":
-        valid_keys = set(matches[0].keys()) & set(['name','label','organizationShortName','id','edgeRouterAttributes','serviceAttributes','endpointAttributes','status','zitiId','provider','locationCode','ipAddress','region','size','attributes','email'])
+        valid_keys = set(matches[0].keys()) & set(['name','label','organizationShortName','id','edgeRouterAttributes','serviceAttributes','endpointAttributes','status','zitiId','provider','locationCode','ipAddress','region','size','attributes','email','productVersion'])
 
     if valid_keys:
         cli.log.debug("valid keys: %s", str(valid_keys))
@@ -525,7 +532,7 @@ def list(cli):
         else:
             table_headers = []
         if cli.config.general.borders:
-            table_borders = "github"
+            table_borders = "presto"
         else:
             table_borders = "plain"
         cli.echo(
@@ -538,7 +545,7 @@ def list(cli):
         cli.echo(json_dumps(filtered_matches, indent=4))
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
-@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in NETWORK_RESOURCES.keys()])
+@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in MUTABLE_NETWORK_RESOURCES.keys()])
 @cli.argument('-w','--wait', help='seconds to wait for confirmation of delete', default=0)
 @cli.subcommand('delete a resource in the network domain')
 def delete(cli):
@@ -563,16 +570,24 @@ def delete(cli):
             cli.log.warn("ignoring name='%s' because this operation applies to the entire network that is already selected", str(cli.args.query))
         try:
             if cli.args.yes or questions.yesno("confirm delete network '{name}'".format(name=network.name), default=False):
-                spinner.text = 'deleting {net}'.format(net=network.name)
-                with spinner:
-                    try:
+                spinner.text = "deleting network '{net}'".format(net=network.name)
+                try:
+                    with spinner:
                         network.delete_network(progress=False, wait=cli.config.delete.wait)
-                    except KeyboardInterrupt as e:
-                        cli.log.debug("wait cancelled by user")
+                except KeyboardInterrupt as e:
+                    cli.log.debug("wait cancelled by user")
+                except Exception as e:
+                    cli.log.error("unknown error in %s", e)
+                    exit(1)
+                else:
+                    cli.log.info(sub('deleting', 'deleted', spinner.text))
             else:
                 cli.echo("not deleting network '{name}'.".format(name=network.name))
         except KeyboardInterrupt as e:
             cli.log.debug("input cancelled by user")
+        except Exception as e:
+            cli.log.error("unknown error in %s", e)
+            exit(1)
     else:
         if not cli.args.query:
             cli.log.error("need query to select a resource")
@@ -592,15 +607,23 @@ def delete(cli):
             try:
                 if cli.args.yes or questions.yesno("confirm delete {type} '{name}'".format(type=cli.args.resource_type, name=matches[0]['name']), default=False):
                     spinner.text = "deleting {type} '{name}'".format(type=cli.args.resource_type, name=matches[0]['name'])
-                    with spinner:
-                        try:
+                    try:
+                        with spinner:
                             network.delete_resource(type=cli.args.resource_type, id=matches[0]['id'])
-                        except KeyboardInterrupt as e:
-                            cli.log.debug("wait cancelled by user")
+                    except KeyboardInterrupt as e:
+                        cli.log.debug("wait cancelled by user")
+                    except Exception as e:
+                        cli.log.error("unknown error in %s", e)
+                        exit(1)
+                    else:
+                        cli.log.info(sub('deleting', 'deleted', spinner.text))
                 else:
                     cli.echo("not deleting {type} '{name}'".format(type=cli.args.resource_type, name=matches[0]['name']))
             except KeyboardInterrupt as e:
                 cli.log.debug("input cancelled by user")
+            except Exception as e:
+                cli.log.error("unknown error in %s", e)
+                exit(1)
 
 def use_organization(prompt: bool=True):
     """Assume an identity in an organization."""
@@ -628,9 +651,12 @@ def use_organization(prompt: bool=True):
         if prompt:
             cli.log.debug("caught no credentials exception from organization, prompting for token")
             try:
-                os.environ['NETFOUNDRY_API_TOKEN'] = questions.password(prompt='Enter Bearer Token:', confirm=False, validate=None)
+                os.environ['NETFOUNDRY_API_TOKEN'] = questions.password(prompt='Enter Bearer Token:', confirm=False, validate=utility.is_jwt)
             except KeyboardInterrupt as e:
                 cli.log.debug("input cancelled by user")
+                exit(1)
+            except Exception as e:
+                cli.log.error("unknown error in %s", e)
                 exit(1)
             try:
                 organization = Organization(
@@ -641,6 +667,10 @@ def use_organization(prompt: bool=True):
                     proxy=cli.config.general.proxy
                 )
             except PyJWTError as e:
+                cli.log.error("caught JWT error in %e", e)
+                exit(1)
+            except Exception as e:
+                cli.log.error("unknown error in %s", e)
                 exit(1)
         else:
             cli.log.info("not logged in")
@@ -693,7 +723,7 @@ def use_network(organization: object, network: str=None, group: str=None, operat
             exit(1)
 
     spinner = cli.spinner(text=str(), spinner='dots12', stream=sys.stderr)
-    if sys.stdout.isatty():
+    if sys.stdout.isatty() and cli.log.getEffectiveLevel() <= logging.INFO:
         spinner.enabled = True
     else:
         spinner.enabled = False
@@ -708,13 +738,25 @@ def use_network(organization: object, network: str=None, group: str=None, operat
                 network.wait_for_statuses(["DELETING","DELETED"],wait=999,progress=False)
         except KeyboardInterrupt as e:
             cli.log.debug("wait cancelled by user")
+        except Exception as e:
+            cli.log.error("unknown error in %s", e)
+            exit(1)
+        else:
+            cli.log.info("network '{net}' deleted".format(net=network_identifier))
     elif operation in ['create','read','update']:
-        spinner.text = 'waiting for {net} to have status PROVISIONED'.format(net=network_identifier)
-        try:
-            with spinner:
-                network.wait_for_status("PROVISIONED",wait=999,progress=False)
-        except KeyboardInterrupt as e:
-            cli.log.debug("wait cancelled by user")
+        if not network.status == 'PROVISIONED':
+            spinner.text = 'waiting for {net} to have status PROVISIONED'.format(net=network_identifier)
+            try:
+                with spinner:
+                    network.wait_for_status("PROVISIONED",wait=999,progress=False)
+            except KeyboardInterrupt as e:
+                cli.log.debug("wait cancelled by user")
+            except Exception as e:
+                cli.log.error("unknown error in %s", e)
+                exit(1)
+            else:
+                cli.log.info("network '{net}' ready".format(net=network_identifier))
+
     return network, network_group
 
 def edit_object_as_yaml(edit: object):
@@ -722,21 +764,45 @@ def edit_object_as_yaml(edit: object):
     
     :param obj input: a deserialized (object) to edit and return as yaml
     """
+    # unless --yes (config general.yes), if stdout is connected to a terminal
+    # then open input for editing and send on exit
+    if not sys.stdout.isatty() or cli.args.yes:
+        return edit
+    save_error = False
     EDITOR = os.environ.get('NETFOUNDRY_EDITOR',os.environ.get('EDITOR','vim'))
-    yaml_dumps(edit, default_flow_style=False)
+    instructions_bytes = "# just exit to confirm, or\n#  abort by saving an empty file\n".encode()
+    edit_bytes = yaml_dumps(edit, default_flow_style=False).encode()
     with tempfile.NamedTemporaryFile(suffix=".yml") as tf:
-        tf.write(yaml_dumps(edit, default_flow_style=False).encode())
+        tf.write(instructions_bytes + edit_bytes)
         tf.flush()
         return_code = call(EDITOR.split()+[tf.name])
 
         tf.seek(0)
         edited = tf.read()
     if return_code == 0:
-        edited_object = yaml_loads(edited)
-        return edited_object
+        if len(edited) == 0:
+            cli.log.info("cancelled due to empty file")
+            return False
+        else:
+            try:
+                edited_object = yaml_loads(edited)
+            except parser.ParserError as e:
+                cli.log.error("invalid YAML or JSON: %s", e)
+                save_error = True
+            except Exception as e:
+                cli.log.error("unknown error in %s", e)
+                save_error = True
+            else:
+                return edited_object
     else:
-        cli.log.debug("error editing temporary file")
+        cli.log.error("editor returned an error")
+        save_error = True
+    if save_error:
+        with tempfile.NamedTemporaryFile(suffix=".yml") as tf:
+            tf.write(edited.encode())
+            cli.log.warn("your buffer was saved in %s and you may edit and redirect to the same command as stdin or --file", tf.name)
         exit(1)
+
 
 if __name__ == '__main__':
     cli()
