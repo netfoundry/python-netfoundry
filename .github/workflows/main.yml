@@ -40,11 +40,22 @@ jobs:
       run: |
         pip3 install ./dist/netfoundry-*.tar.gz
 
+    - name: Read version string
+      id: read_version
+      run: |
+        PYPI_VERSION=$(python setup.py --version)
+        [[ ${PYPI_VERSION} =~ ^[0-9]+\.[0-9]+\.[0-9]+.* ]] || {
+          echo "ERROR: unexpected version string '${PYPI_VERSION}'" >&2
+          exit 1
+        }
+        echo ::set-output name=pypi_version::${PYPI_VERSION}
+
     - name: Compare installed version to PyPi version
       env:
         PYPI_VERSION: ${{ steps.read_version.outputs.pypi_version }}
       run: |
         INSTALLED_VERSION="$(python3 -m netfoundry.version)"
+        echo "PYPI_VERSION=${PYPI_VERSION}, INSTALLED_VERSION=${INSTALLED_VERSION#v}"
         if ! [[ ${PYPI_VERSION} == ${INSTALLED_VERSION#v} ]]; then
           echo "ERROR: PyPi and installed version do not match." >&2
           exit 1
@@ -98,17 +109,7 @@ jobs:
         name: netfoundry-pypi-${{ github.run_id }}
         path: dist/netfoundry-*.tar.gz
 
-    - name: Read version string
-      id: read_version
-      run: |
-        PYPI_VERSION=$(python setup.py --version)
-        [[ ${PYPI_VERSION} =~ ^[0-9]+\.[0-9]+\.[0-9]+.* ]] || {
-          echo "ERROR: unexpected version string '${PYPI_VERSION}'" >&2
-          exit 1
-        }
-        echo ::set-output name=pypi_version::${PYPI_VERSION}
-
-    - name: Append 'latest' tag if release published
+    - name: Append 'latest' tag if release
       env:
         GITHUB_EVENT_ACTION: ${{ github.event.action }}
         PYPI_VERSION: ${{ steps.read_version.outputs.pypi_version }}
