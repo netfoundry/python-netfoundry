@@ -19,7 +19,6 @@ import time
 from json import dumps as json_dumps
 from json import loads as json_loads
 from re import sub
-from subprocess import call
 
 #from cryptography.hazmat.primitives.serialization import Encoding, pkcs7
 from jwt.exceptions import PyJWTError
@@ -69,7 +68,7 @@ class StoreListKeys(argparse.Action):
 @cli.argument('-O', '--organization', help="label or ID of an alternative organization (default is caller's org)" )
 @cli.argument('-N', '--network', help='caseless name of the network to manage')
 @cli.argument('-G', '--network-group', help="shortname or ID of a network group to search for network_identifier")
-@cli.argument('-O','--output', help="object formats suppress console messages", default="text", choices=['text', 'yaml','json'])
+@cli.argument('-O','--output', arg_only=True, help="format the output", default="text", choices=['text', 'yaml','json'])
 @cli.argument('-b','--borders', default=True, action='store_boolean', help='print cell borders in text tables')
 @cli.argument('-H','--headers', default=True, action='store_boolean', help='print column headers in text tables')
 @cli.argument('-Y', '--yes', action='store_true', arg_only=True, help='answer yes to potentially-destructive operations')
@@ -81,6 +80,7 @@ def main(cli):
 
 @cli.argument('api', help=argparse.SUPPRESS, arg_only=True, nargs='?', default="organization", choices=['organization', 'ziti'])
 @cli.argument('-s','--shell', help=argparse.SUPPRESS, arg_only=True, action="store_true", default=False)
+@cli.argument('-O','--output', arg_only=True, help="format the output", default="text", choices=['text', 'yaml','json'])
 @cli.argument('-v','--ziti-version', help=argparse.SUPPRESS, default='0.22.0') # minium ziti CLI version supports --cli-identity and --read-only
 @cli.argument('-c','--ziti-cli', help=argparse.SUPPRESS)
 @cli.subcommand('login to a management API')
@@ -132,7 +132,7 @@ def login(cli, api: str=None, shell: bool=None):
         # compose a summary table from selected details if text, not yaml or
         # json (unless shell which means to suppress normal output and only
         # configure the current shell)
-        if not cli.args.shell and cli.config.general.output == "text":
+        if not cli.args.shell and cli.args.output == "text":
             summary_table = []
             summary_table.append(['organization', 'logged in to "{org_name}" ({org_label}@{env}) \nas {fullname} ({email}) \nuntil {expiry_timestamp} (T-{expiry_seconds}s)'.format(
                     fullname=summary_object['caller']['name'],
@@ -165,12 +165,12 @@ def login(cli, api: str=None, shell: bool=None):
                 +tabulate(tabular_data=summary_table, headers=['domain', 'summary'], tablefmt=table_borders)
             )
 
-        elif not cli.args.shell and cli.config.general.output == "yaml":
+        elif not cli.args.shell and cli.args.output == "yaml":
             cli.echo(
                 '{fg_lightgreen_ex}'
                 +yaml_dumps(summary_object, indent=4)
             )
-        elif not cli.args.shell and cli.config.general.output == "json":
+        elif not cli.args.shell and cli.args.output == "json":
             cli.echo(
                 '{fg_lightgreen_ex}'
                 +json_dumps(summary_object, indent=4)
@@ -352,6 +352,7 @@ def edit(cli):
         network.put_resource(put=update_request_object, type=cli.args.resource_type)
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
+@cli.argument('-O','--output', arg_only=True, help="format the output", default="text", choices=['text', 'yaml','json'])
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
 @cli.argument('-a', '--accept', arg_only=True, choices=['create','update'], help="request the as=create or as=update form of the resource")
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
@@ -468,9 +469,9 @@ def get(cli, echo: bool=True):
             else:
                 cli.log.debug("not filtering output keys")
                 filtered_match = match
-            if cli.config.general.output in ["yaml","text"]:
+            if cli.args.output in ["yaml","text"]:
                 cli.echo(yaml_dumps(filtered_match, indent=4, default_flow_style=False))
-            elif cli.config.general.output == "json":
+            elif cli.args.output == "json":
                 cli.echo(json_dumps(filtered_match, indent=4))
     elif len(matches) == 0:
         cli.log.warn("found no %s '%s'", cli.args.resource_type, cli.args.query)
@@ -482,11 +483,12 @@ def get(cli, echo: bool=True):
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
+@cli.argument('-O','--output', arg_only=True, help="format the output", default="text", choices=['text', 'yaml','json'])
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[type for type in RESOURCES.keys()])
 @cli.subcommand('find resources as lists')
 def list(cli):
     """Find resources as lists."""
-    if cli.config.general.output == "text":
+    if cli.args.output == "text":
         if not sys.stdout.isatty():
             cli.log.warn("nfctl does not have a stable CLI interface. Use with caution in scripts.")
     else: # output is YAML or JSON
@@ -534,7 +536,7 @@ def list(cli):
         # intersection of the set of valid, observed keys in the first match
         # and the set of configured, desired keys
         valid_keys = set(matches[0].keys()) & set(cli.args.keys)
-    elif cli.config.general.output == "text":
+    elif cli.args.output == "text":
         valid_keys = set(matches[0].keys()) & set(['name','label','organizationShortName','id','edgeRouterAttributes','serviceAttributes','endpointAttributes','status','zitiId','provider','locationCode','ipAddress','region','size','attributes','email','productVersion'])
 
     if valid_keys:
@@ -547,7 +549,7 @@ def list(cli):
         cli.log.debug("not filtering output keys")
         filtered_matches = matches
 
-    if cli.config.general.output == "text":
+    if cli.args.output == "text":
         if cli.config.general.headers:
             table_headers = filtered_matches[0].keys()
         else:
@@ -560,9 +562,9 @@ def list(cli):
             '{fg_lightgreen_ex}'
             +tabulate(tabular_data=[match.values() for match in filtered_matches], headers=table_headers, tablefmt=table_borders)
         )
-    elif cli.config.general.output == "yaml":
+    elif cli.args.output == "yaml":
         cli.echo(yaml_dumps(filtered_matches, indent=4, default_flow_style=False))
-    elif cli.config.general.output == "json":
+    elif cli.args.output == "json":
         cli.echo(json_dumps(filtered_matches, indent=4))
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
@@ -798,7 +800,7 @@ def edit_object_as_yaml(edit: object):
         temp_file = tf.name
         tf.write(instructions_bytes + edit_bytes)
         tf.flush()
-        return_code = call(editor.split()+[tf.name])
+        return_code = cli.run(editor.split()+[tf.name])
         tf.seek(0)
         edited = tf.read().decode("utf-8")
     if return_code == 0:
