@@ -117,6 +117,7 @@ class Organization:
             else:
                 self.token = token_cache['token']
                 self.expiry = token_cache['expiry']
+                self.expiry_seconds = self.expiry - epoch
                 self.audience = token_cache['audience']
 
         # if the token was found but not the expiry then try to parse to extract the expiry so we can enforce minimum lifespan seconds
@@ -125,9 +126,10 @@ class Organization:
                 self.expiry = utility.jwt_expiry(self.token)
             except:
                 self.expiry = epoch + DEFAULT_TOKEN_EXPIRY
+                self.expiry_seconds = DEFAULT_TOKEN_EXPIRY
                 logging.debug("failed to parse token as JWT, estimating expiry in %ds", DEFAULT_TOKEN_EXPIRY)
         elif not self.token:
-            logging.debug("no bearer token found in param, env, or cache, looking for credentials to renew token")
+            logging.debug("no bearer token found")
 
         # find credentials from param or env so we can renew the token later
         if credentials is not None:
