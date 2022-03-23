@@ -36,29 +36,6 @@ jobs:
     - name: Build Package
       run: python3 -m build
 
-    - name: Publish Test Package
-      uses: pypa/gh-action-pypi-publish@27b31702a0e7fc50959f5ad993c78deac1bdfc29
-      with:
-        user: __token__
-        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
-        repository_url: https://test.pypi.org/legacy/
-
-    - name: Temporarily Store the Python Package in GitHub # for convenient reference, troubleshooting, investigation, etc...
-      uses: actions/upload-artifact@v2
-      with:
-        name: netfoundry-pypi-${{ github.run_id }}
-        path: dist/netfoundry-*.tar.gz
-
-    - name: Read version string
-      id: read_version
-      run: |
-        PYPI_VERSION=$(python setup.py --version)
-        [[ ${PYPI_VERSION} =~ ^[0-9]+\.[0-9]+\.[0-9]+.* ]] || {
-          echo "ERROR: unexpected version string '${PYPI_VERSION}'" >&2
-          exit 1
-        }
-        echo ::set-output name=pypi_version::${PYPI_VERSION}
-
     - name: Install NetFoundry from build tarball
       run: |
         pip3 install ./dist/netfoundry-*.tar.gz
@@ -107,6 +84,29 @@ jobs:
           --network ${NETWORK_NAME} \
           --yes \
           delete network
+
+    - name: Publish Test Package
+      uses: pypa/gh-action-pypi-publish@27b31702a0e7fc50959f5ad993c78deac1bdfc29
+      with:
+        user: __token__
+        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+        repository_url: https://test.pypi.org/legacy/
+
+    - name: Temporarily Store the Python Package in GitHub # for convenient reference, troubleshooting, investigation, etc...
+      uses: actions/upload-artifact@v2
+      with:
+        name: netfoundry-pypi-${{ github.run_id }}
+        path: dist/netfoundry-*.tar.gz
+
+    - name: Read version string
+      id: read_version
+      run: |
+        PYPI_VERSION=$(python setup.py --version)
+        [[ ${PYPI_VERSION} =~ ^[0-9]+\.[0-9]+\.[0-9]+.* ]] || {
+          echo "ERROR: unexpected version string '${PYPI_VERSION}'" >&2
+          exit 1
+        }
+        echo ::set-output name=pypi_version::${PYPI_VERSION}
 
     - name: Append 'latest' tag if release published
       env:
