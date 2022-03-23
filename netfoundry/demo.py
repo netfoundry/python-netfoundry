@@ -192,8 +192,8 @@ def main():
             print("WARN: ignoring provider and location_codes because AWS georegion is specified.")
         geo_regions = args.regions
         for region in geo_regions:
-            data_center_ids = [dc['id'] for dc in network.aws_geo_regions[region]]
-            existing_count = len([er for er in hosted_edge_routers if er['dataCenterId'] in data_center_ids])
+            data_center_ids = [dc['locationCode'] for dc in network.aws_geo_regions[region]]
+            existing_count = len([er for er in hosted_edge_routers if er['locationCode'] in data_center_ids])
             if existing_count < 1:
                 choice = random.choice(network.aws_geo_regions[region]) # nosec
                 # append the current major region to the randomly-chosen data center object
