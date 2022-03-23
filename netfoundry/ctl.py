@@ -7,13 +7,14 @@ Usage::
 PYTHON_ARGCOMPLETE_OK
 """
 import argparse
+import logging
 import os
 import platform
+import re  # regex
 import shutil
 import sys
 import tempfile
 import time
-import logging
 #from base64 import b64decode
 from json import dumps as json_dumps
 from json import loads as json_loads
@@ -343,12 +344,12 @@ def edit(cli):
     return e.g. "code --wait".
     """
     edit_resource_object, network, network_group, organization = get(cli, echo=False)
-    cli.log.debug("opening %s named '%s' for editing", cli.args.resource_type, edit_resource_object['name'])
+    cli.log.debug("opening %s '%s' for editing", cli.args.resource_type, edit_resource_object['name'])
     update_request_object = edit_object_as_yaml(edit_resource_object)
     if not update_request_object: # is False if editing cancelled by empty buffer
         return True
-
-    network.put_resource(put=update_request_object, type=cli.args.resource_type)
+    else:
+        network.put_resource(put=update_request_object, type=cli.args.resource_type)
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
@@ -356,36 +357,50 @@ def edit(cli):
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in RESOURCES.keys()])
 @cli.subcommand('get a single resource by query')
 def get(cli, echo: bool=True):
-    """Get a single resource as YAML or JSON"""
-    cli.log.setLevel(logging.WARN) # don't emit INFO messages to stdout because they will break deserialization
+    """Get a single resource as YAML or JSON."""
+    if not cli.config.general.verbose:
+        cli.log.setLevel(logging.WARN) # don't emit INFO messages to stdout because they will break deserialization
     organization = use_organization()
     match = {}
     matches = []
+    query_keys = [*cli.args.query]
     if cli.args.resource_type == "organization":
-        if 'id' in cli.args.query.keys():
+        if 'id' in query_keys:
+            if len(query_keys) > 1:
+                query_keys.remove('id')
+                cli.log.warn("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
             match = organization.get_organization(id=cli.args.query['id'])
         else:
             matches = organization.get_organizations(**cli.args.query)
             if len(matches) == 1:
                 match = organization.get_organization(id=matches[0]['id'])
     elif cli.args.resource_type == "network-group":
-        if 'id' in cli.args.query.keys():
+        if 'id' in query_keys:
+            if len(query_keys) > 1:
+                query_keys.remove('id')
+                cli.log.warn("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
             match = organization.get_network_group(network_group_id=cli.args.query['id'])
         else:
             matches = organization.get_network_groups_by_organization(**cli.args.query)
             if len(matches) == 1:
                 match = organization.get_network_group(network_group_id=matches[0]['id'])
     elif cli.args.resource_type == "identity":
-        if 'id' in cli.args.query.keys():
+        if 'id' in query_keys:
+            if len(query_keys) > 1:
+                query_keys.remove('id')
+                cli.log.warn("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
             match = organization.get_identity(identity_id=cli.args.query['id'])
-        elif not cli.args.query.keys():
+        elif not query_keys:
             match = organization.caller
         else:
             matches = organization.get_identities(**cli.args.query)
             if len(matches) == 1:
                 match = matches[0]
     elif cli.args.resource_type == "network":
-        if 'id' in cli.args.query.keys():
+        if 'id' in query_keys:
+            if len(query_keys) > 1:
+                query_keys.remove('id')
+                cli.log.warn("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
             match = organization.get_network(network_id=cli.args.query['id'])
         else:
             if cli.config.general.network_group and not cli.config.general.network:
@@ -414,15 +429,21 @@ def get(cli, echo: bool=True):
         if cli.args.resource_type == "data-center":
             if cli.args.accept:
                 cli.log.warn("'accept' param not applicable to data-centers")
-            if 'id' in cli.args.query.keys():
+            if 'id' in query_keys:
                 cli.log.warn("data centers fetched by ID may not support this network's product version, try provider or locationCode params for safety")
+                if len(query_keys) > 1:
+                    query_keys.remove('id')
+                    cli.log.warn("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
                 match = network.get_data_center_by_id(id=cli.args.query['id'])
             else:
                 matches = network.get_edge_router_data_centers(**cli.args.query)
                 if len(matches) == 1:
                     match = network.get_data_center_by_id(id=matches[0]['id'])
         else:
-            if 'id' in cli.args.query.keys():
+            if 'id' in query_keys:
+                if len(query_keys) > 1:
+                    query_keys.remove('id')
+                    cli.log.warn("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
                 match = network.get_resource_by_id(type=cli.args.resource_type, id=cli.args.query['id'], accept=cli.args.accept)
             else:
                 matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
@@ -431,7 +452,7 @@ def get(cli, echo: bool=True):
 
     if match:
         cli.log.debug("found exactly one %s '%s'", cli.args.resource_type, cli.args.query)
-        if not echo:
+        if not echo: # edit() uses echo=False to get a match for updating
             return match, network, network_group, organization
         else:
             if cli.args.keys:
@@ -452,8 +473,8 @@ def get(cli, echo: bool=True):
             elif cli.config.general.output == "json":
                 cli.echo(json_dumps(filtered_match, indent=4))
     elif len(matches) == 0:
-        cli.log.info("found no %s '%s'", cli.args.resource_type, cli.args.query)
-        return True
+        cli.log.warn("found no %s '%s'", cli.args.resource_type, cli.args.query)
+        exit(1)
     else: # len(matches) > 1:
         cli.log.error("found more than one %s '%s'", cli.args.resource_type, cli.args.query)
         exit(len(matches))
@@ -770,19 +791,23 @@ def edit_object_as_yaml(edit: object):
     if not sys.stdout.isatty() or cli.args.yes:
         return edit
     save_error = False
-    EDITOR = os.environ.get('NETFOUNDRY_EDITOR',os.environ.get('EDITOR','vim'))
-    instructions_bytes = "# just exit to confirm, or\n#  abort by saving an empty file\n".encode()
+    editor = os.environ.get('NETFOUNDRY_EDITOR',os.environ.get('EDITOR','vim'))
+    instructions_bytes = "# just exit to confirm, or\n#  abort by leaving an empty file\n".encode()
     edit_bytes = yaml_dumps(edit, default_flow_style=False).encode()
-    with tempfile.NamedTemporaryFile(suffix=".yml") as tf:
+    with tempfile.NamedTemporaryFile(suffix=".yml", delete=False) as tf:
+        temp_file = tf.name
         tf.write(instructions_bytes + edit_bytes)
         tf.flush()
-        return_code = call(EDITOR.split()+[tf.name])
-
+        return_code = call(editor.split()+[tf.name])
         tf.seek(0)
-        edited = tf.read()
+        edited = tf.read().decode("utf-8")
     if return_code == 0:
-        if len(edited) == 0:
-            cli.log.info("cancelled due to empty file")
+        # prune comments from buffer
+        edited_no_comments = str()
+        for line in edited.splitlines():
+            edited_no_comments += re.sub('^(\s+)?#.*','',line)
+        if len(edited_no_comments) == 0:
+            cli.log.warn("cancelled due to empty file")
             return False
         else:
             try:
@@ -799,9 +824,7 @@ def edit_object_as_yaml(edit: object):
         cli.log.error("editor returned an error")
         save_error = True
     if save_error:
-        with tempfile.NamedTemporaryFile(suffix=".yml") as tf:
-            tf.write(edited.encode())
-            cli.log.warn("your buffer was saved in %s and you may edit and redirect to the same command as stdin or --file", tf.name)
+        cli.log.warn("your buffer was saved in %s and you may edit it again and redirect that file to the same command again as stdin or --file", temp_file)
         exit(1)
 
 
