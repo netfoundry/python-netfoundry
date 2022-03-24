@@ -10,8 +10,10 @@ import argparse
 import logging
 import os
 import platform
+import random
 import re  # regex
 import shutil
+from subprocess import CalledProcessError
 import sys
 import tempfile
 import time
@@ -66,7 +68,7 @@ class StoreListKeys(argparse.Action):
 @cli.argument('-p','--profile', default='default', help='login profile for storing and retrieving concurrent, discrete sessions')
 @cli.argument('-C', '--credentials', help='API account JSON file from web console')
 @cli.argument('-O', '--organization', help="label or ID of an alternative organization (default is caller's org)" )
-@cli.argument('-N', '--network', help='caseless name of the network to manage')
+@cli.argument('-N', '--network', arg_only=True, help='caseless name of the network to manage')
 @cli.argument('-G', '--network-group', help="shortname or ID of a network group to search for network_identifier")
 @cli.argument('-O','--output', arg_only=True, help="format the output", default="text", choices=['text', 'yaml','json'])
 @cli.argument('-b','--borders', default=True, action='store_boolean', help='print cell borders in text tables')
@@ -99,18 +101,18 @@ def login(cli, api: str=None, shell: bool=None):
     # if logging in to a NF org (default)
     if cli.args.api == "organization":
         organization = use_organization()
-        if cli.config.general.network_group and cli.config.general.network:
-            cli.log.debug("configuring network %s in group %s", cli.config.general.network, cli.config.general.network_group)
+        if cli.config.general.network_group and cli.args.network:
+            cli.log.debug("configuring network %s in group %s", cli.args.network, cli.config.general.network_group)
             network, network_group = use_network(
                 organization=organization,
                 group=cli.config.general.network_group,
-                network=cli.config.general.network
+                network=cli.args.network
             )
-        elif cli.config.general.network:
-            cli.log.debug("configuring network %s and local group if unique name for this organization", cli.config.general.network)
+        elif cli.args.network:
+            cli.log.debug("configuring network %s and local group if unique name for this organization", cli.args.network)
             network, network_group = use_network(
                 organization=organization,
-                network=cli.config.general.network
+                network=cli.args.network
             )
         elif cli.config.general.network_group:
             cli.log.debug("configuring network group %s", cli.config.general.network_group)
@@ -213,7 +215,7 @@ export MOPENV={env}
         network, network_group = use_network(
             organization=organization,
             group=cli.config.general.network_group,
-            network=cli.config.general.network
+            network=cli.args.network
         )
         tempdir = tempfile.mkdtemp()
         network_controller = network.get_resource_by_id(type="network-controller", id=network.network_controller['id'])
@@ -268,11 +270,11 @@ def logout(cli):
 @cli.argument('-f', '--file', help='JSON or YAML file', type=argparse.FileType('r', encoding='UTF-8'))
 @cli.argument('-w','--wait', help='seconds to wait for process execution to finish', default=0)
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[singular(type) for type in MUTABLE_NETWORK_RESOURCES.keys()])
-@cli.subcommand('create a resource from stdin or file')
+@cli.subcommand('create a resource from a file')
 def create(cli):
     """Create a resource.
     
-    If interactive then open template or stdin or --file in EDITOR. Then
+    If interactive then open template or --file in EDITOR. Then
     send create request upon EDITOR exit. If not interactive then send input
     object as create request immediately.
     """
@@ -288,9 +290,8 @@ def create(cli):
             cli.log.error("failed to read the input file: %s", e)
             raise e
     else:
-        for line in sys.stdin:
-            create_input_lines += line
-            cli.log.debug("got lines from stdin: %s", str(create_input_lines))
+        cli.log.warn("you may input from a file with --file")
+        exit(1)
     if not create_input_object and create_input_lines:
         try:
             create_input_object = yaml_loads(create_input_lines)
@@ -327,7 +328,7 @@ def create(cli):
         network, network_group = use_network(
             organization=organization,
             group=cli.config.general.network_group,
-            network=cli.config.general.network
+            network=cli.args.network
         )
         resource = network.create_resource(type=cli.args.resource_type, properties=create_object, wait=cli.config.create.wait)
 
@@ -404,13 +405,13 @@ def get(cli, echo: bool=True):
                 cli.log.warn("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
             match = organization.get_network(network_id=cli.args.query['id'])
         else:
-            if cli.config.general.network_group and not cli.config.general.network:
+            if cli.config.general.network_group and not cli.args.network:
                 network_group = use_network_group(organization, group=cli.config.general.network_group)
                 matches = organization.get_networks_by_group(network_group.id, **cli.args.query)
-            elif cli.config.general.network:
+            elif cli.args.network:
                 network, network_group = use_network(
                     organization=organization,
-                    network=cli.config.general.network,
+                    network=cli.args.network,
                 )
                 match = organization.get_network(network_id=network.id, embed="all", accept=cli.args.accept)
             else:
@@ -418,11 +419,11 @@ def get(cli, echo: bool=True):
             if len(matches) == 1:
                 match = organization.get_network(network_id=matches[0]['id'], embed="all", accept=cli.args.accept)
     else: # is a resource in the network domain
-        if cli.config.general.network:
+        if cli.args.network:
             network, network_group = use_network(
                 organization=organization,
                 group=cli.config.general.network_group, # None unless configured
-                network=cli.config.general.network
+                network=cli.args.network
             )
         else:
             cli.log.error("first configure a network to get resources in a network e.g. --network ACMENet")
@@ -511,11 +512,11 @@ def list(cli):
         else:
             matches = organization.get_networks_by_organization(**cli.args.query)
     else:
-        if cli.config.general.network:
+        if cli.args.network:
             network, network_group = use_network(
                 organization=organization,
                 group=cli.config.general.network_group, # None unless configured
-                network=cli.config.general.network
+                network=cli.args.network
             )
         else:
             cli.log.error("first configure a network to list resources in a network e.g. --network ACMENet")
@@ -577,7 +578,7 @@ def delete(cli):
     network, network_group = use_network(
         organization=organization,
         group=cli.config.general.network_group,
-        network=cli.config.general.network,
+        network=cli.args.network,
         operation='delete'
     )
 
@@ -592,20 +593,33 @@ def delete(cli):
         if not cli.args.query == {}:
             cli.log.warn("ignoring name='%s' because this operation applies to the entire network that is already selected", str(cli.args.query))
         try:
-            if cli.args.yes or questions.yesno("confirm delete network '{name}'".format(name=network.name), default=False):
-                spinner.text = "deleting network '{net}'".format(net=network.name)
-                try:
-                    with spinner:
-                        network.delete_network(progress=False, wait=cli.config.delete.wait)
-                except KeyboardInterrupt as e:
-                    cli.log.debug("wait cancelled by user")
-                except Exception as e:
-                    cli.log.error("unknown error in %s", e)
-                    exit(1)
-                else:
-                    cli.log.info(sub('deleting', 'deleted', spinner.text))
+            delete_confirmed = False
+            if cli.args.yes:
+                delete_confirmed = True
             else:
-                cli.echo("not deleting network '{name}'.".format(name=network.name))
+                scrambled = []
+                for i in range(9):
+                    scrambled.extend([''.join(random.sample(network.name, len(network.name)))])
+                scrambled.extend([network.name])
+                random.shuffle(scrambled)
+                cli.echo("scrambled has %d elements:", len(scrambled))
+                for i in scrambled:
+                    cli.echo(i)
+                descrambled = questions.choice("{fg_red}Enter the number next to the unscrambled network name to delete", scrambled, default=None, confirm=True, prompt='{fg_red}DELETE which network? ')
+                if network.name == descrambled:
+                    spinner.text = "deleting network '{net}'".format(net=network.name)
+                    try:
+                        with spinner:
+                            network.delete_network(progress=False, wait=cli.config.delete.wait)
+                    except KeyboardInterrupt as e:
+                        cli.log.debug("wait cancelled by user")
+                    except Exception as e:
+                        cli.log.error("unknown error in %s", e)
+                        exit(1)
+                    else:
+                        cli.log.info(sub('deleting', 'deleted', spinner.text))
+                else:
+                    cli.echo("not deleting network '{name}'.".format(name=network.name))
         except KeyboardInterrupt as e:
             cli.log.debug("input cancelled by user")
         except Exception as e:
@@ -725,7 +739,7 @@ def use_network(organization: object, network: str=None, group: str=None, operat
             existing_networks = network_group.networks_by_name()
         else:
             existing_networks = organization.get_networks_by_organization()
-        cli.log.error("need 'nfctl --network NETWORK' or 'nfctl config general.network=NETWORK' to configure a network")
+        cli.log.error("need 'nfctl --network NETWORK' or 'nfctl args.network=NETWORK' to configure a network")
         exit(1)
     if group:
         network_group = use_network_group(organization=organization, group=group)
@@ -800,10 +814,16 @@ def edit_object_as_yaml(edit: object):
         temp_file = tf.name
         tf.write(instructions_bytes + edit_bytes)
         tf.flush()
-        return_code = cli.run(editor.split()+[tf.name])
+        completed = cli.run(command=editor.split()+[tf.name], capture_output=False)
         tf.seek(0)
         edited = tf.read().decode("utf-8")
-    if return_code == 0:
+    try:
+        completed.check_returncode()
+    except CalledProcessError:
+        cli.log.error("editor returned an error: '%s'", completed.stdout)
+        save_error = True
+    else:
+        cli.log.debug("editor returned without error: '%s'", completed.stdout)
         # prune comments from buffer
         edited_no_comments = str()
         for line in edited.splitlines():
@@ -822,11 +842,8 @@ def edit_object_as_yaml(edit: object):
                 save_error = True
             else:
                 return edited_object
-    else:
-        cli.log.error("editor returned an error")
-        save_error = True
     if save_error:
-        cli.log.warn("your buffer was saved in %s and you may edit it again and redirect that file to the same command again as stdin or --file", temp_file)
+        cli.log.warn("your buffer was saved and you may continue editing it  'create TYPE --file %s'", temp_file)
         exit(1)
 
 
