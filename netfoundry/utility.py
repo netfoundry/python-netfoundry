@@ -477,6 +477,7 @@ RESOURCES = {
 
 NETWORK_RESOURCES = {type:spec for type,spec in RESOURCES.items() if spec.domain == "network"}
 MUTABLE_NETWORK_RESOURCES = {type:spec for type,spec in RESOURCES.items() if spec.domain == "network" and spec.mutable}
+EMBEDDABLE_NETWORK_RESOURCES = {type:spec for type,spec in RESOURCES.items() if spec.domain == "network" and spec.embeddable}
 
 # TODO: [MOP-13441] associate locations with a short list of major geographic regions / continents
 MAJOR_REGIONS = {

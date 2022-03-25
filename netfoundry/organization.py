@@ -12,7 +12,7 @@ from platformdirs import user_cache_path, user_config_path
 
 from .exceptions import NFAPINoCredentials
 from .utility import (DEFAULT_TOKEN_EXPIRY, ENVIRONMENTS,
-                      MUTABLE_NETWORK_RESOURCES, NETWORK_RESOURCES, RESOURCES,
+                      EMBEDDABLE_NETWORK_RESOURCES, NETWORK_RESOURCES, RESOURCES,
                       STATUS_CODES, find_resources, get_resource, http,
                       is_uuidv4, normalize_caseless, get_token_cache, jwt_decode, jwt_environment, jwt_expiry)
 
@@ -550,7 +550,7 @@ class Organization:
         headers["authorization"] = "Bearer " + self.token
         params = dict()
         if embed == "all":
-            params['embed'] = ','.join(MUTABLE_NETWORK_RESOURCES)
+            params['embed'] = ','.join(EMBEDDABLE_NETWORK_RESOURCES)
             logging.debug("requesting embed all resource types in network domain: {:s}".format(params['embed']))
         elif embed:
             valid_types = [type for type in embed.split(',') if RESOURCES[type]['domain'] == "network"]
@@ -562,7 +562,7 @@ class Organization:
 
         url = self.audience+'core/v2/networks/'+network_id
         try:
-            network = get_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            network = get_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params)
         except:
             logging.debug("failed to get network from url: '%s'", url)
             raise
