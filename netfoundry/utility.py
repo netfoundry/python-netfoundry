@@ -1,6 +1,7 @@
 """Shared helper functions, constants, and classes."""
 
 import json
+from json import JSONDecodeError
 import logging
 import os
 from stat import filemode
@@ -15,175 +16,15 @@ from uuid import UUID  # validate UUIDv4 strings
 
 import inflect  # singular and plural nouns
 import jwt
-from requests import \
-    Session  # HTTP user agent will not emit server cert warnings if verify=False
+from requests import Session  # HTTP user agent will not emit server cert warnings if verify=False
 from requests import status_codes
+from requests.exceptions import RequestException
 from requests.adapters import HTTPAdapter
 from urllib3 import disable_warnings
 from urllib3.exceptions import InsecureRequestWarning
 from urllib3.util.retry import Retry
 
 disable_warnings(InsecureRequestWarning)
-
-class Utility:
-    """Shared functions intended for use with and within the module."""
-
-    def __init__(self):
-        """No-op."""
-        pass
-
-    def camel(self, snake_str):
-        """Convert a string from snake case to camel case."""
-        first, *others = snake_str.split('_')
-        return ''.join([first.lower(), *map(str.title, others)])
-
-    def snake(self, camel_str):
-        """Convert a string from camel case to snake case."""
-        return sub(r'(?<!^)(?=[A-Z])', '_', camel_str).lower()
-
-    def normalize_caseless(self, text):
-        """Normalize a string as lowercase unicode KD form.
-        
-        The normal form KD (NFKD) will apply the compatibility decomposition,
-        i.e. replace all compatibility characters with their equivalents.
-        """
-        return unicodedata.normalize("NFKD", text.casefold())
-
-    def caseless_equal(self, left, right):
-        """Compare the KD normal form of left, right strings."""
-        return self.normalize_caseless(left) == self.normalize_caseless(right)
-
-    def get_token_cache(self, path):
-        """Try to read the token cache file and return the object."""
-        try:
-            token_cache = json.loads(path.read_text())
-        except FileNotFoundError as e:
-            logging.debug("cache file '%s' not found", path.__str__())
-            raise
-        except json.JSONDecodeError as e:
-            logging.debug("failed to parse cache file '%s' as JSON, got %s", path.__str__(), e)
-            raise
-        except Exception as e:
-            logging.debug("failed to read cache file '%s', got %s", path.__str__(), e)
-            raise
-        else:
-            cache_file_stats = os.stat(path)
-            logging.debug("parsed token cache file '%s' as JSON with mode %s", path.__str__(), filemode(cache_file_stats.st_mode))
-        
-        if all(k in token_cache for k in ['token', 'expiry', 'audience']):
-            return token_cache
-        else:
-            raise Exception("not all expected token cache file keys were found: token, expiry, audience")
-
-    def jwt_expiry(self, token):
-        """Return an epoch timestampt when the token will be expired.
-        
-        First, try to parse JWT to extract expiry. If that fails then estimate +1h.
-        """
-        try:
-            claim = self.jwt_decode(token)
-            expiry = claim['exp']
-        except jwt.exceptions.PyJWTError:
-            logging.debug("error parsing JWT to extract expiry, estimating +%ds", DEFAULT_TOKEN_EXPIRY)
-            expiry = time.time() + DEFAULT_TOKEN_EXPIRY
-        except KeyError:
-            logging.debug("failed to extract expiry epoch from claimset as key 'exp', estimating +%ds", DEFAULT_TOKEN_EXPIRY)
-            expiry = time.time() + DEFAULT_TOKEN_EXPIRY
-        except:
-            logging.error("unexpect error")
-            raise
-        else:
-            logging.debug("successfully extracted expiry from JWT")
-        finally:
-            return expiry
-
-    def jwt_environment(self, token):
-        """Try to extract the environment name from a JWT.
-        
-        First, try to parse JWT to extract the audience. If that fails then assume "production".
-        """
-        try:
-            claim = self.jwt_decode(token)
-            iss = claim['iss']
-        except jwt.exceptions.PyJWTError:
-            environment = "production"
-            logging.debug("error parsing JWT to extract audience, assuming environment is Production")
-        except KeyError:
-            environment = "production"
-            logging.debug("failed to extract the issuer URL from claimset as key 'iss', assuming environment is Production")
-        except:
-            logging.error("unexpect error")
-            raise
-        else:
-            if re.match(r'https://cognito-', iss):
-                environment = re.sub(r'https://gateway\.([^.]+)\.netfoundry\.io.*',r'\1',claim['scope'])
-                logging.debug("matched Cognito issuer URL convention, found environment '%s'", environment)
-            elif re.match(r'.*\.auth0\.com', iss):
-                environment = re.sub(r'https://netfoundry-([^.]+)\.auth0\.com.*',r'\1',claim['iss'])
-                logging.debug("matched Auth0 issuer URL convention, found environment '%s'", environment)
-            else:
-                environment = "production"
-                logging.debug("failed to match Auth0 and Cognito issuer URL conventions, assuming environment is '%s'", environment)
-        finally:
-            return environment
-
-    def jwt_decode(self, token):
-        # TODO: figure out how to stop doing this because the token is for the
-        # API, not this app, and so may change algorithm unexpectedly or stop
-        # being a JWT altogether, currently needed to build the URL for HTTP
-        # requests, might need to start using env config
-        """Parse the token and return claimset."""
-        try:
-            claim = jwt.decode(jwt=token, algorithms=["RS256"], options={"verify_signature": False})
-        except jwt.exceptions.PyJWTError:
-            logging.error("failed to parse bearer token as JWT")
-            raise
-        except:
-            logging.error("unexpect error parsing JWT")
-            raise
-        return claim
-
-    def is_jwt(self, token):
-        """If is a JWT then True."""
-        try:
-            self.jwt_decode(token)
-        except jwt.exceptions.PyJWTError:
-            return False
-        except:
-            logging.error("unexpect error parsing JWT")
-            raise
-        else:
-            return True
-class LookupDict(dict):
-    """Helper class to create a lookup dictionary from a set."""
-
-    def __init__(self, name=None):
-        """Initialize a lookup dictionary."""
-        self.name = name
-        super(LookupDict, self).__init__()
-
-    def __repr__(self):
-        return '<lookup \'%s\'>' % (self.name)
-
-    def __getitem__(self, key):
-        # We allow fall-through here, so values default to None
-
-        return self.__dict__.get(key, None)
-
-    def get(self, key, default=None):
-        return self.__dict__.get(key, default)
-
-def is_uuidv4(string: str):
-    """Test if string is valid UUIDv4."""
-    try: UUID(string, version=4)
-    except ValueError:
-        return False
-    else:
-        return True
-
-def eprint(*args, **kwargs):
-    """Adapt legacy function to logging."""
-    logging.debug(*args, **kwargs)
 
 p = inflect.engine()
 def plural(singular):
@@ -215,8 +56,224 @@ def camel(kebab, case: str="lower"):                # "lower" dromedary or "uppe
     camel = ''.join(camel_words)
     return camel
 
+def camel(snake_str):
+    """Convert a string from snake case to camel case."""
+    first, *others = snake_str.split('_')
+    return ''.join([first.lower(), *map(str.title, others)])
 
-# parent class so that type checking be re-used for other child classes
+def snake(camel_str):
+    """Convert a string from camel case to snake case."""
+    return sub(r'(?<!^)(?=[A-Z])', '_', camel_str).lower()
+
+def normalize_caseless(text):
+    """Normalize a string as lowercase unicode KD form.
+    
+    The normal form KD (NFKD) will apply the compatibility decomposition,
+    i.e. replace all compatibility characters with their equivalents.
+    """
+    return unicodedata.normalize("NFKD", text.casefold())
+
+def caseless_equal(left, right):
+    """Compare the KD normal form of left, right strings."""
+    return normalize_caseless(left) == normalize_caseless(right)
+
+def get_token_cache(path):
+    """Try to read the token cache file and return the object."""
+    try:
+        token_cache = json.loads(path.read_text())
+    except FileNotFoundError as e:
+        logging.debug("cache file '%s' not found", path.__str__())
+        raise
+    except JSONDecodeError as e:
+        logging.debug("failed to parse cache file '%s' as JSON, got %s", path.__str__(), e)
+        raise
+    except Exception as e:
+        logging.debug("failed to read cache file '%s', got %s", path.__str__(), e)
+        raise
+    else:
+        cache_file_stats = os.stat(path)
+        logging.debug("parsed token cache file '%s' as JSON with mode %s", path.__str__(), filemode(cache_file_stats.st_mode))
+    
+    if all(k in token_cache for k in ['token', 'expiry', 'audience']):
+        return token_cache
+    else:
+        raise Exception("not all expected token cache file keys were found: token, expiry, audience")
+
+def jwt_expiry(token):
+    """Return an epoch timestampt when the token will be expired.
+    
+    First, try to parse JWT to extract expiry. If that fails then estimate +1h.
+    """
+    try:
+        claim = jwt_decode(token)
+        expiry = claim['exp']
+    except jwt.exceptions.PyJWTError:
+        logging.debug("error parsing JWT to extract expiry, estimating +%ds", DEFAULT_TOKEN_EXPIRY)
+        expiry = time.time() + DEFAULT_TOKEN_EXPIRY
+    except KeyError:
+        logging.debug("failed to extract expiry epoch from claimset as key 'exp', estimating +%ds", DEFAULT_TOKEN_EXPIRY)
+        expiry = time.time() + DEFAULT_TOKEN_EXPIRY
+    except:
+        logging.error("unexpect error")
+        raise
+    else:
+        logging.debug("successfully extracted expiry from JWT")
+    finally:
+        return expiry
+
+def jwt_environment(token):
+    """Try to extract the environment name from a JWT.
+    
+    First, try to parse JWT to extract the audience. If that fails then assume "production".
+    """
+    try:
+        claim = jwt_decode(token)
+        iss = claim['iss']
+    except jwt.exceptions.PyJWTError:
+        environment = "production"
+        logging.debug("error parsing JWT to extract audience, assuming environment is Production")
+    except KeyError:
+        environment = "production"
+        logging.debug("failed to extract the issuer URL from claimset as key 'iss', assuming environment is Production")
+    except:
+        logging.error("unexpect error")
+        raise
+    else:
+        if re.match(r'https://cognito-', iss):
+            environment = re.sub(r'https://gateway\.([^.]+)\.netfoundry\.io.*',r'\1',claim['scope'])
+            logging.debug("matched Cognito issuer URL convention, found environment '%s'", environment)
+        elif re.match(r'.*\.auth0\.com', iss):
+            environment = re.sub(r'https://netfoundry-([^.]+)\.auth0\.com.*',r'\1',claim['iss'])
+            logging.debug("matched Auth0 issuer URL convention, found environment '%s'", environment)
+        else:
+            environment = "production"
+            logging.debug("failed to match Auth0 and Cognito issuer URL conventions, assuming environment is '%s'", environment)
+    finally:
+        return environment
+
+def jwt_decode(token):
+    # TODO: figure out how to stop doing this because the token is for the
+    # API, not this app, and so may change algorithm unexpectedly or stop
+    # being a JWT altogether, currently needed to build the URL for HTTP
+    # requests, might need to start using env config
+    """Parse the token and return claimset."""
+    try:
+        claim = jwt.decode(jwt=token, algorithms=["RS256"], options={"verify_signature": False})
+    except jwt.exceptions.PyJWTError:
+        logging.error("failed to parse bearer token as JWT")
+        raise
+    except:
+        logging.error("unexpect error parsing JWT")
+        raise
+    return claim
+
+def is_jwt(token):
+    """If is a JWT then True."""
+    try:
+        jwt_decode(token)
+    except jwt.exceptions.PyJWTError:
+        return False
+    except:
+        logging.error("unexpect error parsing JWT")
+        raise
+    else:
+        return True
+
+def is_uuidv4(string: str):
+    """Test if string is valid UUIDv4."""
+    try: UUID(string, version=4)
+    except ValueError:
+        return False
+    else:
+        return True
+
+def eprint(*args, **kwargs):
+    """Adapt legacy function to logging."""
+    logging.debug(*args, **kwargs)
+
+def find_resources(url: str, headers: dict, embedded: str=None, proxies: dict=dict(), verify: bool=True, **kwargs):
+    """
+    Recurse and return all pages of a type of resource.
+    :param url: the full URL to get
+    :param headers: authorization and accept headers
+    :param embedded: the key under '_embedded' where the list of resources for this type is found (e.g. 'networkList')
+    :param proxies: Requests proxies dict
+    :param verify: Requests verify bool is off if proxies enabled in this lib
+    :param kwargs: additional query params are typically logical AND if supported or ignored by the API if not
+    """
+    get_all_pages = True
+    params = dict()
+    for param in kwargs.keys():
+        params[param] = kwargs[param]
+    if not 'sort' in params.keys():
+        params["sort"] = "name,asc"
+    if 'size' in params.keys():
+        get_all_pages = False
+    else:
+        params['size'] = 1000
+    if 'page' in params.keys():
+        get_all_pages = False
+    else:
+        params['page'] = 0
+
+    try:
+        response = http.get(
+            url,
+            headers=headers,
+            params=params,
+            proxies=proxies,
+            verify=verify,
+        )
+        response.raise_for_status()
+    except RequestException as e:
+        logging.error('unexpected HTTP response code {:s} ({:d}) and response {:s}'.format(
+                STATUS_CODES._codes[response.status_code][0].upper(),
+                response.status_code,
+                response.text))
+        raise e
+    else:
+        try:
+            resource_page = response.json()
+        except JSONDecodeError as e:
+            logging.error("caught exception deserializing HTTP response as JSON")
+            raise e
+        else:
+            if 'page' in resource_page.keys():
+                try:
+                    total_pages = resource_page['page']['totalPages']
+                    total_elements = resource_page['page']['totalElements']
+                except KeyError as e:
+                    logging.error("got 'page' key in HTTP response but missing expected sub-key: %s", e)
+                    raise
+                else:
+                    if total_elements == 0:
+                        return(list())
+                    else:
+                        if embedded:
+                            try:
+                                all_pages = resource_page['_embedded'][embedded]
+                            except KeyError as e:
+                                logging.error("missing key in valid JSON response: '%s', got: '%s'", '_embedded.'+embedded, e)
+                                raise
+                        else:
+                            all_pages = resource_page
+
+                    if total_pages == 1:
+                        return all_pages
+                    elif total_pages > 1 and get_all_pages: # this is False if page or size param, to stop recursion or get a single page
+                        for next_page in range(1,total_pages):
+                            params['page'] = next_page
+                            try:
+                                # recurse
+                                all_pages.extend(find_resources(url=url, headers=headers, embedded=embedded, proxies=proxies, verify=verify, **params))
+                            except Exception as e:
+                                logging.error("failed to get page %d of %d, got '%s'", next_page, total_pages)
+                                raise
+                        return all_pages
+            else:
+                return resource_page
+
+
 @dataclass
 class ResourceTypeParent:
     """Parent class for ResourceType class."""
@@ -448,5 +505,24 @@ http.mount("http://", adapter)
 STATUS_CODES = status_codes
 
 DEFAULT_TOKEN_EXPIRY = 3600
+
+class LookupDict(dict):
+    """Helper class to create a lookup dictionary from a set."""
+
+    def __init__(self, name=None):
+        """Initialize a lookup dictionary."""
+        self.name = name
+        super(LookupDict, self).__init__()
+
+    def __repr__(self):
+        return '<lookup \'%s\'>' % (self.name)
+
+    def __getitem__(self, key):
+        # We allow fall-through here, so values default to None
+
+        return self.__dict__.get(key, None)
+
+    def get(self, key, default=None):
+        return self.__dict__.get(key, default)
 
 ENVIRONMENTS = ['production','staging','sandbox']
