@@ -1,11 +1,13 @@
 """Use a network group and find its networks."""
 
+from ast import Or
 import json
 import logging
 
-from .utility import RESOURCES, STATUS_CODES, NETWORK_RESOURCES, Utility, http, is_uuidv4
+from .utility import (NETWORK_RESOURCES, RESOURCES, STATUS_CODES,
+                      find_resources, get_resource, http, is_uuidv4,
+                      normalize_caseless)
 
-utility = Utility()
 
 class NetworkGroup:
     """use a network group by name or ID.
@@ -50,15 +52,21 @@ class NetworkGroup:
             raise Exception("need at least one network group in organization")
 
         self.session = Organization
+        self.token = self.session.token
+        self.proxies = self.session.proxies
+        self.verify = self.session.verify
+        self.audience = self.session.audience
+        self.environment = self.session.environment
         self.describe = Organization.get_network_group(self.network_group_id)
         self.id = self.network_group_id
         self.name = self.network_group_name
-        self.vanity = utility.normalize_caseless(Organization.label)
+        self.vanity = normalize_caseless(Organization.label)
 
-        if self.session.environment == "production":
+
+        if self.environment == "production":
             self.nfconsole = "https://{vanity}.nfconsole.io".format(vanity=self.vanity)
         else:
-            self.nfconsole = "https://{vanity}.{env}-nfconsole.io".format(vanity=self.vanity, env=self.session.environment)
+            self.nfconsole = "https://{vanity}.{env}-nfconsole.io".format(vanity=self.vanity, env=self.environment)
 
     def nc_data_centers_by_location(self):
         """Get a controller data center by locationCode."""
@@ -86,7 +94,7 @@ class NetworkGroup:
         """
         my_networks_by_normal_name = dict()
         for name,id in self.networks_by_name().items():
-            my_networks_by_normal_name[utility.normalize_caseless(name)] = id
+            my_networks_by_normal_name[normalize_caseless(name)] = id
         return(my_networks_by_normal_name)
 
     def network_exists(self, name: str, deleted: bool=False):
@@ -97,160 +105,73 @@ class NetworkGroup:
         """
         network_normal_names = list()
         for net in self.session.get_networks_by_group(network_group_id=self.network_group_id, deleted=deleted):
-            network_normal_names.append(utility.normalize_caseless(net['name']))
-        if utility.normalize_caseless(name) in network_normal_names:
+            network_normal_names.append(normalize_caseless(net['name']))
+        if normalize_caseless(name) in network_normal_names:
             return(True)
         else:
             return(False)
 
-    def get_controller_data_centers(self, **kwargs):
-        """Find controller data centers."""
+    def nc_data_centers(self, **kwargs):
+        """Find network controller data centers."""
         # data centers returns a list of dicts (data center objects)
-        params = {
-            "productVersion": self.product_version,
-            "hostType": "NC",
-            "provider": "AWS"
-        }
-        get_all_pages = True
+        params = dict()
         for param in kwargs.keys():
             params[param] = kwargs[param]
-        if not 'sort' in params.keys():
-            params["sort"] = "name,asc"
-        if not 'size' in params.keys():
-            params['size'] = 1000
-        else:
-            get_all_pages = False
-        if not 'page' in params.keys():
-            params['page'] = 0
-        else:
-            get_all_pages = False
+        params["productVersion"] = self.find_latest_product_version(is_active=True)
+        params["hostType"] = "NC"
+        #params["provider"] = "AWS"
 
+        url = self.audience+'core/v2/data-centers'
+        headers = { "authorization": "Bearer " + self.token }
         try:
-            headers = { "authorization": "Bearer " + self.session.token }
-            response = http.get(
-                self.session.audience+'core/v2/data-centers',
-                proxies=self.session.proxies,
-                verify=self.session.verify,
-                headers=headers,
-                params=params
-            )
-            response_code = response.status_code
+            data_centers = find_resources(url=url, headers=headers, embedded=NETWORK_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params)
         except:
+            logging.debug("failed to get data-centers from url: '%s'", url)
             raise
-
-        if response_code == STATUS_CODES.codes.OK: # HTTP 200
-            try:
-                resources = json.loads(response.text)
-            except ValueError as e:
-                logging.error('requested data centers and failed to parse response as JSON')
-                raise(e)
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
-
-        total_pages = resources['page']['totalPages']
-        total_elements = resources['page']['totalElements']
-        # if there are no resources
-        if total_elements == 0:
-            return([])
-        else:
-            try:
-                all_entities = resources['_embedded'][NETWORK_RESOURCES['data-centers']._embedded]
-            except KeyError:
-                logging.error("missing key in valid JSON response: %s", '_embedded.'+NETWORK_RESOURCES['data-centers']._embedded)
-                raise
-
-        # if there are multiple pages of resources
-        if get_all_pages and total_pages > 1:
-            # append the remaining pages of resources
-            for page in range(1,total_pages):
-                try:
-                    params["page"] = page
-                    response = http.get(
-                        self.session.audience+'core/v2/data-centers',
-                        proxies=self.session.proxies,
-                        verify=self.session.verify,
-                        headers=headers,
-                        params=params
-                    )
-                    response_code = response.status_code
-                except:
-                    raise
-
-                if response_code == STATUS_CODES.codes.OK: # HTTP 200
-                    try:
-                        resources = json.loads(response.text)['_embedded'][NETWORK_RESOURCES['data-centers']._embedded]
-                    except ValueError as e:
-                        logging.error('requested data centers and failed to parse response as JSON')
-                        raise(e)
-                else:
-                    raise Exception(
-                        'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                            STATUS_CODES._codes[response_code][0].upper(),
-                            response_code,
-                            response.text
-                        )
-                    )
-        return(all_entities)
+            return(data_centers)
 
     # provide a compatible alias
-    nc_data_centers = get_controller_data_centers
+    get_controller_data_centers = nc_data_centers 
 
     def get_product_metadata(self, is_active: bool=True):
-        """Get all products' metadata."""
+        """
+        Get product version metadata.
+        
+        :param is_active: filter for only active product versions
+        :param product_version: semver string of a single version to get, default is all versions
+        """
+        url = self.audience+'product-metadata/v2/download-urls.json'
+        headers = dict() # no auth
         try:
-            response = http.get(
-                self.session.audience+'product-metadata/v2/download-urls.json',
-                proxies=self.session.proxies,
-                verify=self.session.verify
-            )
-            response_code = response.status_code
+            all_product_metadata = find_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except:
+            logging.debug("failed to get product-metadata from url: '%s'", url)
             raise
-
-        if response_code == STATUS_CODES.codes.OK: # HTTP 200
-            try:
-                product_metadata = json.loads(response.text)
-            except ValueError as e:
-                logging.error('failed to find product metadata')
-                raise(e)
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
+            if is_active:
+                filtered_product_metadata = dict()
+                for product in all_product_metadata.keys():
+                    if all_product_metadata[product]['active']:
+                        filtered_product_metadata[product] = all_product_metadata[product]
+                return (filtered_product_metadata)
+            else:
+                return (all_product_metadata)
 
-        if is_active:
-            active_product_metadata = dict()
-            for product in product_metadata.keys():
-                if product_metadata[product]['active']:
-                    active_product_metadata[product] = product_metadata[product]
-            return (active_product_metadata)
-        else:
-            return (product_metadata)
-
-    def list_product_versions(self, product_metadata: dict={}):
+    def list_product_versions(self, product_metadata: dict=dict(), is_active: bool=True):
         """Find product versions in all products' metadata."""
         if product_metadata:
             product_versions = product_metadata.keys()
         else:
-            product_metadata = self.get_product_metadata()
+            product_metadata = self.get_product_metadata(is_active=is_active)
             product_versions = product_metadata.keys()
 
         return (product_versions)
 
-    def find_latest_product_version(self, product_versions: list=[]):
+    def find_latest_product_version(self, product_versions: list=list(), is_active: bool=True):
         """Get the highest product version number (may be experimental, not stable)."""
         if not product_versions:
-            product_versions = self.list_product_versions()
+            product_versions = self.list_product_versions(is_active=is_active)
 
         from distutils.version import LooseVersion
         return sorted(product_versions, key=LooseVersion)[-1]
@@ -312,14 +233,14 @@ class NetworkGroup:
 
         headers = {
             'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.session.token
+            "authorization": "Bearer " + self.token
         }
 
         try:
             response = http.post(
-                self.session.audience+"core/v2/networks",
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                self.audience+"core/v2/networks",
+                proxies=self.proxies,
+                verify=self.verify,
                 json=request,
                 headers=headers
             )
@@ -366,12 +287,12 @@ class NetworkGroup:
             raise Exception("ERROR: need one of network_id or network_name for a Network in this network group: {:s}".format(self.name))
 
         try:
-            headers = { "authorization": "Bearer " + self.session.token }
-            entity_url = self.session.audience+'core/v2/networks/'+network_id
+            headers = { "authorization": "Bearer " + self.token }
+            entity_url = self.audience+'core/v2/networks/'+network_id
             response = http.delete(
                 entity_url,
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers
             )
             response_code = response.status_code

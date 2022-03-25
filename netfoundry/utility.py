@@ -191,9 +191,48 @@ def eprint(*args, **kwargs):
     """Adapt legacy function to logging."""
     logging.debug(*args, **kwargs)
 
+def get_resource(url: str, headers: dict, proxies: dict=dict(), verify: bool=True, **kwargs):
+    """
+    Get, deserialize, and return a single resource.
+
+    :param url: the full URL to get
+    :param headers: authorization and accept headers
+    :param proxies: Requests proxies dict
+    :param verify: Requests verify bool is off if proxies enabled in this lib
+    :param kwargs: additional query params are typically logical AND if supported or ignored by the API if not
+    """
+    params = dict()
+    for param in kwargs.keys():
+        params[param] = kwargs[param]
+
+    try:
+        response = http.get(
+            url,
+            headers=headers,
+            params=params,
+            proxies=proxies,
+            verify=verify,
+        )
+        response.raise_for_status()
+    except RequestException as e:
+        logging.error('unexpected HTTP response code {:s} ({:d}) and response {:s}'.format(
+                STATUS_CODES._codes[response.status_code][0].upper(),
+                response.status_code,
+                response.text))
+        raise e
+    else:
+        try:
+            resource = response.json()
+        except JSONDecodeError as e:
+            logging.error("caught exception deserializing HTTP response as JSON")
+            raise e
+        else:
+            return resource
+
 def find_resources(url: str, headers: dict, embedded: str=None, proxies: dict=dict(), verify: bool=True, **kwargs):
     """
     Recurse and return all pages of a type of resource.
+
     :param url: the full URL to get
     :param headers: authorization and accept headers
     :param embedded: the key under '_embedded' where the list of resources for this type is found (e.g. 'networkList')

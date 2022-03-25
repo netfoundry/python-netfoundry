@@ -13,7 +13,8 @@ from platformdirs import user_cache_path, user_config_path
 from .exceptions import NFAPINoCredentials
 from .utility import (DEFAULT_TOKEN_EXPIRY, ENVIRONMENTS,
                       MUTABLE_NETWORK_RESOURCES, NETWORK_RESOURCES, RESOURCES,
-                      STATUS_CODES, http, is_uuidv4)
+                      STATUS_CODES, find_resources, get_resource, http,
+                      is_uuidv4, normalize_caseless, get_token_cache, jwt_decode, jwt_environment, jwt_expiry)
 
 
 class Organization:
@@ -119,7 +120,7 @@ class Organization:
             logging.debug("got token from env NETFOUNDRY_API_TOKEN as %dB", len(self.token))
         else:
             try:
-                token_cache = utility.get_token_cache(self.token_cache_file_path)
+                token_cache = get_token_cache(self.token_cache_file_path)
             except Exception as e:
                 self.token = None
                 self.expiry = None
@@ -133,7 +134,7 @@ class Organization:
         # if the token was found but not the expiry then try to parse to extract the expiry so we can enforce minimum lifespan seconds
         if self.token and not self.expiry:
             try:
-                self.expiry = utility.jwt_expiry(self.token)
+                self.expiry = jwt_expiry(self.token)
             except:
                 self.expiry = epoch + DEFAULT_TOKEN_EXPIRY
                 self.expiry_seconds = DEFAULT_TOKEN_EXPIRY
@@ -231,7 +232,7 @@ class Organization:
         # which is intended for the API, not this application
         if not self.audience and self.token and not self.environment:
             try:
-                self.environment = utility.jwt_environment(self.token)
+                self.environment = jwt_environment(self.token)
             except:
                 # an exception here is very unlikely because the called
                 # function is designed to provide a sane default in case the
@@ -257,7 +258,7 @@ class Organization:
         # application
         if self.token and not self.expiry: # if token was obtained in this pass then expiry is already defined by response 'expires_in' property 
             try:
-                self.expiry = utility.jwt_expiry(self.token)
+                self.expiry = jwt_expiry(self.token)
             except:
                 logging.debug("unexpected error getting expiry from token")
                 raise
@@ -416,85 +417,37 @@ class Organization:
         
     def get_caller_identity(self):
         """Return the caller's identity object."""
-        # try the API account endpoint first, then the endpoint for human, interactive users
-        request = {
-            "url": self.audience+'identity/v1/api-account-identities/self',
-            "proxies": self.proxies,
-            "verify": self.verify,
-            "headers": { "authorization": "Bearer " + self.token }
-        }
-        try:
-            response = http.get(**request)
-            response_code = response.status_code
-        except:
-            raise
-
-        if response_code == STATUS_CODES.codes.OK: # HTTP 200
+        # try the generic endpoint, then the API account endpoint, then the endpoint for interactive users
+        urls = [
+            self.audience+'identity/v1/identities/self',
+            self.audience+'identity/v1/api-account-identities/self',
+            self.audience+'identity/v1/user-identities/self',
+        ]
+        headers = { "authorization": "Bearer " + self.token }
+        for url in urls:
             try:
-                caller = json.loads(response.text)
-            except ValueError as e:
-                eprint('failed loading caller\'s API account identity as an object from response document')
-                raise(e)
-        else:
-            try:
-                request["url"] = self.audience+'identity/v1/user-identities/self'
-                response = http.get(**request)
-                response_code = response.status_code
+                caller = get_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
             except:
-                raise
-
-            if response_code == STATUS_CODES.codes.OK: # HTTP 200
-                try:
-                    caller = json.loads(response.text)
-                except ValueError as e:
-                    eprint('ERROR getting caller\'s user identity from response document')
-                    raise(e)
+                logging.debug("failed to get caller identity from url: '%s'", url)
             else:
-                raise Exception(
-                    'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                        STATUS_CODES._codes[response_code][0].upper(),
-                        response_code,
-                        response.text
-                    )
-                )
-
-        return(caller)
+                return(caller)
+        logging.error("failed to get caller identity from any url")
+        raise RuntimeError
 
     def get_identity(self, identity_id: str):
         """Get an identity by ID.
 
         :param str identity: UUIDv4 of the identity to get
         """
-        params = dict()
+        url = self.audience+'identity/v1/identities/'+identity_id
+        headers = { "authorization": "Bearer " + self.token }
         try:
-            headers = { "authorization": "Bearer " + self.token }
-            response = http.get(
-                self.audience+'identity/v1/identities/'+identity_id,
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers,
-                params=params
-            )
-            response_code = response.status_code
+            identity = get_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except:
+            logging.debug("failed to get identity from url: '%s'", url)
             raise
-
-        if response_code == STATUS_CODES.codes.OK: # HTTP 200
-            try:
-                identity = response.json()
-            except ValueError as e:
-                logging.error('failed loading identities as an object from response document')
-                raise(e)
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
-
-        return(identity)
+            return(identity)
 
     def get_identities(self, **kwargs):
         """Find identities.
@@ -511,35 +464,15 @@ class Organization:
         if 'page' in params.keys():
             logging.warn("query param 'page' is not supported by Identity Service")
 
+        url = self.audience+'identity/v1/identities'
+        headers = { "authorization": "Bearer " + self.token }
         try:
-            headers = { "authorization": "Bearer " + self.token }
-            response = http.get(
-                self.audience+'identity/v1/identities',
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers,
-                params=params
-            )
-            response_code = response.status_code
+            identities = find_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params)
         except:
+            logging.debug("failed to get identities from url: '%s'", url)
             raise
-
-        if response_code == STATUS_CODES.codes.OK: # HTTP 200
-            try:
-                identities = response.json()
-            except ValueError as e:
-                logging.error('failed loading identities as an object from response document')
-                raise(e)
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
-
-        return(identities)
+            return(identities)
 
     def get_organizations(self, **kwargs):
         """Find organizations.
@@ -556,99 +489,47 @@ class Organization:
         if 'page' in params.keys():
             logging.warn("query param 'page' is not supported by Identity Service")
 
+        url = self.audience+'identity/v1/organizations'
+        headers = { "authorization": "Bearer " + self.token }
         try:
-            headers = { "authorization": "Bearer " + self.token }
-            response = http.get(
-                self.audience+'identity/v1/organizations',
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers,
-                params=params
-            )
-            response_code = response.status_code
+            organizations = find_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params)
         except:
+            logging.debug("failed to get organizations from url: '%s'", url)
             raise
-
-        if response_code == STATUS_CODES.codes.OK: # HTTP 200
-            try:
-                organizations = json.loads(response.text)
-            except ValueError as e:
-                eprint('ERROR getting Network Groups')
-                raise(e)
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
-
-        return(organizations)
+            return(organizations)
 
     def get_organization(self, id):
-        """Get a single organizations by ID."""
+        """
+        Get a single organizations by ID.
+        
+        :param id: the UUID of the org
+        """
+        url = self.audience+'identity/v1/organizations/'+id
+        headers = { "authorization": "Bearer " + self.token }
         try:
-            headers = { "authorization": "Bearer " + self.token }
-            response = http.get(
-                self.audience+'identity/v1/organizations/'+id,
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers
-            )
-            response_code = response.status_code
+            organization = get_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except:
+            logging.debug("failed to get organization from url: '%s'", url)
             raise
-
-        if response_code == STATUS_CODES.codes.OK: # HTTP 200
-            try:
-                organization = json.loads(response.text)
-            except ValueError as e:
-                eprint('ERROR getting Network Groups')
-                raise(e)
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
-
-        return(organization)
+            return(organization)
 
     def get_network_group(self,network_group_id):
-        """describe a Network Group
         """
+        Get a network group by ID.
+
+        :param network_group_id: the UUID of the network group
+        """
+        url = self.audience+'rest/v1/network-groups/'+network_group_id
+        headers = { "authorization": "Bearer " + self.token }
         try:
-            # /network-groups/{id} returns a Network Group object
-            headers = { "authorization": "Bearer " + self.token }
-            response = http.get(
-                self.audience+'rest/v1/network-groups/'+network_group_id,
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers
-            )
-            response_code = response.status_code
+            network_group = get_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except:
+            logging.debug("failed to get network_group from url: '%s'", url)
             raise
-
-        if response_code == STATUS_CODES.codes.OK: # HTTP 200
-            try:
-                network_group = json.loads(response.text)
-            except ValueError as e:
-                eprint('ERROR getting Network Group')
-                raise(e)
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
-
-        return(network_group)
+            return(network_group)
 
     def get_network(self, network_id: str, embed: str=None, accept: str=None):
         """Describe a Network by ID.
@@ -672,133 +553,36 @@ class Organization:
             params['embed'] = ','.join(MUTABLE_NETWORK_RESOURCES)
             logging.debug("requesting embed all resource types in network domain: {:s}".format(params['embed']))
         elif embed:
-            params['embed'] = ','.join([type for type in embed.split(',') if RESOURCES[type]['domain'] == "network"])
-            logging.debug("requesting embed some resource types in network domain: {:s}".format(params['embed']))
+            valid_types = [type for type in embed.split(',') if RESOURCES[type]['domain'] == "network"]
+            params['embed'] = ','.join(valid_types)
+            logging.debug("requesting embed some resource types in network domain: {:s}".format(valid_types))
             for type in embed.split(','):
                 if not type in NETWORK_RESOURCES.keys():
-                    logging.debug("not requesting embed of resource type '{:s}' because not a valid resource type or not in network domain".format(type))
+                    logging.warning("not requesting '{:s}', not a resource type in the network domain".format(type))
+
+        url = self.audience+'core/v2/networks/'+network_id
         try:
-            response = http.get(
-                self.audience+'core/v2/networks/'+network_id,
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers,
-                params=params
-            )
-            response_code = response.status_code
+            network = get_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except:
+            logging.debug("failed to get network from url: '%s'", url)
             raise
-
-        if response_code == STATUS_CODES.codes.OK: # HTTP 200
-            try:
-                network = json.loads(response.text)
-            except ValueError as e:
-                eprint('ERROR: failed to load {r} object from GET response'.format(r = "network"))
-                raise(e)
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
-
-        return(network)
-
+            return(network)
 
     def get_network_groups_by_organization(self, **kwargs):
         """Find network groups.
 
         :param str kwargs: filter results by any supported query param
         """
-        params = dict()
-        get_all_pages = True
-        for param in kwargs.keys():
-            params[param] = kwargs[param]
-        if not 'sort' in params.keys():
-            params['sort'] = "name,asc"
-        if not 'size' in params.keys():
-            params['size'] = 1000
-        else:
-            get_all_pages = False
-        if not 'page' in params.keys():
-            params['page'] = 0
-        else:
-            get_all_pages = False
+        url = self.audience+'rest/v1/network-groups'
+        headers = { "authorization": "Bearer " + self.token }
         try:
-            # /network-groups returns a list of dicts (Network Group objects)
-            headers = { "authorization": "Bearer " + self.token }
-            response = http.get(
-                self.audience+'rest/v1/network-groups',
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers,
-                params=params
-            )
-            response_code = response.status_code
+            network_groups = find_resources(url=url, headers=headers, embedded=RESOURCES['network-groups']._embedded, proxies=self.proxies, verify=self.verify, **kwargs)
         except:
+            logging.debug("failed to get network_groups from url: '%s'", url)
             raise
-
-        if response_code == STATUS_CODES.codes.OK: # HTTP 200
-            try:
-                response_object = response.json()
-            except ValueError:
-                logging.error('failed loading list of network groups as object')
-                raise ValueError("response is not JSON")
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
-
-        total_pages = response_object['page']['totalPages']
-        total_elements = response_object['page']['totalElements']
-        # if there are no resources
-        if total_elements == 0:
-            return([])
-        else:
-            network_groups = response_object['_embedded'][RESOURCES['network-groups']._embedded]
-
-        # if there is one page of resources
-        if total_pages == 1 or not get_all_pages:
-            return network_groups
-        # if there are multiple pages of resources
-        else:
-            # append the remaining pages of resources
-            for page in range(1,total_pages+1): # +1 to work around 1-base bug in MOP-17890
-                try:
-                    params["page"] = page
-                    response = http.get(
-                        self.audience+'rest/v1/network-groups',
-                        proxies=self.proxies,
-                        verify=self.verify,
-                        headers=headers,
-                        params=params
-                    )
-                    response_code = response.status_code
-                except:
-                    raise
-                if response_code == STATUS_CODES.codes.OK: # HTTP 200
-                    try:
-                        response_object = response.json()
-                        network_groups.extend(response_object['_embedded'][RESOURCES['network-groups']._embedded])
-                    except ValueError:
-                        logging.error('failed loading list of network groups as object')
-                        raise ValueError("response is not JSON")
-                else:
-                    raise Exception(
-                        'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                            STATUS_CODES._codes[response_code][0].upper(),
-                            response_code,
-                            response.text
-                        )
-                    )
-
-        return(network_groups)
+            return(network_groups)
 
     network_groups = get_network_groups_by_organization
 
@@ -810,97 +594,20 @@ class Organization:
         :param str kwargs: filter results by any supported query param
         :param bool deleted: include resource entities that have a non-null property deletedAt
         """
-        params = dict()
-        get_all_pages = True
+        url = self.audience+'core/v2/networks'
+        headers = { "authorization": "Bearer " + self.token }
+        params = {
+            "findByName": name
+        }
         for param in kwargs.keys():
             params[param] = kwargs[param]
-        if not 'sort' in params.keys():
-            params['sort'] = "name,asc"
-        if not 'size' in params.keys():
-            params['size'] = 1000
-        else:
-            get_all_pages = False
-        if not 'page' in params.keys():
-            params['page'] = 0
-        else:
-            get_all_pages = False
-        if name is not None:
-            params['findByName'] = name
-        if deleted:
-            params['status'] = "DELETED"
-
         try:
-            headers = { "authorization": "Bearer " + self.token }
-            response = http.get(
-                self.audience+'core/v2/networks',
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers,
-                params=params
-            )
-            response_code = response.status_code
+            networks = find_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, proxies=self.proxies, verify=self.verify, **params)
         except:
+            logging.debug("failed to get networks from url: '%s'", url)
             raise
-
-        if response_code == STATUS_CODES.codes.OK: # HTTP 200
-            try:
-                resources = json.loads(response.text)
-            except ValueError as e:
-                eprint('ERROR: failed to load {r} object from GET response'.format(r = type))
-                raise(e)
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
-
-        total_pages = resources['page']['totalPages']
-        total_elements = resources['page']['totalElements']
-        # if there are no resources
-        if total_elements == 0:
-            return([])
-        # if there is one page of resources
-        elif total_pages == 1 or not get_all_pages:
-            all_entities = resources['_embedded'][RESOURCES['networks']._embedded]
-        # if there are multiple pages of resources
-        else:
-            # initialize the list with the first page of resources
-            all_entities = resources['_embedded'][RESOURCES['networks']._embedded]
-            # append the remaining pages of resources
-            for page in range(1,total_pages):
-                try:
-                    params["page"] = page
-                    response = http.get(
-                        self.audience+'core/v2/networks',
-                        proxies=self.proxies,
-                        verify=self.verify,
-                        headers=headers,
-                        params=params
-                    )
-                    response_code = response.status_code
-                except:
-                    raise
-
-                if response_code == STATUS_CODES.codes.OK: # HTTP 200
-                    try:
-                        resources = json.loads(response.text)
-                        all_entities.extend(resources['_embedded'][RESOURCES['networks']._embedded])
-                    except ValueError as e:
-                        eprint('ERROR: failed to load resources object from GET response')
-                        raise(e)
-                else:
-                    raise Exception(
-                        'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                            STATUS_CODES._codes[response_code][0].upper(),
-                            response_code,
-                            response.text
-                        )
-                    )
-
-        return(all_entities)
+            return(networks)
 
     def network_exists(self, name: str, deleted: bool=False):
         """Check if a network exists.
@@ -928,9 +635,9 @@ class Organization:
         """
         normal_names = list()
         for normal in self.get_networks_by_organization(name=name, deleted=deleted):
-            normal_names.append(utility.normalize_caseless(normal['name']))
+            normal_names.append(normalize_caseless(normal['name']))
 
-        return normal_names.count(utility.normalize_caseless(name))
+        return normal_names.count(normalize_caseless(name))
 
     def get_networks_by_group(self, network_group_id: str, deleted: bool=False, **kwargs):
         """Find networks by network group ID.
@@ -941,95 +648,18 @@ class Organization:
         params = {
             "findByNetworkGroupId": network_group_id
         }
-        get_all_pages = True
         for param in kwargs.keys():
             params[param] = kwargs[param]
-        if not 'sort' in params.keys():
-            params['sort'] = "name,asc"
-        if not 'size' in params.keys():
-            params['size'] = 1000
-        else:
-            get_all_pages = False
-        if not 'page' in params.keys():
-            params['page'] = 0
-        else:
-            get_all_pages = False
-
         if deleted:
             params['status'] = "DELETED"
 
+        url = self.audience+'core/v2/networks'
+        headers = { "authorization": "Bearer " + self.token }
         try:
-            headers = { "authorization": "Bearer " + self.token }
-            response = http.get(
-                self.audience+'core/v2/networks',
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers,
-                params=params
-            )
-            response_code = response.status_code
+            networks = find_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, proxies=self.proxies, verify=self.verify, **params)
         except:
+            logging.debug("failed to get networks from url: '%s'", url)
             raise
-
-        if response_code == STATUS_CODES.codes.OK: # HTTP 200
-            try:
-                embedded = response.json()
-            except ValueError:
-                logging.error("response is not JSON")
-                raise ValueError("response is not JSON")
-            try:
-                resources = embedded['_embedded'][RESOURCES['networks']._embedded]
-            except KeyError:
-                resources = list()
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
+            return(networks)
 
-        total_pages = resources['page']['totalPages']
-        total_elements = resources['page']['totalElements']
-        # if there are no resources
-        if total_elements == 0:
-            return([])
-        # if there is one page of resources
-        elif total_pages == 1 or not get_all_pages:
-            all_entities = resources['_embedded'][RESOURCES['networks']._embedded]
-        # if there are multiple pages of resources
-        else:
-            # initialize the list with the first page of resources
-            all_entities = resources['_embedded'][RESOURCES['networks']._embedded]
-            # append the remaining pages of resources
-            for page in range(1,total_pages):
-                try:
-                    params["page"] = page
-                    response = http.get(
-                        self.audience+'core/v2/networks',
-                        proxies=self.proxies,
-                        verify=self.verify,
-                        headers=headers,
-                        params=params
-                    )
-                    response_code = response.status_code
-                except:
-                    raise
-
-                if response_code == STATUS_CODES.codes.OK: # HTTP 200
-                    try:
-                        resources = json.loads(response.text)
-                        all_entities.extend(resources['_embedded'][RESOURCES['networks']._embedded])
-                    except ValueError as e:
-                        eprint('ERROR: failed to load resources object from GET response')
-                        raise(e)
-                else:
-                    raise Exception(
-                        'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                            STATUS_CODES._codes[response_code][0].upper(),
-                            response_code,
-                            response.text
-                        )
-                    )
-        return(all_entities)

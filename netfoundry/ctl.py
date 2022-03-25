@@ -38,13 +38,12 @@ from .network import Network
 from .network_group import NetworkGroup
 from .organization import Organization
 from .utility import (MUTABLE_NETWORK_RESOURCES, NETWORK_RESOURCES, RESOURCES,
-                      Utility, plural, singular)
+                      plural, singular, is_jwt, normalize_caseless)
 
 set_metadata(version="v"+get_versions()['version']) # must precend import milc.cli
 import milc.subcommand.config
 from milc import cli, questions
 
-utility = Utility()
 
 class StoreDictKeyPair(argparse.Action):
     """Parse key pairs into a dictionary."""
@@ -330,7 +329,7 @@ def create(cli):
             cli.log.error("failed to read the input file: %s", e)
             raise e
     else:
-        cli.log.warn("you may input from a file with --file")
+        cli.log.warning("you may input from a file with --file")
         exit(1)
     if not create_input_object and create_input_lines:
         try:
@@ -378,7 +377,6 @@ def create(cli):
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[singular(type) for type in MUTABLE_NETWORK_RESOURCES.keys()])
 # this allows us to pass the edit subcommand's cli object to function get without further modifying that functions params
-@cli.argument('-a', '--as', dest='accept', arg_only=True, default='update', help=argparse.SUPPRESS)
 @cli.subcommand('edit a single resource selected by query with editor defined in NETFOUNDRY_EDITOR or EDITOR')
 def edit(cli):
     """Edit a single resource as YAML.
@@ -398,7 +396,7 @@ def edit(cli):
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
 @cli.argument('-O','--output', arg_only=True, help="format the output", default="yaml", choices=['text', 'yaml','json'])
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
-@cli.argument('-a', '--as', arg_only=True, choices=['create','update'], help="request the as=create or as=update form of the resource")
+@cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create','update'], help="request the as=create or as=update form of the resource")
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[singular(type) for type in RESOURCES.keys()])
 @cli.subcommand('get a single resource by query')
 def get(cli, echo: bool=True):
@@ -409,13 +407,13 @@ def get(cli, echo: bool=True):
     match = {}
     matches = []
     query_keys = [*cli.args.query]
-    spinner = get_spinner("Getting the {:s} by {:s}".format(cli.args.resource_type, cli.args.output.upper()))
+    spinner = get_spinner("Getting {:s}".format(cli.args.resource_type))
     with spinner:
         if cli.args.resource_type == "organization":
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warn("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
+                    cli.log.warning("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
                 match = organization.get_organization(id=cli.args.query['id'])
             else:
                 matches = organization.get_organizations(**cli.args.query)
@@ -425,7 +423,7 @@ def get(cli, echo: bool=True):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warn("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
+                    cli.log.warning("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
                 match = organization.get_network_group(network_group_id=cli.args.query['id'])
             else:
                 matches = organization.get_network_groups_by_organization(**cli.args.query)
@@ -435,7 +433,7 @@ def get(cli, echo: bool=True):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warn("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
+                    cli.log.warning("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
                 match = organization.get_identity(identity_id=cli.args.query['id'])
             elif not query_keys:
                 match = organization.caller
@@ -447,8 +445,8 @@ def get(cli, echo: bool=True):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warn("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
-                match = organization.get_network(network_id=cli.args.query['id'])
+                    cli.log.warning("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
+                match = organization.get_network(network_id=cli.args.query['id'], embed="all", accept=cli.args.accept)
             else:
                 if cli.config.general.network_group and not cli.args.network:
                     network_group = use_network_group(organization, group=cli.config.general.network_group)
@@ -475,12 +473,12 @@ def get(cli, echo: bool=True):
                 exit(1)
             if cli.args.resource_type == "data-center":
                 if cli.args.accept:
-                    cli.log.warn("'accept' param not applicable to data-centers")
+                    cli.log.warning("'accept' param not applicable to data-centers")
                 if 'id' in query_keys:
-                    cli.log.warn("data centers fetched by ID may not support this network's product version, try provider or locationCode params for safety")
+                    cli.log.warning("data centers fetched by ID may not support this network's product version, try provider or locationCode params for safety")
                     if len(query_keys) > 1:
                         query_keys.remove('id')
-                        cli.log.warn("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
+                        cli.log.warning("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
                     match = network.get_data_center_by_id(id=cli.args.query['id'])
                 else:
                     matches = network.get_edge_router_data_centers(**cli.args.query)
@@ -490,7 +488,7 @@ def get(cli, echo: bool=True):
                 if 'id' in query_keys:
                     if len(query_keys) > 1:
                         query_keys.remove('id')
-                        cli.log.warn("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
+                        cli.log.warning("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
                     match = network.get_resource_by_id(type=cli.args.resource_type, id=cli.args.query['id'], accept=cli.args.accept)
                 else:
                     matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
@@ -520,7 +518,7 @@ def get(cli, echo: bool=True):
             elif cli.args.output == "json":
                 cli.echo(json_dumps(filtered_match, indent=4))
     elif len(matches) == 0:
-        cli.log.warn("found no %s '%s'", cli.args.resource_type, cli.args.query)
+        cli.log.warning("found no %s '%s'", cli.args.resource_type, cli.args.query)
         exit(1)
     else: # len(matches) > 1:
         cli.log.error("found more than one %s '%s'", cli.args.resource_type, cli.args.query)
@@ -536,7 +534,7 @@ def list(cli):
     """Find resources as lists."""
     if cli.args.output == "text":
         if not sys.stdout.isatty():
-            cli.log.warn("nfctl does not have a stable CLI interface. Use with caution in scripts.")
+            cli.log.warning("nfctl does not have a stable CLI interface. Use with caution in scripts.")
     else: # output is YAML or JSON
         # don't emit INFO messages to stdout because they will break deserialization
         cli.log.setLevel(logging.WARN)
@@ -632,7 +630,7 @@ def delete(cli):
 
     if cli.args.resource_type == "network":
         if not cli.args.query == {}:
-            cli.log.warn("ignoring name='%s' because this operation applies to the entire network that is already selected", str(cli.args.query))
+            cli.log.warning("ignoring name='%s' because this operation applies to the entire network that is already selected", str(cli.args.query))
         try:
             delete_confirmed = False
             if cli.args.yes:
@@ -648,7 +646,7 @@ def delete(cli):
                     delete_confirmed = True
 
             if delete_confirmed:
-                spinner.text = "deleting network '{net}'".format(net=network.name)
+                spinner = get_spinner("deleting network '{net}'".format(net=network.name))
                 try:
                     with spinner:
                         network.delete_network(progress=False, wait=cli.config.delete.wait)
@@ -715,7 +713,7 @@ def use_organization(prompt: bool=True):
         cli.log.debug("using API account credentials from environment NETFOUNDRY_CLIENT_ID, NETFOUNDRY_PASSWORD, NETFOUNDRY_OAUTH_URL")
     else:
         cli.log.debug("no token or credentials file provided, trying token cache")
-    spinner = get_spinner("checking login for profile '{:s}'".format(cli.config.general.profile))
+    spinner = get_spinner("refreshing profile '{:s}'".format(cli.config.general.profile))
     # use the session with some organization, default is to use the first and there's typically only one
     try:
         with spinner:
@@ -730,7 +728,7 @@ def use_organization(prompt: bool=True):
         if prompt:
             cli.log.debug("caught no credentials exception from organization, prompting for token")
             try:
-                token_from_prompt = questions.password(prompt='Enter Bearer Token:', confirm=False, validate=utility.is_jwt)
+                token_from_prompt = questions.password(prompt='Enter Bearer Token:', confirm=False, validate=is_jwt)
             except KeyboardInterrupt as e:
                 cli.log.debug("input cancelled by user")
                 exit(1)
@@ -788,7 +786,7 @@ def use_network(organization: object, network: str=None, group: str=None, operat
     if group:
         network_group = use_network_group(organization=organization, group=group)
         existing_networks = network_group.networks_by_normal_name()
-        if not utility.normalize_caseless(network_identifier) in existing_networks.keys():
+        if not normalize_caseless(network_identifier) in existing_networks.keys():
             cli.log.error("failed to find a network named '{name}'.".format(name=network_identifier))
             exit(1)
     else:
@@ -807,7 +805,7 @@ def use_network(organization: object, network: str=None, group: str=None, operat
     # use the Network
     network = Network(network_group, network=network_identifier)
     if operation == delete:
-        spinner.text = 'waiting for {net} to have status DELETING or DELETED'.format(net=network_identifier)
+        spinner = get_spinner('waiting for {net} to have status DELETING or DELETED'.format(net=network_identifier))
         try:
             with spinner:
                 network.wait_for_statuses(["DELETING","DELETED"],wait=999,progress=False)
@@ -866,7 +864,7 @@ def edit_object_as_yaml(edit: object):
         for line in edited.splitlines():
             edited_no_comments += re.sub('^(\s+)?#.*','',line)
         if len(edited_no_comments) == 0:
-            cli.log.warn("cancelled due to empty file")
+            cli.log.warning("cancelled due to empty file")
             return False
         else:
             try:
@@ -880,7 +878,7 @@ def edit_object_as_yaml(edit: object):
             else:
                 return edited_object
     if save_error:
-        cli.log.warn("your buffer was saved and you may continue editing it  'create TYPE --file %s'", temp_file)
+        cli.log.warning("your buffer was saved and you may continue editing it  'create TYPE --file %s'", temp_file)
         exit(1)
 
 def get_spinner(text):
@@ -891,12 +889,12 @@ def get_spinner(text):
     it will mangle debug output and isn't useful if output is redirected.
     """
     spinner = cli.spinner(text=text, spinner='dots12', stream=sys.stderr)
-    if sys.stdout.isatty():
-        spinner.enabled = True
-        cli.log.debug("spinner enabled because stdout is a tty")
-    else:
+    if not sys.stdout.isatty() or cli.log.isEnabledFor(logging.DEBUG):
         spinner.enabled = False
-        cli.log.debug("spinner disabled because stdout is not a tty")
+        cli.log.debug("spinner disabled because stdout is not a tty or DEBUG is enabled")
+    else:
+        spinner.enabled = True
+        cli.log.debug("spinner enabled because stdout is a tty and DEBUG is not enabled")
     return spinner
 
 if __name__ == '__main__':

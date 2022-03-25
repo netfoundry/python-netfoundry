@@ -94,14 +94,7 @@ def main():
         help="cloud provider to host Edge Routers",
         choices=DC_PROVIDERS
     )
-    regions_group = parser.add_mutually_exclusive_group(required=False)
-    regions_group.add_argument("--regions",
-        default=["Americas"],
-        nargs="+",
-        help="space-separated one or more major geographic regions in which to place Edge Routers for overlay fabric",
-        choices=["Americas", "EuropeMiddleEastAfrica", "AsiaPacific"]
-    )
-    regions_group.add_argument("--location-codes",
+    parser.add_argument("--location-codes",
         dest="location_codes",
         nargs="+",
         help="cloud location codes in which to host Edge Routers"
@@ -169,7 +162,7 @@ def main():
             if existing_count < 1:
                 fabric_placements += [location]
             else:
-                print("INFO: found a hosted Edge Router(s) in {location}".format(location=location))
+                logging.info("found a hosted router in {location}".format(location=location))
 
         for location in fabric_placements:
             er = network.create_edge_router(
@@ -182,42 +175,9 @@ def main():
                 provider=args.provider,
                 location_code=location['locationCode']
             )
-            hosted_edge_routers += [er]
-            print("INFO: Placed Edge Router in {provider} ({location_name})".format(
+            hosted_edge_routers.extend(er)
+            logging.info("placed router in {provider} ({location_name})".format(
                 provider=location['provider'],
-                location_name=location['locationName']
-            ))
-    elif args.regions:
-        if args.provider or args.location_codes:
-            print("WARN: ignoring provider and location_codes because AWS georegion is specified.")
-        geo_regions = args.regions
-        for region in geo_regions:
-            data_center_ids = [dc['locationCode'] for dc in network.aws_geo_regions[region]]
-            existing_count = len([er for er in hosted_edge_routers if er['locationCode'] in data_center_ids])
-            if existing_count < 1:
-                choice = random.choice(network.aws_geo_regions[region]) # nosec
-                # append the current major region to the randomly-chosen data center object
-                #   so we can use it as a role attribute when we create the hosted Edge Router
-                choice['geoRegion'] = region
-                fabric_placements += [choice]
-            else:
-                print("INFO: found a hosted Edge Router(s) in {major}".format(major=region))
-
-        for location in fabric_placements:
-            er = network.create_edge_router(
-                name=location['locationName']+" ["+location['geoRegion']+"]",
-                attributes=[
-                    "#defaultRouters",
-                    "#"+location['locationCode'],
-                    "#"+location['provider'],
-                    "#"+location['geoRegion']
-                ],
-                provider="AWS",
-                location_code=location['locationCode']
-            )
-            hosted_edge_routers += [er]
-            print("INFO: Placed Edge Router in {major} ({location_name})".format(
-                major=location['geoRegion'],
                 location_name=location['locationName']
             ))
 

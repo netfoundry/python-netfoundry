@@ -9,10 +9,10 @@ from unicodedata import name  # enforce a timeout; sleep
 
 from .utility import (DC_PROVIDERS, EXCLUDED_PATCH_PROPERTIES, MAJOR_REGIONS,
                       NETWORK_RESOURCES, STATUS_CODES, VALID_SEPARATORS,
-                      VALID_SERVICE_PROTOCOLS, Utility, docstring_parameters,
-                      eprint, http, is_uuidv4, plural, singular)
+                      VALID_SERVICE_PROTOCOLS, docstring_parameters,
+                      find_resources, get_resource, http, is_uuidv4, plural,
+                      singular, normalize_caseless)
 
-utility = Utility()
 
 class Network:
     """Describe and use a Network."""
@@ -25,7 +25,10 @@ class Network:
         :param str network_name: optional name of the network to describe and use
         :param str network_id: optional UUID of the network to describe and use
         """
-        self.session = NetworkGroup.session
+        self.token = NetworkGroup.token
+        self.proxies = NetworkGroup.proxies
+        self.verify = NetworkGroup.verify
+        self.audience = NetworkGroup.audience
 
         if (not network_id and not network_name) and network:
             if is_uuidv4(network):
@@ -55,10 +58,6 @@ class Network:
         self.created_at = self.describe['createdAt']
         self.updated_at = self.describe['updatedAt']
         self.created_by = self.describe['createdBy']
-
-        self.aws_geo_regions = dict()
-        for geo in MAJOR_REGIONS['AWS'].keys():
-            self.aws_geo_regions[geo] = [dc for dc in self.get_edge_router_data_centers(provider="AWS") if dc['locationName'] in MAJOR_REGIONS['AWS'][geo]]
 
     def endpoints(self, name: str=None, typeId: str=None):
         """Find endpoints.
@@ -269,35 +268,15 @@ class Network:
 
         :param id:        required UUIDv4 of data center
         """
+        url = self.audience+'core/v2/data-centers/'+id
+        headers = { "authorization": "Bearer " + self.token }
         try:
-            # data centers returns a list of dicts (data centers)
-            headers = { "authorization": "Bearer " + self.session.token }
-
-            response = http.get(
-                self.session.audience+'core/v2/data-centers/'+id,
-                proxies=self.session.proxies,
-                verify=self.session.verify,
-                headers=headers
-            )
-            response_code = response.status_code
+            data_center = get_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except:
+            logging.debug("failed to get data_center from url: '%s'", url)
             raise
-
-        if response_code == STATUS_CODES.codes.OK: # HTTP 200
-            try:
-                data_center = json.loads(response.text)
-            except ValueError as e:
-                eprint('ERROR getting data center')
-                raise(e)
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
-        return(data_center)
+            return(data_center)
 
     @docstring_parameters(providers=str(DC_PROVIDERS))
     def get_edge_router_data_centers(self, provider: str=None, location_code: str=None, **kwargs):
@@ -306,65 +285,27 @@ class Network:
         :param provider:        optionally filter by data center provider, choices: {providers}
         :param location_code:   provider-specific string identifying the data center location e.g. us-west-1
         """
-        try:
-            # data centers returns a list of dicts (data centers)
-            headers = { "authorization": "Bearer " + self.session.token }
-            params = {
-                "productVersion": self.product_version,
-                "hostType": "ER"
-            }
-            get_all_pages = True
-            for param in kwargs.keys():
-                if param == "locationCode" and not location_code:
-                    location_code = kwargs[param]
-                    logging.debug("got location_code from kwargs in network.get_edge_router_data_centers()")
-                else:
-                    params[param] = kwargs[param]
-            if not 'sort' in params.keys():
-                params["sort"] = "name,asc"
-            if not 'size' in params.keys():
-                params['size'] = 1000
-            else:
-                get_all_pages = False
-            if not 'page' in params.keys():
-                params['page'] = 0
-            else:
-                get_all_pages = False
-
-            if provider is not None:
-                if provider in DC_PROVIDERS:
-                    params['provider'] = provider
-                else:
-                    raise Exception("ERROR: unexpected cloud provider {:s}. Need one of {:s}".format(provider,str(DC_PROVIDERS)))
-            response = http.get(
-                self.session.audience+'core/v2/data-centers',
-                proxies=self.session.proxies,
-                verify=self.session.verify,
-                headers=headers,
-                params=params
-            )
-            response_code = response.status_code
-        except:
-            raise
-
-        if response_code == STATUS_CODES.codes.OK: # HTTP 200
-            try:
-                data_centers = response.json()['_embedded'][NETWORK_RESOURCES['data-centers']._embedded]
-            except ValueError as e:
-                logging.error('failed to load data centers response as object from JSON')
-                raise(e)
-        else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
+        params = dict()
+        for param in kwargs.keys():
+            params[param] = kwargs[param]
+        params["productVersion"] = self.product_version
+        params["hostType"] = "ER"
         if location_code:
-            matching_data_centers = [dc for dc in data_centers if dc['locationCode'] == location_code]
-            logging.debug("filtered %d data centers by location_code %s, %d remaining", len(data_centers), location_code, len(matching_data_centers))
-            return(matching_data_centers)
+            params["locationCode"] = location_code
+        if provider is not None:
+            if provider in DC_PROVIDERS:
+                params['provider'] = provider
+            else:
+                logging.error("unknown cloud provider '{:s}'. Need one of {:s}".format(provider,str(DC_PROVIDERS)))
+                raise RuntimeError
+
+        url = self.audience+'core/v2/data-centers'
+        headers = { "authorization": "Bearer " + self.token }
+        try:
+            data_centers = find_resources(url=url, headers=headers, embedded=NETWORK_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params)
+        except:
+            logging.debug("failed to get data-centers from url: '%s'", url)
+            raise
         else:
             return(data_centers)
 
@@ -375,7 +316,7 @@ class Network:
         """
         try:
             headers = {
-                "authorization": "Bearer " + self.session.token 
+                "authorization": "Bearer " + self.token 
             }
             body = [
                 {
@@ -385,9 +326,9 @@ class Network:
                 }
             ]
             response = http.post(
-                self.session.audience+'core/v2/endpoints/share',
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                self.audience+'core/v2/endpoints/share',
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers,
                 json=body
             )
@@ -418,12 +359,12 @@ class Network:
             type = singular(type)
 
         try:
-            headers = { "authorization": "Bearer " + self.session.token }
+            headers = { "authorization": "Bearer " + self.token }
             if accept and accept in ["create", "update"]:
                 headers['accept'] = "application/json;as="+accept
             elif accept:
                 raise Exception("ERROR: invalid value for param \"accept\" in {}".format(accept))
-            entity_url = self.session.audience+'core/v2/'+plural(type)+'/'+id
+            entity_url = self.audience+'core/v2/'+plural(type)+'/'+id
             params = dict()
             if not type == "network":
                 params["networkId"] = self.id
@@ -441,8 +382,8 @@ class Network:
 
             response = http.get(
                 entity_url,
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers,
                 params=params
             )
@@ -484,7 +425,7 @@ class Network:
         if type == "data-centers":
             logging.warn("don't call network.get_resources() for data centers, always use network.get_edge_router_data_centers() to filter for locations that support this network's version")
         try:
-            headers = { "authorization": "Bearer " + self.session.token }
+            headers = { "authorization": "Bearer " + self.token }
             if accept and accept in ["create", "update"]:
                 headers['accept'] = "application/json;as="+accept
             elif accept:
@@ -517,9 +458,9 @@ class Network:
                 params['embed'] = "host"
 
             response = http.get(
-                self.session.audience+'core/v2/'+type,
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                self.audience+'core/v2/'+type,
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers,
                 params=params
             )
@@ -531,7 +472,7 @@ class Network:
             try:
                 resources = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR: failed to load {r} object from GET response'.format(r = type))
+                logging.error('failed to load {r} object from GET response'.format(r = type))
                 raise(e)
         else:
             raise Exception(
@@ -559,9 +500,9 @@ class Network:
                 try:
                     params["page"] = page
                     response = http.get(
-                        self.session.audience+'core/v2/'+type,
-                        proxies=self.session.proxies,
-                        verify=self.session.verify,
+                        self.audience+'core/v2/'+type,
+                        proxies=self.proxies,
+                        verify=self.verify,
                         headers=headers,
                         params=params
                     )
@@ -574,7 +515,7 @@ class Network:
                         resources = json.loads(response.text)
                         all_entities.extend(resources['_embedded'][NETWORK_RESOURCES[type]._embedded])
                     except ValueError as e:
-                        eprint('ERROR: failed to load resources object from GET response')
+                        logging.error('failed to load resources object from GET response')
                         raise(e)
                 else:
                     raise Exception(
@@ -595,8 +536,8 @@ class Network:
         """
         normal_names = list()
         for normal in self.get_resources(name=name, type=type, deleted=deleted):
-            normal_names.append(utility.normalize_caseless(normal['name']))
-        if utility.normalize_caseless(name) in normal_names:
+            normal_names.append(normalize_caseless(normal['name']))
+        if normalize_caseless(name) in normal_names:
             return(True)
         else:
             return(False)
@@ -610,7 +551,7 @@ class Network:
             :param id: optional entity ID, needed if put object lacks a self link, ignored if self link present
         """
         headers = {
-            "authorization": "Bearer " + self.session.token,
+            "authorization": "Bearer " + self.token,
             "content-type": "application/json"
         }
 
@@ -618,7 +559,7 @@ class Network:
         try: 
             self_link = patch['_links']['self']['href']
         except KeyError:
-            try: self_link = self.session.audience+'core/v2/'+plural(type)+'/'+id
+            try: self_link = self.audience+'core/v2/'+plural(type)+'/'+id
             except NameError as e:
                 raise(e)
         else: type = self_link.split('/')[5] # e.g. endpoints, app-wans, edge-routers, etc...
@@ -630,8 +571,8 @@ class Network:
         try:
             before_response = http.get(
                 self_link,
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers
             )
             before_response_code = before_response.status_code
@@ -642,7 +583,7 @@ class Network:
             try:
                 before_resource = json.loads(before_response.text)
             except ValueError as e:
-                eprint('ERROR: failed to load {r} object from GET response'.format(r = type))
+                logging.error('failed to load {r} object from GET response'.format(r = type))
                 raise(e)
         else:
             json_formatted = json.dumps(patch, indent=2)
@@ -665,7 +606,7 @@ class Network:
                     if not before_resource[k] == patch[k]:
                         pruned_patch[k] = patch[k]
         headers = {
-            "authorization": "Bearer " + self.session.token
+            "authorization": "Bearer " + self.token
         }
 
         # attempt to update if there's at least one difference between the current resource and the submitted patch
@@ -680,8 +621,8 @@ class Network:
                 #     import epdb; epdb.serve()
                 after_response = http.patch(
                     patch['_links']['self']['href'],
-                    proxies=self.session.proxies,
-                    verify=self.session.verify,
+                    proxies=self.proxies,
+                    verify=self.verify,
                     headers=headers,
                     json=pruned_patch
                 )
@@ -692,7 +633,7 @@ class Network:
                 try:
                     after_resource = json.loads(after_response.text)
                 except ValueError as e:
-                    eprint('ERROR: failed to load {r} object from PATCH response'.format(r = type))
+                    logging.error('failed to load {r} object from PATCH response'.format(r = type))
                     raise(e)
             else:
                 json_formatted = json.dumps(patch, indent=2)
@@ -756,7 +697,7 @@ class Network:
                 else:
                     logging.error('missing id of {type} to update, need put object with "self" link, "id" property, or need "id" param'.format(type=type))
                     raise Exception('missing id of {type} to update, need put object with "self" link, "id" property, or need "id" param'.format(type=type))
-            try: self_link = self.session.audience+'core/v2/'+plural(type)+'/'+id
+            try: self_link = self.audience+'core/v2/'+plural(type)+'/'+id
             except NameError as e:
                 raise(e)
         else:
@@ -764,12 +705,12 @@ class Network:
             #id = self_link.split('/')[6] # UUIDv4 from self reference URL # not currently using this if we already have the self link
         try:
             headers = {
-                "authorization": "Bearer " + self.session.token 
+                "authorization": "Bearer " + self.token 
             }
             response = http.put(
                 self_link,
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers,
                 json=put
             )
@@ -781,7 +722,7 @@ class Network:
             try:
                 resource = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR: failed to load {r} object from PUT response'.format(r = type))
+                logging.error('failed to load {r} object from PUT response'.format(r = type))
                 raise(e)
         else:
             json_formatted = json.dumps(put, indent=2)
@@ -830,13 +771,13 @@ class Network:
         """
         try:
             headers = {
-                "authorization": "Bearer " + self.session.token 
+                "authorization": "Bearer " + self.token 
             }
             post['networkId'] = self.id
             response = http.post(
-                self.session.audience+'core/v2/'+plural(type),
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                self.audience+'core/v2/'+plural(type),
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers,
                 json=post
             )
@@ -848,7 +789,7 @@ class Network:
             try:
                 resource = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR: failed to load {r} object from POST response'.format(r = type))
+                logging.error('failed to load {r} object from POST response'.format(r = type))
                 raise(e)
         else:
             json_formatted = json.dumps(post, indent=2)
@@ -898,7 +839,7 @@ class Network:
         """
         try:
             headers = { 
-                "authorization": "Bearer " + self.session.token 
+                "authorization": "Bearer " + self.token 
             }
             for role in attributes:
                 if not role[0:1] == '#':
@@ -914,9 +855,9 @@ class Network:
                 body['sessionIdentityId'] = session_identity
 
             response = http.post(
-                self.session.audience+'core/v2/endpoints',
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                self.audience+'core/v2/endpoints',
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers,
                 json=body
             )
@@ -990,7 +931,7 @@ class Network:
         """
         try:
             headers = { 
-                "authorization": "Bearer " + self.session.token 
+                "authorization": "Bearer " + self.token 
             }
             for role in attributes:
                 if not role[0:1] == '#':
@@ -1003,7 +944,7 @@ class Network:
                 "tunnelerEnabled": tunneler_enabled
             }
             if data_center_id:
-                eprint('WARN: data_center_id is deprecated by provider, location_code. ')
+                logging.warning('data_center_id is deprecated by provider, location_code. ')
                 data_center = self.get_data_center_by_id(id=data_center_id)
                 body['provider'] = data_center['provider']
                 body['locationCode'] = data_center['locationCode']
@@ -1023,9 +964,9 @@ class Network:
                     raise Exception("ERROR: need both provider and location_code to create a hosted router.")
 
             response = http.post(
-                self.session.audience+'core/v2/edge-routers',
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                self.audience+'core/v2/edge-routers',
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers,
                 json=body
             )
@@ -1038,7 +979,7 @@ class Network:
             try:
                 started = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR: failed to load {:s} object from POST response'.format("Edge Router"))
+                logging.error('failed to load {:s} object from POST response'.format("Edge Router"))
                 raise(e)
             else:
 #                print('DEBUG: created Edge Router trace ID {:s}'.format(response.headers._store['x-b3-traceid'][1]))
@@ -1090,7 +1031,7 @@ class Network:
         """
         try:
             headers = { 
-                "authorization": "Bearer " + self.session.token 
+                "authorization": "Bearer " + self.token 
             }
             for role in endpoint_attributes+edge_router_attributes:
                 if not re.match('^[#@]', role):
@@ -1102,9 +1043,9 @@ class Network:
                 "edgeRouterAttributes": edge_router_attributes
             }
             response = http.post(
-                self.session.audience+'core/v2/edge-router-policies',
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                self.audience+'core/v2/edge-router-policies',
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers,
                 json=body
             )
@@ -1117,7 +1058,7 @@ class Network:
             try:
                 started = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR: failed to load {:s} object from POST response'.format("Edge Router Policy"))
+                logging.error('failed to load {:s} object from POST response'.format("Edge Router Policy"))
                 raise(e)
         else:
             raise Exception(
@@ -1165,7 +1106,7 @@ class Network:
         """
         try:
             headers = { 
-                "authorization": "Bearer " + self.session.token 
+                "authorization": "Bearer " + self.token 
             }
             for role in attributes:
                 if not role[0:1] == '#':
@@ -1187,7 +1128,7 @@ class Network:
             if not server_host_name:
                 body['modelType'] = "TunnelerToSdk"
                 if server_port:
-                    eprint("WARN: ignoring unexpected server details for SDK-hosted service")
+                    logging.warning("ignoring unexpected server details for SDK-hosted service")
             else:
                 server_egress = {
                     "protocol": server_protocol.lower(),
@@ -1216,7 +1157,7 @@ class Network:
                 
             # resolve Edge Router param
             if edge_router_attributes and not edge_router_attributes == ['#all']:
-                eprint("WARN: overriding default service Edge Router Policy #all for new service {:s}".format(name))
+                logging.warning("overriding default service Edge Router Policy #all for new service {:s}".format(name))
                 body['edgeRouterAttributes'] = edge_router_attributes
 
             if body['modelType'] in ["TunnelerToSdk","TunnelerToEndpoint"]:
@@ -1255,9 +1196,9 @@ class Network:
             # }
 
             response = http.post(
-                self.session.audience+'core/v2/services',
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                self.audience+'core/v2/services',
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers,
                 json=body,
                 params=params
@@ -1271,7 +1212,7 @@ class Network:
             try:
                 started = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR: failed to load {:s} object from POST response'.format("service"))
+                logging.error('failed to load {:s} object from POST response'.format("service"))
                 raise(e)
         else:
             raise Exception(
@@ -1330,7 +1271,7 @@ class Network:
         valid_postures = self.validate_entity_roles(posture_checks, type="posture-checks")
         try:
             headers = { 
-                "authorization": "Bearer " + self.session.token 
+                "authorization": "Bearer " + self.token 
             }
             body = {
                 "networkId": self.id,
@@ -1351,9 +1292,9 @@ class Network:
                 return(body)
 
             response = http.post(
-                self.session.audience+'core/v2/service-policies',
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                self.audience+'core/v2/service-policies',
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers,
                 json=body,
                 params=params
@@ -1368,7 +1309,7 @@ class Network:
             try:
                 started = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR: failed to load {:s} object from POST response'.format("service policy"))
+                logging.error('failed to load {:s} object from POST response'.format("service policy"))
                 raise(e)
         else:
             raise Exception(
@@ -1421,7 +1362,7 @@ class Network:
         valid_routers = self.validate_entity_roles(edge_routers, type="edge-routers")
         try:
             headers = { 
-                "authorization": "Bearer " + self.session.token 
+                "authorization": "Bearer " + self.token 
             }
             body = {
                 "networkId": self.id,
@@ -1440,9 +1381,9 @@ class Network:
                 return(body)
 
             response = http.post(
-                self.session.audience+'core/v2/service-edge-router-policies',
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                self.audience+'core/v2/service-edge-router-policies',
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers,
                 json=body,
                 params=params
@@ -1457,7 +1398,7 @@ class Network:
             try:
                 started = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR: failed to load {:s} object from POST response'.format("service edge router policy"))
+                logging.error('failed to load {:s} object from POST response'.format("service edge router policy"))
                 raise(e)
         else:
             raise Exception(
@@ -1512,7 +1453,7 @@ class Network:
                     raise Exception('ERROR: invalid role "{:s}". Must begin with "#"'.format(role))
 
             headers = { 
-                "authorization": "Bearer " + self.session.token 
+                "authorization": "Bearer " + self.token 
             }
             body = {
                 "networkId": self.id,
@@ -1544,9 +1485,9 @@ class Network:
                 return(body)
 
             response = http.post(
-                self.session.audience+'core/v2/services',
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                self.audience+'core/v2/services',
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers,
                 json=body,
                 params=params
@@ -1561,7 +1502,7 @@ class Network:
             try:
                 started = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR: failed to load {:s} object from POST response'.format("service"))
+                logging.error('failed to load {:s} object from POST response'.format("service"))
                 raise(e)
         else:
             raise Exception(
@@ -1833,7 +1774,7 @@ class Network:
                         else: bind_endpoints.append('@'+endpoint_name) # is an existing endpoint's name
 
             headers = { 
-                "authorization": "Bearer " + self.session.token 
+                "authorization": "Bearer " + self.token 
             }
             body = {
                 "networkId": self.id,
@@ -1862,9 +1803,9 @@ class Network:
                 return(body)
 
             response = http.post(
-                self.session.audience+'core/v2/services',
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                self.audience+'core/v2/services',
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers,
                 json=body,
                 params=params
@@ -1879,7 +1820,7 @@ class Network:
             try:
                 started = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR: failed to load {:s} object from POST response'.format("service"))
+                logging.error('failed to load {:s} object from POST response'.format("service"))
                 raise(e)
         else:
             raise Exception(
@@ -1930,7 +1871,7 @@ class Network:
         """
         try:
             headers = { 
-                "authorization": "Bearer " + self.session.token 
+                "authorization": "Bearer " + self.token 
             }
             for role in endpoint_attributes+service_attributes+posture_check_attributes:
                 if not re.match('^[#@]', role):
@@ -1944,9 +1885,9 @@ class Network:
             }
 
             response = http.post(
-                self.session.audience+'core/v2/app-wans',
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                self.audience+'core/v2/app-wans',
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers,
                 json=body
             )
@@ -1959,7 +1900,7 @@ class Network:
             try:
                 started = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR: failed to load {:s} object from POST response'.format("AppWAN"))
+                logging.error('failed to load {:s} object from POST response'.format("AppWAN"))
                 raise(e)
         else:
             raise Exception(
@@ -1985,7 +1926,7 @@ class Network:
         """
         try:
             headers = { 
-                "authorization": "Bearer " + self.session.token 
+                "authorization": "Bearer " + self.token 
             }
             params = {
                 "findByName": name
@@ -1994,9 +1935,9 @@ class Network:
                 params['findByNetworkGroupId'] = group
 
             response = http.get(
-                self.session.audience+'core/v2/networks',
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                self.audience+'core/v2/networks',
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers,
                 params=params
             )
@@ -2008,7 +1949,7 @@ class Network:
             try:
                 networks = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR: failed to load endpoints object from GET response')
+                logging.error('failed to load endpoints object from GET response')
                 raise(e)
         else:
             raise Exception(
@@ -2032,12 +1973,12 @@ class Network:
         """
         try:
             headers = { 
-                "authorization": "Bearer " + self.session.token 
+                "authorization": "Bearer " + self.token 
             }
             response = http.get(
-                self.session.audience+'core/v2/networks/'+network_id,
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                self.audience+'core/v2/networks/'+network_id,
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers
             )
             response_code = response.status_code
@@ -2048,7 +1989,7 @@ class Network:
             try:
                 network = json.loads(response.text)
             except ValueError as e:
-                eprint('ERROR: failed to load {r} object from GET response'.format(r = "network"))
+                logging.error('failed to load {r} object from GET response'.format(r = "network"))
                 raise(e)
         else:
             raise Exception(
@@ -2068,12 +2009,12 @@ class Network:
         :param id: the UUID of the network controller
         """
         try:
-            headers = { "authorization": "Bearer " + self.session.token }
-            entity_url = self.session.audience+'core/v2/network-controllers/'+id+'/secrets'
+            headers = { "authorization": "Bearer " + self.token }
+            entity_url = self.audience+'core/v2/network-controllers/'+id+'/secrets'
             response = http.get(
                 entity_url,
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers
             )
             response_code = response.status_code
@@ -2107,12 +2048,12 @@ class Network:
         :param id: the UUID of the network controller
         """
         try:
-            headers = { "authorization": "Bearer " + self.session.token }
-            entity_url = self.session.audience+'core/v2/network-controllers/'+id+'/session'
+            headers = { "authorization": "Bearer " + self.token }
+            entity_url = self.audience+'core/v2/network-controllers/'+id+'/session'
             response = http.get(
                 entity_url,
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers
             )
             response_code = response.status_code
@@ -2449,7 +2390,7 @@ class Network:
         :param id: the UUID of the entity having a status if not a network
         """
         try:
-            headers = { "authorization": "Bearer " + self.session.token }
+            headers = { "authorization": "Bearer " + self.token }
 
             params = dict()
             if not type == "network":
@@ -2457,7 +2398,7 @@ class Network:
             # elif type == "service": 
             #     params["beta"] = ''
 
-            entity_url = self.session.audience+'core/v2/'
+            entity_url = self.audience+'core/v2/'
             if type == 'network':
                 entity_url += 'networks/'+self.id
             elif type == 'process':
@@ -2469,8 +2410,8 @@ class Network:
 
             response = http.get(
                 entity_url,
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers,
                 params=params
             )
@@ -2487,9 +2428,9 @@ class Network:
                 elif 'processorName' in object.keys():
                     name = object['processorName']
                 else:
-                    eprint('WARN: no "name" property found')
+                    logging.warning('no "name" property found')
             except:
-                eprint('ERROR parsing entity object in response')
+                logging.error('failed parsing entity object in response')
                 raise
             else:
                 return {
@@ -2510,12 +2451,12 @@ class Network:
         :param id: the UUID of the edge router
         """
         try:
-            headers = { "authorization": "Bearer " + self.session.token }
-            entity_url = self.session.audience+'core/v2/edge-routers/'+id+'/registration-key'
+            headers = { "authorization": "Bearer " + self.token }
+            entity_url = self.audience+'core/v2/edge-routers/'+id+'/registration-key'
             response = http.post(
                 entity_url,
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers,
             )
             response_code = response.status_code
@@ -2548,8 +2489,8 @@ class Network:
         :param wait: optional seconds to wait for entity destruction
         """
         try:
-            headers = { "authorization": "Bearer " + self.session.token }
-            entity_url = self.session.audience+'core/v2/networks/'+self.id
+            headers = { "authorization": "Bearer " + self.token }
+            entity_url = self.audience+'core/v2/networks/'+self.id
             expected_responses = [
                 STATUS_CODES.codes.ACCEPTED,
                 STATUS_CODES.codes.OK
@@ -2557,7 +2498,7 @@ class Network:
             if not type == 'network':
                 if id is None:
                     raise Exception("ERROR: need entity UUID to delete")
-                entity_url = self.session.audience+'core/v2/'+plural(type)+'/'+id
+                entity_url = self.audience+'core/v2/'+plural(type)+'/'+id
             logging.debug("deleting {:s}".format(entity_url))
             params = dict()
             # if type == "service":
@@ -2565,8 +2506,8 @@ class Network:
 
             response = http.delete(
                 entity_url,
-                proxies=self.session.proxies,
-                verify=self.session.verify,
+                proxies=self.proxies,
+                verify=self.verify,
                 headers=headers,
                 params=params
             )
