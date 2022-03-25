@@ -11,11 +11,9 @@ from pathlib import Path
 from platformdirs import user_cache_path, user_config_path
 
 from .exceptions import NFAPINoCredentials
-from .utility import (DEFAULT_TOKEN_EXPIRY, ENVIRONMENTS, MUTABLE_NETWORK_RESOURCES,
-                      NETWORK_RESOURCES, RESOURCES, STATUS_CODES, Utility,
-                      eprint, http, is_uuidv4)
-
-utility = Utility()
+from .utility import (DEFAULT_TOKEN_EXPIRY, ENVIRONMENTS,
+                      MUTABLE_NETWORK_RESOURCES, NETWORK_RESOURCES, RESOURCES,
+                      STATUS_CODES, http, is_uuidv4)
 
 
 class Organization:
@@ -41,9 +39,9 @@ class Organization:
         organization_label: str=None,
         profile: str="default",
         token: str=None,
-        authorization: dict=dict(),
         expiry_minimum: int=600,
         environment: str=None,
+        logout: bool=False,
         proxy: str=None):
         """Initialize an instance of organization."""
         # verify auth endpoint's server certificate if proxy is type SOCKS or None
@@ -67,7 +65,6 @@ class Organization:
         password = None
         token_endpoint = None
         credentials_configured = False
-        write_token_cache = False # will set True if token is renewed
 
         if profile is None:
             profile = "default"
@@ -78,7 +75,11 @@ class Organization:
             self.environment = environment
 
         # the token_cache dict is the schema for the file that persists what we think we know about the session
-        token_cache = dict() # { 'access_token': JWT, 'expires_in': SECONDS_UNTIL_EXPIRY, 'audience': GATEWAY_SERVICE_URL }
+        token_cache = {
+            'token': None,
+            'expiry': None,
+            'audience': None
+        }
         cache_dir_path = user_cache_path(appname='netfoundry')
         token_cache_file_name = self.profile+'.json'
         config_dir_path = user_config_path(appname='netfoundry')
@@ -95,6 +96,15 @@ class Organization:
             logging.debug("token cache dir exists with mode %s", stat.filemode(cache_dir_stats.st_mode))
         self.token_cache_file_path = Path(cache_dir_path / token_cache_file_name)
         logging.debug("cache file path is computed '%s'", self.token_cache_file_path.__str__())
+
+        # short circuit if logout only
+        if logout:
+            try:
+                self.logout()
+            except Exception as e:
+                logging.error("unexpected error while logging out: %s", e)
+            else:
+                return None
 
         # if not token then use standard env var if defined, else look for cached token in file
         if token is not None:
@@ -128,6 +138,9 @@ class Organization:
                 self.expiry = epoch + DEFAULT_TOKEN_EXPIRY
                 self.expiry_seconds = DEFAULT_TOKEN_EXPIRY
                 logging.debug("failed to parse token as JWT, estimating expiry in %ds", DEFAULT_TOKEN_EXPIRY)
+            else:
+                self.expiry_seconds = self.expiry - epoch
+                logging.debug("bearer token expiry in %ds", self.expiry_seconds)
         elif not self.token:
             logging.debug("no bearer token found")
 
@@ -213,10 +226,10 @@ class Organization:
         if not credentials_configured:
             logging.debug("token renewal impossible because API account credentials are not configured")
 
-        # the purpose of this try-except block is to soft-fail all attempts
-        # to parse the JWT, which is intended for the API, not this
-        # application
-        if self.token and not self.environment:
+        # The purpose of this flow is to compose the audience URL. The mode of
+        # the try-except block is to soft-fail all attempts to parse the JWT,
+        # which is intended for the API, not this application
+        if not self.audience and self.token and not self.environment:
             try:
                 self.environment = utility.jwt_environment(self.token)
             except:
@@ -256,6 +269,8 @@ class Organization:
         if not self.token or self.expiry_seconds < expiry_minimum:
             # we've already done the work to determine the cached token is expired or imminently-expiring, might as well save other runs the same trouble
             self.logout()
+            self.expiry = None
+            self.audience = None
             if self.token and self.expiry_seconds < expiry_minimum:
                 logging.debug("token expiry %ds is less than configured minimum %ds", self.expiry_seconds, expiry_minimum)
             if not credentials_configured:
@@ -263,7 +278,6 @@ class Organization:
                 raise NFAPINoCredentials("credentials needed to renew token")
             else:
                 logging.debug("renewing token with credentials")
-                write_token_cache = True
 
             # extract the environment name from the authorization URL aka token API endpoint
             if self.environment is None:
@@ -319,21 +333,30 @@ class Organization:
         else:
             logging.debug("found token with %ss until expiry", self.expiry_seconds)
 
-        if write_token_cache:
-            # cache token state w/ expiry and Gateway Service audience URL
-            try:
-                # set file mode 0o600 at creation
-                self.token_cache_file_path.touch(mode=stat.S_IRUSR|stat.S_IWUSR)
-                token_cache_out = {
-                    'token': self.token,
-                    'expiry': self.expiry,
-                    'audience': self.audience
-                }
-                self.token_cache_file_path.write_text(json.dumps(token_cache_out, indent=4))
-            except:
-                logging.warn("failed to cache token in '%s'", self.token_cache_file_path.__str__())
+        # write to the token cache if we have all three things: the token,
+        # expiry, and audience URL, unless it matches the token cache, which
+        # would mean we would be needlessly writing the same token back to the
+        # same cache. 
+        if self.token and self.expiry and self.audience:
+            if not token_cache['token'] == self.token:
+                # cache token state w/ expiry and Gateway Service audience URL
+                try:
+                    # set file mode 0o600 at creation
+                    self.token_cache_file_path.touch(mode=stat.S_IRUSR|stat.S_IWUSR)
+                    token_cache_out = {
+                        'token': self.token,
+                        'expiry': self.expiry,
+                        'audience': self.audience
+                    }
+                    self.token_cache_file_path.write_text(json.dumps(token_cache_out, indent=4))
+                except:
+                    logging.warn("failed to cache token in '%s'", self.token_cache_file_path.__str__())
+                else:
+                    logging.debug("cached token in '%s'", self.token_cache_file_path.__str__())
             else:
-                logging.debug("cached token in '%s'", self.token_cache_file_path.__str__())
+                logging.debug("not caching token because it exactly matches the existing cache")
+        else:
+            logging.debug("not caching token because not all of token, expiry, audience were found")
 
         # Obtain a session token and find own `.caller` identity and `.organizations`
         self.caller = self.get_caller_identity()
@@ -481,6 +504,13 @@ class Organization:
         params = dict()
         for param in kwargs.keys():
             params[param] = kwargs[param]
+        if 'sort' in params.keys():
+            logging.warn("query param 'sort' is not supported by Identity Service")
+        if 'size' in params.keys():
+            logging.warn("query param 'size' is not supported by Identity Service")
+        if 'page' in params.keys():
+            logging.warn("query param 'page' is not supported by Identity Service")
+
         try:
             headers = { "authorization": "Bearer " + self.token }
             response = http.get(
@@ -519,6 +549,13 @@ class Organization:
         params = dict()
         for param in kwargs.keys():
             params[param] = kwargs[param]
+        if 'sort' in params.keys():
+            logging.warn("query param 'sort' is not supported by Identity Service")
+        if 'size' in params.keys():
+            logging.warn("query param 'size' is not supported by Identity Service")
+        if 'page' in params.keys():
+            logging.warn("query param 'page' is not supported by Identity Service")
+
         try:
             headers = { "authorization": "Bearer " + self.token }
             response = http.get(
@@ -550,8 +587,7 @@ class Organization:
         return(organizations)
 
     def get_organization(self, id):
-        """return a single organizations by ID
-        """
+        """Get a single organizations by ID."""
         try:
             headers = { "authorization": "Bearer " + self.token }
             response = http.get(
@@ -676,12 +712,20 @@ class Organization:
 
         :param str kwargs: filter results by any supported query param
         """
-        params = {
-            'size': 1000,
-            'page': 0
-        }
+        params = dict()
+        get_all_pages = True
         for param in kwargs.keys():
-            params[param] = kwargs[param]            
+            params[param] = kwargs[param]
+        if not 'sort' in params.keys():
+            params['sort'] = "name,asc"
+        if not 'size' in params.keys():
+            params['size'] = 1000
+        else:
+            get_all_pages = False
+        if not 'page' in params.keys():
+            params['page'] = 0
+        else:
+            get_all_pages = False
         try:
             # /network-groups returns a list of dicts (Network Group objects)
             headers = { "authorization": "Bearer " + self.token }
@@ -720,7 +764,7 @@ class Organization:
             network_groups = response_object['_embedded'][RESOURCES['network-groups']._embedded]
 
         # if there is one page of resources
-        if total_pages == 1:
+        if total_pages == 1 or not get_all_pages:
             return network_groups
         # if there are multiple pages of resources
         else:
@@ -759,28 +803,34 @@ class Organization:
     network_groups = get_network_groups_by_organization
 
     def get_networks_by_organization(self, name: str=None, deleted: bool=False, **kwargs):
-        """Find networks known to this organization.
+        """
+        Find networks known to this organization.
 
         :param str name: filter results by name
         :param str kwargs: filter results by any supported query param
         :param bool deleted: include resource entities that have a non-null property deletedAt
         """
+        params = dict()
+        get_all_pages = True
+        for param in kwargs.keys():
+            params[param] = kwargs[param]
+        if not 'sort' in params.keys():
+            params['sort'] = "name,asc"
+        if not 'size' in params.keys():
+            params['size'] = 1000
+        else:
+            get_all_pages = False
+        if not 'page' in params.keys():
+            params['page'] = 0
+        else:
+            get_all_pages = False
+        if name is not None:
+            params['findByName'] = name
+        if deleted:
+            params['status'] = "DELETED"
+
         try:
             headers = { "authorization": "Bearer " + self.token }
-
-            params = {
-                "page": 0,
-                "size": 100,
-                "sort": "name,asc"
-            }
-
-            for param in kwargs.keys():
-                params[param] = kwargs[param]            
-            if name is not None:
-                params['findByName'] = name
-            if deleted:
-                params['status'] = "DELETED"
-
             response = http.get(
                 self.audience+'core/v2/networks',
                 proxies=self.proxies,
@@ -813,7 +863,7 @@ class Organization:
         if total_elements == 0:
             return([])
         # if there is one page of resources
-        elif total_pages == 1:
+        elif total_pages == 1 or not get_all_pages:
             all_entities = resources['_embedded'][RESOURCES['networks']._embedded]
         # if there are multiple pages of resources
         else:
@@ -882,23 +932,34 @@ class Organization:
 
         return normal_names.count(utility.normalize_caseless(name))
 
-    def get_networks_by_group(self,network_group_id: str, deleted: bool=False, **kwargs):
+    def get_networks_by_group(self, network_group_id: str, deleted: bool=False, **kwargs):
         """Find networks by network group ID.
 
         :param network_group_id: required network group UUIDv4
         :param str kwargs: filter results by logical AND query parameters
         """
+        params = {
+            "findByNetworkGroupId": network_group_id
+        }
+        get_all_pages = True
+        for param in kwargs.keys():
+            params[param] = kwargs[param]
+        if not 'sort' in params.keys():
+            params['sort'] = "name,asc"
+        if not 'size' in params.keys():
+            params['size'] = 1000
+        else:
+            get_all_pages = False
+        if not 'page' in params.keys():
+            params['page'] = 0
+        else:
+            get_all_pages = False
+
+        if deleted:
+            params['status'] = "DELETED"
+
         try:
-            headers = { 
-                "authorization": "Bearer " + self.token 
-            }
-            params = {
-                "findByNetworkGroupId": network_group_id
-            }
-            for param in kwargs.keys():
-                params[param] = kwargs[param]
-            if deleted:
-                params['status'] = "DELETED"
+            headers = { "authorization": "Bearer " + self.token }
             response = http.get(
                 self.audience+'core/v2/networks',
                 proxies=self.proxies,
@@ -917,9 +978,9 @@ class Organization:
                 logging.error("response is not JSON")
                 raise ValueError("response is not JSON")
             try:
-                networks = embedded['_embedded'][RESOURCES['networks']._embedded]
+                resources = embedded['_embedded'][RESOURCES['networks']._embedded]
             except KeyError:
-                networks = list()
+                resources = list()
         else:
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
@@ -929,4 +990,46 @@ class Organization:
                 )
             )
 
-        return(networks)
+        total_pages = resources['page']['totalPages']
+        total_elements = resources['page']['totalElements']
+        # if there are no resources
+        if total_elements == 0:
+            return([])
+        # if there is one page of resources
+        elif total_pages == 1 or not get_all_pages:
+            all_entities = resources['_embedded'][RESOURCES['networks']._embedded]
+        # if there are multiple pages of resources
+        else:
+            # initialize the list with the first page of resources
+            all_entities = resources['_embedded'][RESOURCES['networks']._embedded]
+            # append the remaining pages of resources
+            for page in range(1,total_pages):
+                try:
+                    params["page"] = page
+                    response = http.get(
+                        self.audience+'core/v2/networks',
+                        proxies=self.proxies,
+                        verify=self.verify,
+                        headers=headers,
+                        params=params
+                    )
+                    response_code = response.status_code
+                except:
+                    raise
+
+                if response_code == STATUS_CODES.codes.OK: # HTTP 200
+                    try:
+                        resources = json.loads(response.text)
+                        all_entities.extend(resources['_embedded'][RESOURCES['networks']._embedded])
+                    except ValueError as e:
+                        eprint('ERROR: failed to load resources object from GET response')
+                        raise(e)
+                else:
+                    raise Exception(
+                        'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                            STATUS_CODES._codes[response_code][0].upper(),
+                            response_code,
+                            response.text
+                        )
+                    )
+        return(all_entities)

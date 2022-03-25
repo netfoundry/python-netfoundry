@@ -3,7 +3,7 @@
 import json
 import logging
 
-from .utility import RESOURCES, STATUS_CODES, Utility, http, is_uuidv4
+from .utility import RESOURCES, STATUS_CODES, NETWORK_RESOURCES, Utility, http, is_uuidv4
 
 utility = Utility()
 
@@ -103,16 +103,30 @@ class NetworkGroup:
         else:
             return(False)
 
-    def get_controller_data_centers(self):
+    def get_controller_data_centers(self, **kwargs):
         """Find controller data centers."""
+        # data centers returns a list of dicts (data center objects)
+        params = {
+            "productVersion": self.product_version,
+            "hostType": "NC",
+            "provider": "AWS"
+        }
+        get_all_pages = True
+        for param in kwargs.keys():
+            params[param] = kwargs[param]
+        if not 'sort' in params.keys():
+            params["sort"] = "name,asc"
+        if not 'size' in params.keys():
+            params['size'] = 1000
+        else:
+            get_all_pages = False
+        if not 'page' in params.keys():
+            params['page'] = 0
+        else:
+            get_all_pages = False
+
         try:
-            # data centers returns a list of dicts (data center objects)
             headers = { "authorization": "Bearer " + self.session.token }
-            params = {
-                # "productVersion": self.product_version,
-                # "hostType": "NC",
-                # "provider": "AWS"
-            }
             response = http.get(
                 self.session.audience+'core/v2/data-centers',
                 proxies=self.session.proxies,
@@ -126,10 +140,9 @@ class NetworkGroup:
 
         if response_code == STATUS_CODES.codes.OK: # HTTP 200
             try:
-                all_data_centers = json.loads(response.text)['_embedded']['dataCenters']
-                aws_data_centers = [dc for dc in all_data_centers if dc['provider'] == "AWS"]
+                resources = json.loads(response.text)
             except ValueError as e:
-                logging.error('failed to find data centers')
+                logging.error('requested data centers and failed to parse response as JSON')
                 raise(e)
         else:
             raise Exception(
@@ -140,7 +153,50 @@ class NetworkGroup:
                 )
             )
 
-        return(aws_data_centers)
+        total_pages = resources['page']['totalPages']
+        total_elements = resources['page']['totalElements']
+        # if there are no resources
+        if total_elements == 0:
+            return([])
+        else:
+            try:
+                all_entities = resources['_embedded'][NETWORK_RESOURCES['data-centers']._embedded]
+            except KeyError:
+                logging.error("missing key in valid JSON response: %s", '_embedded.'+NETWORK_RESOURCES['data-centers']._embedded)
+                raise
+
+        # if there are multiple pages of resources
+        if get_all_pages and total_pages > 1:
+            # append the remaining pages of resources
+            for page in range(1,total_pages):
+                try:
+                    params["page"] = page
+                    response = http.get(
+                        self.session.audience+'core/v2/data-centers',
+                        proxies=self.session.proxies,
+                        verify=self.session.verify,
+                        headers=headers,
+                        params=params
+                    )
+                    response_code = response.status_code
+                except:
+                    raise
+
+                if response_code == STATUS_CODES.codes.OK: # HTTP 200
+                    try:
+                        resources = json.loads(response.text)['_embedded'][NETWORK_RESOURCES['data-centers']._embedded]
+                    except ValueError as e:
+                        logging.error('requested data centers and failed to parse response as JSON')
+                        raise(e)
+                else:
+                    raise Exception(
+                        'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
+                            STATUS_CODES._codes[response_code][0].upper(),
+                            response_code,
+                            response.text
+                        )
+                    )
+        return(all_entities)
 
     # provide a compatible alias
     nc_data_centers = get_controller_data_centers

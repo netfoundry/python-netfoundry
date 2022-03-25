@@ -313,12 +313,24 @@ class Network:
                 "productVersion": self.product_version,
                 "hostType": "ER"
             }
+            get_all_pages = True
             for param in kwargs.keys():
                 if param == "locationCode" and not location_code:
                     location_code = kwargs[param]
                     logging.debug("got location_code from kwargs in network.get_edge_router_data_centers()")
                 else:
                     params[param] = kwargs[param]
+            if not 'sort' in params.keys():
+                params["sort"] = "name,asc"
+            if not 'size' in params.keys():
+                params['size'] = 1000
+            else:
+                get_all_pages = False
+            if not 'page' in params.keys():
+                params['page'] = 0
+            else:
+                get_all_pages = False
+
             if provider is not None:
                 if provider in DC_PROVIDERS:
                     params['provider'] = provider
@@ -459,7 +471,7 @@ class Network:
     def get_resources(self, type: str, accept: str=None, deleted: bool=False, **kwargs):
         """Find resources by type.
 
-        :param str type: plural of an entity type e.g. networks, endpoints, services, posture-checks, etc...
+        :param str type: plural of an entity type in the network domain e.g. networks, endpoints, services, posture-checks, etc...
         :param str kwargs: filter results by logical AND query parameters
         :param str accept: specifying the form of the desired response. Choices ["create","update"] where
                 "create" is useful for comparing an existing entity to a set of properties that are used to create the same type of
@@ -481,21 +493,27 @@ class Network:
 
             params = {
                 "networkId": self.id,
-                "page": 0,
-                "size": 1000,
             }
-            # if type == "services": 
-            #     params["beta"] = ''
-            if not type == "hosts":
-                params["sort"] = "name,asc"
+            get_all_pages = True
             for param in kwargs.keys():
                 params[param] = kwargs[param]
+            if not 'sort' in params.keys():
+                params["sort"] = "name,asc"
+            if not 'size' in params.keys():
+                params['size'] = 1000
+            else:
+                get_all_pages = False
+            if not 'page' in params.keys():
+                params['page'] = 0
+            else:
+                get_all_pages = False
+
             if deleted:
                 params['status'] = "DELETED"
 
             if not type in NETWORK_RESOURCES.keys():
                 raise Exception("ERROR: unknown type \"{}\". Choices: {}".format(type, NETWORK_RESOURCES.keys()))
-            elif type == "edge-routers":
+            elif type in ["edge-routers","network-controllers"]:
                 params['embed'] = "host"
 
             response = http.get(
@@ -530,7 +548,7 @@ class Network:
         if total_elements == 0:
             return([])
         # if there is one page of resources
-        elif total_pages == 1:
+        elif total_pages == 1 or not get_all_pages:
             all_entities = resources['_embedded'][NETWORK_RESOURCES[type]._embedded]
         # if there are multiple pages of resources
         else:
@@ -803,24 +821,24 @@ class Network:
 
         return(resource)
 
-    def create_resource(self, type: str, properties: dict, wait: int=30, sleep: int=2, progress: bool=False):
+    def create_resource(self, type: str, post: dict, wait: int=30, sleep: int=2, progress: bool=False):
         """
         Create a raw resource by sending a complete set of properties for some type of entity.
 
         :param type: entity type such as endpoint, service, edge-router, app-wan
-        :param properties: required dictionary with all properties required by the particular resource type's model
+        :param post: required dictionary with all properties required by the particular resource type's model
         """
         try:
             headers = {
                 "authorization": "Bearer " + self.session.token 
             }
-            properties['networkId'] = self.id
+            post['networkId'] = self.id
             response = http.post(
                 self.session.audience+'core/v2/'+plural(type),
                 proxies=self.session.proxies,
                 verify=self.session.verify,
                 headers=headers,
-                json=properties
+                json=post
             )
             response_code = response.status_code
         except:
@@ -833,7 +851,7 @@ class Network:
                 eprint('ERROR: failed to load {r} object from POST response'.format(r = type))
                 raise(e)
         else:
-            json_formatted = json.dumps(properties, indent=2)
+            json_formatted = json.dumps(post, indent=2)
             raise Exception(
                 'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s} for POST create {:s}'.format(
                     STATUS_CODES._codes[response_code][0].upper(),
