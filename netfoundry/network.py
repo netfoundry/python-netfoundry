@@ -10,17 +10,17 @@ from unicodedata import name  # enforce a timeout; sleep
 from .utility import (DC_PROVIDERS, EXCLUDED_PATCH_PROPERTIES, MAJOR_REGIONS,
                       NETWORK_RESOURCES, STATUS_CODES, VALID_SEPARATORS,
                       VALID_SERVICE_PROTOCOLS, docstring_parameters,
-                      find_resources, get_resource, http, is_uuidv4, plural,
+                      find_generic_resources, get_generic_resource, http, is_uuidv4, plural,
                       singular, normalize_caseless)
 
 
 class Network:
-    """Describe and use a Network."""
+    """Describe and use a network."""
 
     def __init__(self, NetworkGroup: object, network_id: str=None, network_name: str=None, network: str=None):
-        """Initialize Network.
+        """Initialize network.
         
-        :param obj NetworkGroup: required parent Network Group of this Network
+        :param obj NetworkGroup: required parent network group of this network
         :param str network: optional identifier to resolve as UUID or name, ignored if network_id or network_name
         :param str network_name: optional name of the network to describe and use
         :param str network_id: optional UUID of the network to describe and use
@@ -271,7 +271,7 @@ class Network:
         url = self.audience+'core/v2/data-centers/'+id
         headers = { "authorization": "Bearer " + self.token }
         try:
-            data_center = get_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            data_center = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except:
             logging.debug("failed to get data_center from url: '%s'", url)
             raise
@@ -302,7 +302,7 @@ class Network:
         url = self.audience+'core/v2/data-centers'
         headers = { "authorization": "Bearer " + self.token }
         try:
-            data_centers = find_resources(url=url, headers=headers, embedded=NETWORK_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params)
+            data_centers = find_generic_resources(url=url, headers=headers, embedded=NETWORK_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params)
         except:
             logging.debug("failed to get data-centers from url: '%s'", url)
             raise
@@ -357,56 +357,33 @@ class Network:
         # to singular if plural
         if type[-1] == "s":
             type = singular(type)
-
-        try:
-            headers = { "authorization": "Bearer " + self.token }
-            if accept and accept in ["create", "update"]:
+        headers, params = dict(), dict()
+        if accept:
+            if accept in ["create", "update"]:
                 headers['accept'] = "application/json;as="+accept
-            elif accept:
-                raise Exception("ERROR: invalid value for param \"accept\" in {}".format(accept))
-            entity_url = self.audience+'core/v2/'+plural(type)+'/'+id
-            params = dict()
-            if not type == "network":
-                params["networkId"] = self.id
-            # if singular(type) == "service": 
-            #     params["beta"] = ''
+            else:
+                logging.warn("ignoring invalid value for param 'accept': '{:s}'".format(accept))
+        if not type == "network":
+            params["networkId"] = self.id
+        if not plural(type) in NETWORK_RESOURCES.keys():
+            logging.error("unknown resource type '{plural}'. Choices: {choices}".format(
+                singular=type,
+                plural=plural(type),
+                choices=NETWORK_RESOURCES.keys()
+            ))
+            raise RuntimeError
+        elif plural(type) in ["edge-routers","network-controllers"]:
+            params['embed'] = "host"
 
-            if not plural(type) in NETWORK_RESOURCES.keys():
-                raise Exception("ERROR: unknown type \"{singular}\" as plural \"{plural}\". Choices: {choices}".format(
-                    singular=type,
-                    plural=plural(type),
-                    choices=NETWORK_RESOURCES.keys()
-                ))
-            elif plural(type) in ["edge-routers","network-controllers"]:
-                params['embed'] = "host"
-
-            response = http.get(
-                entity_url,
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers,
-                params=params
-            )
-            response_code = response.status_code
+        headers = { "authorization": "Bearer " + self.token }
+        url = self.audience+'core/v2/'+plural(type)+'/'+id
+        try:
+            resource = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except:
+            logging.debug("failed to get resource from url: '%s'", url)
             raise
-
-        if response_code == STATUS_CODES.codes.OK:
-            try:
-                entity = json.loads(response.text)
-            except:
-                raise Exception('ERROR parsing response as object, got:\n{}'.format(response.text))
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
-
-        return(entity)
-
+            return(resource)
     get_resource = get_resource_by_id
 
     def get_resources(self, type: str, accept: str=None, deleted: bool=False, **kwargs):
@@ -424,108 +401,28 @@ class Network:
             type = plural(type)
         if type == "data-centers":
             logging.warn("don't call network.get_resources() for data centers, always use network.get_edge_router_data_centers() to filter for locations that support this network's version")
+
+        params = dict()
+        for param in kwargs.keys():
+            params[param] = kwargs[param]
+        params["networkId"] = self.id
+        if deleted:
+            params['status'] = "DELETED"
+        url = self.audience+'core/v2/networks'
+        headers = { "authorization": "Bearer " + self.token }
+        params = {
+            "findByName": name
+        }
+        for param in kwargs.keys():
+            params[param] = kwargs[param]
         try:
-            headers = { "authorization": "Bearer " + self.token }
-            if accept and accept in ["create", "update"]:
-                headers['accept'] = "application/json;as="+accept
-            elif accept:
-                logging.error("invalid value for param 'accept': '%s'", accept)
-                raise Exception()
-
-            params = {
-                "networkId": self.id,
-            }
-            get_all_pages = True
-            for param in kwargs.keys():
-                params[param] = kwargs[param]
-            if not 'sort' in params.keys():
-                params["sort"] = "name,asc"
-            if not 'size' in params.keys():
-                params['size'] = 1000
-            else:
-                get_all_pages = False
-            if not 'page' in params.keys():
-                params['page'] = 0
-            else:
-                get_all_pages = False
-
-            if deleted:
-                params['status'] = "DELETED"
-
-            if not type in NETWORK_RESOURCES.keys():
-                raise Exception("ERROR: unknown type \"{}\". Choices: {}".format(type, NETWORK_RESOURCES.keys()))
-            elif type in ["edge-routers","network-controllers"]:
-                params['embed'] = "host"
-
-            response = http.get(
-                self.audience+'core/v2/'+type,
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers,
-                params=params
-            )
-            response_code = response.status_code
+            networks = find_generic_resources(url=url, headers=headers, accept=accept, embedded=NETWORK_RESOURCES[type]._embedded, proxies=self.proxies, verify=self.verify, **params)
         except:
+            logging.debug("failed to get networks from url: '%s'", url)
             raise
-
-        if response_code == STATUS_CODES.codes.OK: # HTTP 200
-            try:
-                resources = json.loads(response.text)
-            except ValueError as e:
-                logging.error('failed to load {r} object from GET response'.format(r = type))
-                raise(e)
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
+            return(networks)
 
-        total_pages = resources['page']['totalPages']
-        total_elements = resources['page']['totalElements']
-        # if there are no resources
-        if total_elements == 0:
-            return([])
-        # if there is one page of resources
-        elif total_pages == 1 or not get_all_pages:
-            all_entities = resources['_embedded'][NETWORK_RESOURCES[type]._embedded]
-        # if there are multiple pages of resources
-        else:
-            # initialize the list with the first page of resources
-            all_entities = resources['_embedded'][NETWORK_RESOURCES[type]._embedded]
-            # append the remaining pages of resources
-            for page in range(1,total_pages):
-                try:
-                    params["page"] = page
-                    response = http.get(
-                        self.audience+'core/v2/'+type,
-                        proxies=self.proxies,
-                        verify=self.verify,
-                        headers=headers,
-                        params=params
-                    )
-                    response_code = response.status_code
-                except:
-                    raise
-
-                if response_code == STATUS_CODES.codes.OK: # HTTP 200
-                    try:
-                        resources = json.loads(response.text)
-                        all_entities.extend(resources['_embedded'][NETWORK_RESOURCES[type]._embedded])
-                    except ValueError as e:
-                        logging.error('failed to load resources object from GET response')
-                        raise(e)
-                else:
-                    raise Exception(
-                        'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                            STATUS_CODES._codes[response_code][0].upper(),
-                            response_code,
-                            response.text
-                        )
-                    )
-        return(all_entities)
 
     def resource_exists_in_network(self, name: str, type: str, deleted: bool=False):
         """Check if a resource of a particular type with a particular name exists in this network.
@@ -550,10 +447,7 @@ class Network:
             :param type: optional entity type, needed if put object lacks a self link, ignored if self link present
             :param id: optional entity ID, needed if put object lacks a self link, ignored if self link present
         """
-        headers = {
-            "authorization": "Bearer " + self.token,
-            "content-type": "application/json"
-        }
+        headers = {"authorization": "Bearer " + self.token}
 
         # prefer the self link if present, else require type and id to compose the self link
         try: 
@@ -569,111 +463,84 @@ class Network:
                 self_link)
             )
         try:
-            before_response = http.get(
-                self_link,
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers
-            )
-            before_response_code = before_response.status_code
-        except:
-            raise
-
-        if before_response_code in [STATUS_CODES.codes.OK]: # HTTP 200
-            try:
-                before_resource = json.loads(before_response.text)
-            except ValueError as e:
-                logging.error('failed to load {r} object from GET response'.format(r = type))
-                raise(e)
+            before_resource = get_generic_resource(url=self_link, headers=headers, proxies=self.proxies, verify=self.verify, accept='update')
+        except Exception as e:
+            logging.error("failed to get the %s for patching: '%s'", type, e)
         else:
-            json_formatted = json.dumps(patch, indent=2)
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s} for GET {:s}'.format(
-                    STATUS_CODES._codes[before_response_code][0].upper(),
-                    before_response_code,
-                    before_response.text,
-                    json_formatted
-                )
-            )
-        # compare the patch to the discovered, current state, adding new or updated keys to pruned_patch
-        pruned_patch = dict()
-        for k in patch.keys():
-            if k not in EXCLUDED_PATCH_PROPERTIES[type] and k in before_resource.keys():
-                if isinstance(patch[k], list):
-                    if not set(before_resource[k]) == set(patch[k]):
-                        pruned_patch[k] = list(set(patch[k]))
-                else:
-                    if not before_resource[k] == patch[k]:
-                        pruned_patch[k] = patch[k]
-        headers = {
-            "authorization": "Bearer " + self.token
-        }
+            # compare the patch to the discovered, current state, adding new or updated keys to pruned_patch
+            pruned_patch = dict()
+            for k in patch.keys():
+                if k not in EXCLUDED_PATCH_PROPERTIES[type] and k in before_resource.keys():
+                    if isinstance(patch[k], list):
+                        if not set(before_resource[k]) == set(patch[k]):
+                            pruned_patch[k] = list(set(patch[k]))
+                    else:
+                        if not before_resource[k] == patch[k]:
+                            pruned_patch[k] = patch[k]
 
-        # attempt to update if there's at least one difference between the current resource and the submitted patch
-        if len(pruned_patch.keys()) > 0:
-            if not "name" in pruned_patch.keys():
-                pruned_patch["name"] = before_resource["name"]
-            # if entity is a service and "model" is patched then always include "modelType"
-            if type == "services" and not "modelType" in pruned_patch.keys() and "model" in pruned_patch.keys():
-                pruned_patch["modelType"] = before_resource["modelType"]
-            try:
-                # if type == "app-wans":
-                #     import epdb; epdb.serve()
-                after_response = http.patch(
-                    patch['_links']['self']['href'],
-                    proxies=self.proxies,
-                    verify=self.verify,
-                    headers=headers,
-                    json=pruned_patch
-                )
-                after_response_code = after_response.status_code
-            except:
-                raise
-            if after_response_code in [STATUS_CODES.codes.OK, STATUS_CODES.codes.ACCEPTED]: # HTTP 202
+            # attempt to update if there's at least one difference between the current resource and the submitted patch
+            if len(pruned_patch.keys()) > 0:
+                if not "name" in pruned_patch.keys():
+                    pruned_patch["name"] = before_resource["name"]
+                # if entity is a service and "model" is patched then always include "modelType"
+                if type == "services" and not "modelType" in pruned_patch.keys() and "model" in pruned_patch.keys():
+                    pruned_patch["modelType"] = before_resource["modelType"]
                 try:
-                    after_resource = json.loads(after_response.text)
-                except ValueError as e:
-                    logging.error('failed to load {r} object from PATCH response'.format(r = type))
-                    raise(e)
-            else:
-                json_formatted = json.dumps(patch, indent=2)
-                raise Exception(
-                    'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s} for PATCH update {:s}'.format(
-                        STATUS_CODES._codes[after_response_code][0].upper(),
-                        after_response_code,
-                        after_response.text,
-                        json_formatted
+                    after_response = http.patch(
+                        self_link,
+                        proxies=self.proxies,
+                        verify=self.verify,
+                        headers=headers,
+                        json=pruned_patch
                     )
-                )
+                    after_response_code = after_response.status_code
+                except:
+                    raise
+                if after_response_code in [STATUS_CODES.codes.OK, STATUS_CODES.codes.ACCEPTED]: # HTTP 202
+                    try:
+                        after_resource = json.loads(after_response.text)
+                    except ValueError as e:
+                        logging.error('failed to load {r} object from PATCH response'.format(r = type))
+                        raise(e)
+                else:
+                    json_formatted = json.dumps(patch, indent=2)
+                    raise Exception(
+                        'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s} for PATCH update {:s}'.format(
+                            STATUS_CODES._codes[after_response_code][0].upper(),
+                            after_response_code,
+                            after_response.text,
+                            json_formatted
+                        )
+                    )
 
-            # if API responded with async promise then parse the expected process execution ID
-            if wait and after_response_code == STATUS_CODES.codes.ACCEPTED: # HTTP 202
-                # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
-                process_id = after_resource['_links']['process']['href'].split('/')[6]
+                # if API responded with async promise then parse the expected process execution ID
+                if wait and after_response_code == STATUS_CODES.codes.ACCEPTED: # HTTP 202
+                    # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
+                    process_id = after_resource['_links']['process']['href'].split('/')[6]
 
-                # monitor async process
-                if wait:
-                    try:
-                        self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait, sleep=sleep, progress=progress)
-                    except:
-                        raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
-                    try:
-                        # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
-                        #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
-                        finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type=type, 
-                                                                    id=after_resource['id'], wait=3, sleep=1)
-                    except:
-                        raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
-                    return(finished)
-                else: # if not wait then merely verify the async process was at least started if not finished
-                    try:
-                        self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2, progress=progress)
-                    except:
-                        raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
-            return(after_resource)
-        else:
-            # no change, return the existing unmodified entity
-            return(before_resource)
+                    # monitor async process
+                    if wait:
+                        try:
+                            self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait, sleep=sleep, progress=progress)
+                        except:
+                            raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
+                        try:
+                            # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
+                            #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
+                            finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type=type, 
+                                                                        id=after_resource['id'], wait=3, sleep=1)
+                        except:
+                            raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
+                        return(finished)
+                    else: # if not wait then merely verify the async process was at least started if not finished
+                        try:
+                            self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2, progress=progress)
+                        except:
+                            raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
+                return(after_resource)
+            else:
+                # no change, return the existing unmodified entity
+                return(before_resource)
 
     def put_resource(self, put: dict, type: str=None, id: str=None, wait: int=0, sleep: int=2, progress: bool=False):
         """Update a resource with a complete set of properties.
@@ -702,7 +569,6 @@ class Network:
                 raise(e)
         else:
             type = self_link.split('/')[5] # e.g. endpoints, app-wans, edge-routers, etc...
-            #id = self_link.split('/')[6] # UUIDv4 from self reference URL # not currently using this if we already have the self link
         try:
             headers = {
                 "authorization": "Bearer " + self.token 
@@ -834,7 +700,7 @@ class Network:
 
         :param: name is required string on which to key future operations for this endpoint
         :param: attributes is an optional list of endpoint roles of which this endpoint is a member
-        :param: session_identity is optional string UUID of the identity in the NF Organization for
+        :param: session_identity is optional string UUID of the identity in the NF organization for
                 which a concurrent web console session is required to activate this endpoint
         """
         try:
@@ -1918,11 +1784,11 @@ class Network:
         else:
             return(started)
 
-    def get_network_by_name(self,name: str,group: str=None):
+    def get_network_by_name(self,name: str, group: str=None):
         """Get one network by name.
 
         :param: name required name of the NF network may contain quoted whitespace
-        :param: group optional string UUID to limit results by Network Group ID
+        :param: group optional string UUID to limit results by network group ID
         """
         try:
             headers = { 
@@ -2091,7 +1957,7 @@ class Network:
         :param: wait optional SECONDS after which to raise an exception defaults to five minutes (300)
         :param: sleep SECONDS polling interval
         """
-        # use the id of this instance's Network unless another one is specified
+        # use the id of this instance's network unless another one is specified
         if entity_type == "network" and not id:
             id = self.id
 
@@ -2240,7 +2106,7 @@ class Network:
         :param wait: optional SECONDS after which to raise an exception defaults to five minutes (300)
         :param sleep: SECONDS polling interval
         """
-        # use the id of this instance's Network unless another one is specified
+        # use the id of this instance's network unless another one is specified
         if type == "network" and not id:
             id = self.id
 
@@ -2316,7 +2182,7 @@ class Network:
         :param wait: optional SECONDS after which to raise an exception defaults to five minutes (300)
         :param sleep: SECONDS polling interval
         """
-        # use the id of this instance's Network unless another one is specified
+        # use the id of this instance's network unless another one is specified
         if type == "network" and not id:
             id = self.id
 
@@ -2383,67 +2249,42 @@ class Network:
                 )
             )
 
-    def get_resource_status(self, type: str, id: str):
+    def get_resource_status(self, type: str, id: str=None):
         """Return an object describing an entity's API status or the symbolic HTTP code.
         
         :param type: the type of entity e.g. network, endpoint, service, edge-router, edge-router-policy, posture-check
         :param id: the UUID of the entity having a status if not a network
         """
-        try:
-            headers = { "authorization": "Bearer " + self.token }
 
-            params = dict()
-            if not type == "network":
-                params["networkId"] = self.id
-            # elif type == "service": 
-            #     params["beta"] = ''
+        params = dict()
+        if not type == "network":
+            params["networkId"] = self.id
 
-            entity_url = self.audience+'core/v2/'
-            if type == 'network':
-                entity_url += 'networks/'+self.id
-            elif type == 'process':
-                entity_url += 'process/'+id
-            elif id is None:
-                raise Exception("ERROR: entity UUID must be specified if not a network")
-            else:
-                entity_url += plural(type)+'/'+id
-
-            response = http.get(
-                entity_url,
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers,
-                params=params
-            )
-            response_code = response.status_code
-        except:
-            raise
-
-        if response_code == STATUS_CODES.codes.OK:
-            try:
-                object = json.loads(response.text)
-                status = object['status']
-                if 'name' in object.keys():
-                    name = object['name']
-                elif 'processorName' in object.keys():
-                    name = object['processorName']
-                else:
-                    logging.warning('no "name" property found')
-            except:
-                logging.error('failed parsing entity object in response')
-                raise
-            else:
-                return {
-                    'http_status': STATUS_CODES._codes[response_code][0].upper(),
-                    'response_code': response_code,
-                    'status': status,
-                    'name': name if name else "NONAME"
-                }
+        entity_url = self.audience+'core/v2/'
+        if type == 'network':
+            entity_url += 'networks/'+self.id
+        elif type == 'process':
+            entity_url += 'process/'+id
+        elif id is None:
+            logging.error("entity UUID must be specified if not a network")
+            raise RuntimeError
         else:
-            return {
-                'http_status': STATUS_CODES._codes[response_code][0].upper(),
-                'response_code': response_code
-            }
+            entity_url += plural(type)+'/'+id
+
+        headers = { "authorization": "Bearer " + self.token }
+        try:
+            resource = get_generic_resource(url=entity_url, headers=headers, proxies=self.proxies, verify=self.verify)
+        except:
+            logging.debug("failed to get resource from url: '%s'", entity_url)
+            raise
+        else:
+            status = resource['status']
+            if 'name' in resource.keys():
+                name = resource['name']
+            elif 'processorName' in resource.keys():
+                name = resource['processorName']
+            else:
+                logging.warning('no "name" property found')
 
     def rotate_edge_router_registration(self, id: str):
         """Rotate and return the registration key like {"registrationKey": str, "expiresAt": date}.

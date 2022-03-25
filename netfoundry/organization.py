@@ -13,7 +13,7 @@ from platformdirs import user_cache_path, user_config_path
 from .exceptions import NFAPINoCredentials
 from .utility import (DEFAULT_TOKEN_EXPIRY, ENVIRONMENTS,
                       EMBEDDABLE_NETWORK_RESOURCES, NETWORK_RESOURCES, RESOURCES,
-                      STATUS_CODES, find_resources, get_resource, http,
+                      STATUS_CODES, find_generic_resources, get_generic_resource, http,
                       is_uuidv4, normalize_caseless, get_token_cache, jwt_decode, jwt_environment, jwt_expiry)
 
 
@@ -426,7 +426,7 @@ class Organization:
         headers = { "authorization": "Bearer " + self.token }
         for url in urls:
             try:
-                caller = get_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+                caller = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
             except:
                 logging.debug("failed to get caller identity from url: '%s'", url)
             else:
@@ -442,7 +442,7 @@ class Organization:
         url = self.audience+'identity/v1/identities/'+identity_id
         headers = { "authorization": "Bearer " + self.token }
         try:
-            identity = get_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            identity = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except:
             logging.debug("failed to get identity from url: '%s'", url)
             raise
@@ -467,7 +467,7 @@ class Organization:
         url = self.audience+'identity/v1/identities'
         headers = { "authorization": "Bearer " + self.token }
         try:
-            identities = find_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params)
+            identities = find_generic_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params)
         except:
             logging.debug("failed to get identities from url: '%s'", url)
             raise
@@ -492,7 +492,7 @@ class Organization:
         url = self.audience+'identity/v1/organizations'
         headers = { "authorization": "Bearer " + self.token }
         try:
-            organizations = find_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params)
+            organizations = find_generic_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params)
         except:
             logging.debug("failed to get organizations from url: '%s'", url)
             raise
@@ -508,7 +508,7 @@ class Organization:
         url = self.audience+'identity/v1/organizations/'+id
         headers = { "authorization": "Bearer " + self.token }
         try:
-            organization = get_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            organization = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except:
             logging.debug("failed to get organization from url: '%s'", url)
             raise
@@ -524,7 +524,7 @@ class Organization:
         url = self.audience+'rest/v1/network-groups/'+network_group_id
         headers = { "authorization": "Bearer " + self.token }
         try:
-            network_group = get_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            network_group = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except:
             logging.debug("failed to get network_group from url: '%s'", url)
             raise
@@ -541,12 +541,6 @@ class Organization:
                 entity in a POST request, and "update" may be used in the same way for a PUT update.
         """
         headers = dict()
-        if accept:
-            if not accept in ["update","create"]:
-                logging.error("param 'accept' must be one of 'update' or 'create', got '{:s}'".format(accept))
-                raise Exception("param 'accept' must be one of 'update' or 'create', got '{:s}'".format(accept))
-            else:
-                headers['accept'] = "application/json;as="+accept
         headers["authorization"] = "Bearer " + self.token
         params = dict()
         if embed == "all":
@@ -562,7 +556,7 @@ class Organization:
 
         url = self.audience+'core/v2/networks/'+network_id
         try:
-            network = get_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params)
+            network = get_generic_resource(url=url, headers=headers, accept=accept, proxies=self.proxies, verify=self.verify, **params)
         except:
             logging.debug("failed to get network from url: '%s'", url)
             raise
@@ -577,7 +571,7 @@ class Organization:
         url = self.audience+'rest/v1/network-groups'
         headers = { "authorization": "Bearer " + self.token }
         try:
-            network_groups = find_resources(url=url, headers=headers, embedded=RESOURCES['network-groups']._embedded, proxies=self.proxies, verify=self.verify, **kwargs)
+            network_groups = find_generic_resources(url=url, headers=headers, embedded=RESOURCES['network-groups']._embedded, proxies=self.proxies, verify=self.verify, **kwargs)
         except:
             logging.debug("failed to get network_groups from url: '%s'", url)
             raise
@@ -602,7 +596,7 @@ class Organization:
         for param in kwargs.keys():
             params[param] = kwargs[param]
         try:
-            networks = find_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, proxies=self.proxies, verify=self.verify, **params)
+            networks = find_generic_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, proxies=self.proxies, verify=self.verify, **params)
         except:
             logging.debug("failed to get networks from url: '%s'", url)
             raise
@@ -656,7 +650,7 @@ class Organization:
         url = self.audience+'core/v2/networks'
         headers = { "authorization": "Bearer " + self.token }
         try:
-            networks = find_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, proxies=self.proxies, verify=self.verify, **params)
+            networks = find_generic_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, proxies=self.proxies, verify=self.verify, **params)
         except:
             logging.debug("failed to get networks from url: '%s'", url)
             raise

@@ -5,7 +5,7 @@ import json
 import logging
 
 from .utility import (NETWORK_RESOURCES, RESOURCES, STATUS_CODES,
-                      find_resources, get_resource, http, is_uuidv4,
+                      find_generic_resources, get_generic_resource, http, is_uuidv4,
                       normalize_caseless)
 
 
@@ -51,12 +51,12 @@ class NetworkGroup:
         else:
             raise Exception("need at least one network group in organization")
 
-        self.session = Organization
-        self.token = self.session.token
-        self.proxies = self.session.proxies
-        self.verify = self.session.verify
-        self.audience = self.session.audience
-        self.environment = self.session.environment
+        self.Organization = Organization # pass the instance to the group to expose methods
+        self.token = Organization.token
+        self.proxies = Organization.proxies
+        self.verify = Organization.verify
+        self.audience = Organization.audience
+        self.environment = Organization.environment
         self.describe = Organization.get_network_group(self.network_group_id)
         self.id = self.network_group_id
         self.name = self.network_group_name
@@ -124,7 +124,7 @@ class NetworkGroup:
         url = self.audience+'core/v2/data-centers'
         headers = { "authorization": "Bearer " + self.token }
         try:
-            data_centers = find_resources(url=url, headers=headers, embedded=NETWORK_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params)
+            data_centers = find_generic_resources(url=url, headers=headers, embedded=NETWORK_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params)
         except:
             logging.debug("failed to get data-centers from url: '%s'", url)
             raise
@@ -144,7 +144,7 @@ class NetworkGroup:
         url = self.audience+'product-metadata/v2/download-urls.json'
         headers = dict() # no auth
         try:
-            all_product_metadata = find_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            all_product_metadata = find_generic_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except:
             logging.debug("failed to get product-metadata from url: '%s'", url)
             raise

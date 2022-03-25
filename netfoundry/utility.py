@@ -191,7 +191,7 @@ def eprint(*args, **kwargs):
     """Adapt legacy function to logging."""
     logging.debug(*args, **kwargs)
 
-def get_resource(url: str, headers: dict, proxies: dict=dict(), verify: bool=True, **kwargs):
+def get_generic_resource(url: str, headers: dict, proxies: dict=dict(), verify: bool=True, accept: str=None, **kwargs):
     """
     Get, deserialize, and return a single resource.
 
@@ -204,6 +204,11 @@ def get_resource(url: str, headers: dict, proxies: dict=dict(), verify: bool=Tru
     params = dict()
     for param in kwargs.keys():
         params[param] = kwargs[param]
+    if accept:
+        if accept in ["create", "update"]:
+            headers['accept'] = "application/json;as="+params['accept']
+        else:
+            logging.warn("ignoring invalid value for header 'accept': '{:s}'".format(accept))
 
     try:
         response = http.get(
@@ -229,7 +234,7 @@ def get_resource(url: str, headers: dict, proxies: dict=dict(), verify: bool=Tru
         else:
             return resource
 
-def find_resources(url: str, headers: dict, embedded: str=None, proxies: dict=dict(), verify: bool=True, **kwargs):
+def find_generic_resources(url: str, headers: dict, embedded: str=None, proxies: dict=dict(), verify: bool=True, accept: str=None, **kwargs):
     """
     Recurse and return all pages of a type of resource.
 
@@ -254,6 +259,20 @@ def find_resources(url: str, headers: dict, embedded: str=None, proxies: dict=di
         get_all_pages = False
     else:
         params['page'] = 0
+    if accept:
+        if accept in ["create", "update"]:
+            headers['accept'] = "application/json;as="+params['accept']
+        else:
+            logging.warn("ignoring invalid value for header 'accept': '{:s}'".format(accept))
+    if not plural(type) in NETWORK_RESOURCES.keys():
+        logging.error("unknown resource type '{plural}'. Choices: {choices}".format(
+            singular=type,
+            plural=plural(type),
+            choices=NETWORK_RESOURCES.keys()
+        ))
+        raise RuntimeError
+    elif plural(type) in ["edge-routers","network-controllers"]:
+        params['embed'] = "host"
 
     try:
         response = http.get(
@@ -304,7 +323,7 @@ def find_resources(url: str, headers: dict, embedded: str=None, proxies: dict=di
                             params['page'] = next_page
                             try:
                                 # recurse
-                                all_pages.extend(find_resources(url=url, headers=headers, embedded=embedded, proxies=proxies, verify=verify, **params))
+                                all_pages.extend(find_generic_resources(url=url, headers=headers, embedded=embedded, proxies=proxies, verify=verify, **params))
                             except Exception as e:
                                 logging.error("failed to get page %d of %d, got '%s'", next_page, total_pages)
                                 raise
