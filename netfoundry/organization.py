@@ -555,7 +555,7 @@ class Organization:
 
     network_groups = get_network_groups_by_organization
 
-    def get_networks_by_organization(self, name: str=None, deleted: bool=False, **kwargs):
+    def get_networks_by_organization(self, name: str=None, deleted: bool=False, generate: bool=False, **kwargs):
         """
         Find networks by organization as a collection.
 
@@ -573,9 +573,13 @@ class Organization:
         if deleted:
             params['status'] = 'DELETED'
         try:
-            networks = list()
-            for i in find_generic_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, proxies=self.proxies, verify=self.verify, **params):
-                networks.extend(i)
+            if generate:
+                yield from find_generic_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, proxies=self.proxies, verify=self.verify, **params)
+                return
+            else:
+                networks = list()
+                for i in find_generic_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, proxies=self.proxies, verify=self.verify, **params):
+                    networks.extend(i)
         except Exception as e:
             raise RuntimeError(f"failed to get networks from url: '{url}', got {e}")
         else:

@@ -251,7 +251,7 @@ def find_generic_resources(url: str, headers: dict, embedded: str=None, proxies:
     if params.get('size'):
         get_all_pages = False
     else:
-        params['size'] = 1000
+        params['size'] = DEFAULT_PAGE_SIZE
     if params.get('page'):
         get_all_pages = False
     else:
@@ -306,13 +306,13 @@ def find_generic_resources(url: str, headers: dict, embedded: str=None, proxies:
                     
                     # then yield subsequent pages, if applicable
                     if get_all_pages: # this is False if param 'page' or 'size' to stop recursion or get a single page
-                        for next_page in range(1,total_pages): # first page is 0, so now we start with 1
+                        for next_page in range(1,total_pages): # first page is 0
                             params['page'] = next_page
                             try:
                                 # recurse
                                 yield from find_generic_resources(url=url, headers=headers, embedded=embedded, proxies=proxies, verify=verify, **params)
                             except Exception as e:
-                                raise RuntimeError("failed to get page %d of %d, got '%s'", next_page, total_pages)                        
+                                raise RuntimeError(f"failed to get page {next_page} of {total_pages}, got {e}'")
             else:
                 yield resource_page
 
@@ -573,3 +573,5 @@ class LookupDict(dict):
         return self.__dict__.get(key, default)
 
 ENVIRONMENTS = ['production','staging','sandbox']
+
+DEFAULT_PAGE_SIZE = 10
