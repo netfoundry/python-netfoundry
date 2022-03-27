@@ -90,7 +90,7 @@ def get_token_cache(path):
         raise RuntimeError(f"failed to read cache file '{path.__str__()}', got {e}")
     else:
         cache_file_stats = os.stat(path)
-        logging.debug("parsed token cache file '%s' as JSON with mode %s", path.__str__(), filemode(cache_file_stats.st_mode))
+        logging.debug(f"parsed token cache file '{path.__str__()}' as JSON with mode {filemode(cache_file_stats.st_mode)}")
     
     if all(k in token_cache for k in ['token', 'expiry', 'audience']):
         return token_cache
@@ -106,10 +106,10 @@ def jwt_expiry(token):
         claim = jwt_decode(token)
         expiry = claim['exp']
     except jwt.exceptions.PyJWTError:
-        logging.debug("error parsing JWT to extract expiry, estimating +%ds", DEFAULT_TOKEN_EXPIRY)
+        logging.debug(f"error parsing JWT to extract expiry, estimating +{DEFAULT_TOKEN_EXPIRY}s")
         expiry = time.time() + DEFAULT_TOKEN_EXPIRY
     except KeyError:
-        logging.debug("failed to extract expiry epoch from claimset as key 'exp', estimating +%ds", DEFAULT_TOKEN_EXPIRY)
+        logging.debug(f"failed to extract expiry epoch from claimset as key 'exp', estimating +{DEFAULT_TOKEN_EXPIRY}s")
         expiry = time.time() + DEFAULT_TOKEN_EXPIRY
     except Exception as e:
         raise RuntimeError(f"unexpect error, got {e}")
@@ -138,13 +138,13 @@ def jwt_environment(token):
     else:
         if re.match(r'https://cognito-', iss):
             environment = re.sub(r'https://gateway\.([^.]+)\.netfoundry\.io.*',r'\1',claim['scope'])
-            logging.debug("matched Cognito issuer URL convention, found environment '%s'", environment)
+            logging.debug(f"matched Cognito issuer URL convention, found environment '{environment}'")
         elif re.match(r'.*\.auth0\.com', iss):
             environment = re.sub(r'https://netfoundry-([^.]+)\.auth0\.com.*',r'\1',claim['iss'])
-            logging.debug("matched Auth0 issuer URL convention, found environment '%s'", environment)
+            logging.debug(f"matched Auth0 issuer URL convention, found environment '{environment}'")
         else:
             environment = "production"
-            logging.debug("failed to match Auth0 and Cognito issuer URL conventions, assuming environment is '%s'", environment)
+            logging.debug(f"failed to match Auth0 and Cognito issuer URL conventions, assuming environment is '{environment}'")
     finally:
         return environment
 
@@ -293,7 +293,7 @@ def find_generic_resources(url: str, headers: dict, embedded: str=None, proxies:
                     total_pages = resource_page['page']['totalPages']
                     total_elements = resource_page['page']['totalElements']
                 except KeyError as e:
-                    raise RuntimeError("got 'page' key in HTTP response but missing expected sub-key: %s", e)
+                    raise RuntimeError(f"got 'page' key in HTTP response but missing expected sub-key: {e}")
                 else:
                     if total_elements == 0:
                         yield_page = list() # delay yielding until end of flow
@@ -565,7 +565,7 @@ class LookupDict(dict):
         super(LookupDict, self).__init__()
 
     def __repr__(self):
-        return '<lookup \'%s\'>' % (self.name)
+        return f"<lookup '{self.name}'>"
 
     def __getitem__(self, key):
         # We allow fall-through here, so values default to None

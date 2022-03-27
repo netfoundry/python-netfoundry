@@ -67,7 +67,7 @@ class StoreListKeys(argparse.Action):
         setattr(namespace, self.dest, values.split(','))
 
 @cli.argument('-p','--profile', default='default', help='login profile for storing and retrieving concurrent, discrete sessions')
-@cli.argument('-C', '--credentials', help='API account JSON file from web console')
+@cli.argument('-C', '--credentials', nargs='+', help='API account JSON file from web console')
 @cli.argument('-O', '--organization', help="label or ID of an alternative organization (default is caller's org)" )
 @cli.argument('-N', '--network', help='caseless name of the network to manage')
 @cli.argument('-G', '--network-group', help="shortname or ID of a network group to search for network_name")
@@ -104,13 +104,13 @@ def login(cli):
                 network_name=cli.config.general.network
             )
         elif cli.config.general.network:
-            cli.log.debug("configuring network %s and local group if unique name for this organization", cli.config.general.network)
+            cli.log.debug(f"configuring network {cli.config.general.network} and local group if unique name for this organization")
             network, network_group = use_network(
                 organization=organization,
                 network_name=cli.config.general.network
             )
         elif cli.config.general.network_group:
-            cli.log.debug("configuring network group %s", cli.config.general.network_group)
+            cli.log.debug(f"configuring network group {cli.config.general.network_group}")
             network_group = use_network_group(organization, group=cli.config.general.network_group)
             network = None
         else:
@@ -202,7 +202,7 @@ export MOPENV={organization.environment}
                 ziti_cli = 'ziti'
         which_ziti = which(ziti_cli)
         if which_ziti:
-            cli.log.debug("found ziti CLI executable in %s", which_ziti)
+            cli.log.debug(f"found ziti CLI executable in {which_ziti}")
         else:
             cli.log.critical("missing executable '%s' in PATH: %s", ziti_cli, os.environ['PATH'])
             exit(1)
@@ -258,7 +258,7 @@ export MOPENV={organization.environment}
             if exec.returncode == 0: # if succeeded
                 exec = cli.run(f"{ziti_cli} edge use {ziti_cli_identity}".shutil.split(), capture_output=False)
                 if not exec.returncode == 0: # if error
-                    cli.log.error("failed to switch default ziti login identity to '%s'", ziti_cli_identity)
+                    cli.log.error(f"failed to switch default ziti login identity to '{ziti_cli_identity}'")
                     exit(exec.returncode)
             else:
                 cli.log.error("failed to login")
@@ -277,7 +277,7 @@ def logout(cli):
                 proxy=cli.config.general.proxy
             )
     except Exception as e:
-        cli.log.error("unexpected error while logging out profile '%s': %s", cli.config.general.profile, e)
+        cli.log.error(f"unexpected error while logging out profile '{cli.config.general.profile}': {e}")
     else:
         cli.log.info(sub('Logging', 'Logged', spinner.text))
 
@@ -297,7 +297,7 @@ def copy(cli):
     cli.args['output'] = 'text' # implies tty which allows INFO messages
     with spinner:
         edit_resource_object, network, network_group, organization = get(cli, echo=False)
-    cli.log.debug("opening %s '%s' for copying", cli.args.resource_type, edit_resource_object['name'])
+    cli.log.debug(f"opening {cli.args.resource_type} '{edit_resource_object['name']}' for copying")
     copy_request_object = edit_object_as_yaml(edit_resource_object)
     if not copy_request_object: # is False if editing cancelled by empty buffer
         return True
@@ -325,7 +325,7 @@ def create(cli):
     elif cli.args.file:
         try:
             create_input_lines = cli.args.file.read()
-            cli.log.debug("got lines from file: %s", str(create_input_lines))
+            cli.log.debug(f"got lines from file: {str(create_input_lines)}")
         except Exception as e:
             raise RuntimeError(f"failed to read the input file: {e}")
     else:
@@ -335,11 +335,11 @@ def create(cli):
         try:
             create_input_object = yaml_loads(create_input_lines)
         except Exception as e:
-            cli.log.debug("failed to parse input lines from file as YAML, trying JSON: %s", e)
+            cli.log.debug(f"failed to parse input lines from file as YAML, trying JSON: {e}")
             try:
                 create_input_object = json_loads(create_input_lines)
             except Exception as e:
-                cli.log.debug("failed to parse input lines from file as JSON: %s", e)
+                cli.log.debug(f"failed to parse input lines from file as JSON: {e}")
     if not create_input_object:
         cli.log.error("failed to parse input lines as an object (deserialized JSON or YAML)")
         exit(1)
@@ -372,7 +372,7 @@ def create(cli):
                 network_name=cli.config.general.network
             )
             resource = network.create_resource(type=cli.args.resource_type, post=create_object, wait=cli.config.create.wait)
-    cli.log.info("Created %s '%s'", cli.args.resource_type, resource['name'])
+    cli.log.info(f"Created {cli.args.resource_type} '{resource['name']}'")
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[singular(type) for type in MUTABLE_NETWORK_RESOURCES.keys()])
@@ -387,7 +387,7 @@ def edit(cli):
     """
     cli.args['accept'] = 'update'
     edit_resource_object, network, network_group, organization = get(cli, echo=False)
-    cli.log.debug("opening %s '%s' for editing", cli.args.resource_type, edit_resource_object['name'])
+    cli.log.debug(f"opening {cli.args.resource_type} '{edit_resource_object['name']}' for editing")
     update_request_object = edit_object_as_yaml(edit_resource_object)
     if not update_request_object: # is False if editing cancelled by empty buffer
         return True
@@ -419,7 +419,7 @@ def get(cli, echo: bool=True, embed='all'):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warning("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
+                    cli.log.warning(f"using 'id' only, ignoring query params: '{','.join(query_keys)}'")
                 match = organization.get_organization(id=cli.args.query['id'])
             else:
                 matches = organization.get_organizations(**cli.args.query)
@@ -429,7 +429,7 @@ def get(cli, echo: bool=True, embed='all'):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warning("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
+                    cli.log.warning(f"using 'id' only, ignoring query params: '{','.join(query_keys)}'")
                 match = organization.get_network_group(network_group_id=cli.args.query['id'])
             else:
                 matches = organization.get_network_groups_by_organization(**cli.args.query)
@@ -439,7 +439,7 @@ def get(cli, echo: bool=True, embed='all'):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warning("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
+                    cli.log.warning(f"using 'id' only, ignoring query params: '{','.join(query_keys)}'")
                 match = organization.get_identity(identity_id=cli.args.query['id'])
             elif not query_keys:
                 match = organization.caller
@@ -451,7 +451,7 @@ def get(cli, echo: bool=True, embed='all'):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warning("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
+                    cli.log.warning(f"using 'id' only, ignoring query params: '{','.join(query_keys)}'")
                 match = organization.get_network(network_id=cli.args.query['id'], embed=embed, accept=cli.args.accept)
             else:
                 if cli.config.general.network_group and not cli.config.general.network:
@@ -488,7 +488,7 @@ def get(cli, echo: bool=True, embed='all'):
                     cli.log.warning("data centers fetched by ID may not support this network's product version, try provider or locationCode params for safety")
                     if len(query_keys) > 1:
                         query_keys.remove('id')
-                        cli.log.warning("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
+                        cli.log.warning(f"using 'id' only, ignoring query params: '{','.join(query_keys)}'")
                     match = network.get_data_center_by_id(id=cli.args.query['id'])
                 else:
                     matches = network.get_edge_router_data_centers(**cli.args.query)
@@ -498,7 +498,7 @@ def get(cli, echo: bool=True, embed='all'):
                 if 'id' in query_keys:
                     if len(query_keys) > 1:
                         query_keys.remove('id')
-                        cli.log.warning("using 'id' only, ignoring query params: '%s'",','.join(query_keys))
+                        cli.log.warning(f"using 'id' only, ignoring query params: '{','.join(query_keys)}'")
                     match = network.get_resource_by_id(type=cli.args.resource_type, id=cli.args.query['id'], accept=cli.args.accept)
                 else:
                     matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
@@ -506,7 +506,7 @@ def get(cli, echo: bool=True, embed='all'):
                         match = network.get_resource_by_id(type=cli.args.resource_type, id=matches[0]['id'], accept=cli.args.accept)
 
     if match:
-        cli.log.debug("found exactly one %s '%s'", cli.args.resource_type, cli.args.query)
+        cli.log.debug(f"found exactly one {cli.args.resource_type} '{cli.args.query}'")
         if not echo: # edit() uses echo=False to get a match for updating
             return match, network, network_group, organization
         else:
@@ -515,10 +515,10 @@ def get(cli, echo: bool=True, embed='all'):
                 # match and the set of configured, desired keys
                 valid_keys = set(match.keys()) & set(cli.args.keys)
                 if valid_keys: # if at least one element in intersection set
-                    cli.log.debug("valid keys: %s", str(valid_keys))
+                    cli.log.debug(f"valid keys: {str(valid_keys)}")
                     filtered_match = { key: match[key] for key in match.keys() if key in valid_keys}
                 else:
-                    cli.log.error("no valid keys requested in list: %s, need at least one of %s", str(cli.args.keys), str(match.keys()))
+                    cli.log.error(f"no valid keys requested in list: %s, need at least one of {str(cli.args.keys}"), str(match.keys()))
                     exit(1)
             else:
                 cli.log.debug("not filtering output keys")
@@ -528,10 +528,10 @@ def get(cli, echo: bool=True, embed='all'):
             elif cli.args.output == "json":
                 cli.echo(json_dumps(filtered_match, indent=4))
     elif len(matches) == 0:
-        cli.log.warning("found no %s '%s'", cli.args.resource_type, cli.args.query)
+        cli.log.warning(f"found no {cli.args.resource_type} '{cli.args.query}'")
         exit(1)
     else: # len(matches) > 1:
-        cli.log.error("found more than one %s '%s'", cli.args.resource_type, cli.args.query)
+        cli.log.error(f"found more than one {cli.args.resource_type} '{cli.args.query}'")
         exit(len(matches))
 
 
@@ -599,7 +599,7 @@ def list(cli):
         valid_keys = set(matches[0].keys()) & set(['name','label','organizationShortName','id','edgeRouterAttributes','serviceAttributes','endpointAttributes','status','zitiId','provider','locationCode','ipAddress','region','size','attributes','email','productVersion'])
 
     if valid_keys:
-        cli.log.debug("valid keys: %s", str(valid_keys))
+        cli.log.debug(f"valid keys: {str(valid_keys)}")
         filtered_matches = []
         for match in matches:
             filtered_match = { key: match[key] for key in match.keys() if key in valid_keys}
@@ -657,7 +657,7 @@ def delete(cli):
                 except KeyboardInterrupt as e:
                     cli.log.debug("wait cancelled by user")
                 except Exception as e:
-                    cli.log.error("unknown error in %s", e)
+                    cli.log.error(f"unknown error in {e}")
                     exit(1)
                 else:
                     cli.log.info(sub('deleting', 'deleted', spinner.text))
@@ -666,7 +666,7 @@ def delete(cli):
         except KeyboardInterrupt as e:
             cli.log.debug("input cancelled by user")
         except Exception as e:
-            cli.log.error("unknown error in %s", e)
+            cli.log.error(f"unknown error in {e}")
             exit(1)
     else: # network child resource, not the network itself
         try:
@@ -678,7 +678,7 @@ def delete(cli):
                 except KeyboardInterrupt as e:
                     cli.log.debug("wait cancelled by user")
                 except Exception as e:
-                    cli.log.error("unknown error in %s", e)
+                    cli.log.error(f"unknown error in {e}")
                     exit(1)
                 else:
                     cli.log.info(sub('deleting', 'deleted', spinner.text))
@@ -687,7 +687,7 @@ def delete(cli):
         except KeyboardInterrupt as e:
             cli.log.debug("input cancelled by user")
         except Exception as e:
-            cli.log.error("unknown error in %s", e)
+            cli.log.error(f"unknown error in {e}")
             exit(1)
 
 @cli.subcommand('create a functioning demo network')
@@ -707,7 +707,7 @@ def demo(cli):
 def use_organization(prompt: bool=True):
     """Assume an identity in an organization."""
     if cli.config.general.credentials:
-        cli.log.debug("will use credentials file %s from config or args to renew token", cli.config.general.credentials)
+        cli.log.debug(f"will use credentials file {cli.config.general.credentials} from config or args to renew token")
     elif 'NETFOUNDRY_API_TOKEN' in os.environ:
         cli.log.debug("using bearer token from environment NETFOUNDRY_API_TOKEN")
     elif 'NETFOUNDRY_API_ACCOUNT' in os.environ:
@@ -736,7 +736,7 @@ def use_organization(prompt: bool=True):
                 cli.log.debug("input cancelled by user")
                 exit(1)
             except Exception as e:
-                cli.log.error("unknown error in %s", e)
+                cli.log.error(f"unknown error in {e}")
                 exit(1)
 
             try:
@@ -753,12 +753,12 @@ def use_organization(prompt: bool=True):
                 cli.log.error("caught JWT error in %e", e)
                 exit(1)
             except Exception as e:
-                cli.log.error("unknown error in %s", e)
+                cli.log.error(f"unknown error in {e}")
                 exit(1)
         else:
             cli.log.info("not logged in")
             raise NFAPINoCredentials()
-    cli.log.debug("logged-in organization label is %s.", organization.label)
+    cli.log.debug(f"logged-in organization label is {organization.label}.")
     return organization
 
 def use_network_group(organization: object, group: str=None):
@@ -772,7 +772,7 @@ def use_network_group(organization: object, group: str=None):
         organization,
         group=group if group else None,
     )
-    cli.log.debug("network group is %s", network_group.name)
+    cli.log.debug(f"network group is {network_group.name}")
     return network_group
 
 def use_network(organization: object, network_name: str=None, group: str=None, operation: str='read'):
@@ -814,7 +814,7 @@ def use_network(organization: object, network_name: str=None, group: str=None, o
         except KeyboardInterrupt as e:
             cli.log.debug("wait cancelled by user")
         except Exception as e:
-            cli.log.error("unknown error in %s", e)
+            cli.log.error(f"unknown error in {e}")
             exit(1)
         else:
             cli.log.info(f"network '{network_name}' deleted")
@@ -827,7 +827,7 @@ def use_network(organization: object, network_name: str=None, group: str=None, o
             except KeyboardInterrupt as e:
                 cli.log.debug("wait cancelled by user")
             except Exception as e:
-                cli.log.error("unknown error in %s", e)
+                cli.log.error(f"unknown error in {e}")
                 exit(1)
             else:
                 cli.log.info(f"network '{network_name}' ready")
@@ -857,10 +857,10 @@ def edit_object_as_yaml(edit: object):
     try:
         completed.check_returncode()
     except CalledProcessError:
-        cli.log.error("editor returned an error: '%s'", completed.stdout)
+        cli.log.error(f"editor returned an error: '{completed.stdout}'")
         save_error = True
     else:
-        cli.log.debug("editor returned without error: '%s'", completed.stdout)
+        cli.log.debug(f"editor returned without error: '{completed.stdout}'")
         # prune comments from buffer
         edited_no_comments = str()
         for line in edited.splitlines():
@@ -872,15 +872,15 @@ def edit_object_as_yaml(edit: object):
             try:
                 edited_object = yaml_loads(edited)
             except parser.ParserError as e:
-                cli.log.error("invalid YAML or JSON: %s", e)
+                cli.log.error(f"invalid YAML or JSON: {e}")
                 save_error = True
             except Exception as e:
-                cli.log.error("unknown error in %s", e)
+                cli.log.error(f"unknown error in {e}")
                 save_error = True
             else:
                 return edited_object
     if save_error:
-        cli.log.warning("your buffer was saved and you may continue editing it  'create TYPE --file %s'", temp_file)
+        cli.log.warning(f"your buffer was saved and you may continue editing it  'create TYPE --file {temp_file}'")
         exit(1)
 
 def get_spinner(text):

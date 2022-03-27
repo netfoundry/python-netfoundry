@@ -38,7 +38,7 @@ class Network:
             else:
                 network_name = network
         elif (network_id or network_name) and network:
-            logging.warn("ignoring network identifier '%s' because network_id or network_name were provided", network)
+            logging.warn(f"ignoring network identifier '{network}' because network_id or network_name were provided")
 
 
         if network_id:
@@ -547,7 +547,7 @@ class Network:
             if not id:
                 if put.get('id'):
                     id = put['id']
-                    logging.debug("got id '%s' from put param object", id)
+                    logging.debug(f"got id '{id}' from put param object")
                 else:
                     logging.error('missing id of {type} to update, need put object with "self" link, "id" property, or need "id" param'.format(type=type))
                     raise Exception('missing id of {type} to update, need put object with "self" link, "id" property, or need "id" param'.format(type=type))
@@ -1738,7 +1738,7 @@ class Network:
                 ziti_secrets_keys = ['zitiUserId','zitiPassword']
                 assert(set(ziti_secrets_keys) & set(secrets.keys()) == set(ziti_secrets_keys))
             except AssertionError as e:
-                logging.error("unexpected secrets keys in '%s', got HTTP response code '%s'", secrets.keys(), status_symbol)
+                logging.error(f"unexpected secrets keys in '{secrets.keys}', got HTTP response code '{status_symbol}'")
                 raise e
             return(secrets)
 
@@ -1759,7 +1759,7 @@ class Network:
                 ziti_session_keys = ['expiresAt','sessionToken']
                 assert(set(ziti_session_keys) & set(session.keys()) == set(ziti_session_keys))
             except AssertionError as e:
-                logging.error("unexpected session keys in '%s', got HTTP response code '%s'", session.keys(), status_symbol)
+                logging.error(f"unexpected secrets keys in '{session.keys}', got HTTP response code '{status_symbol}'")
                 raise e
             return(session)
 

@@ -189,7 +189,7 @@ class NetworkGroup:
                     logging.debug("clobbering param 'version' with kwarg 'productVersion'")
                 version == value
             else:
-                logging.warn("ignoring unexpected keyword argument '%s'", param)
+                logging.warn(f"ignoring unexpected keyword argument '{param}'")
 
         request = {
             "name": name,
