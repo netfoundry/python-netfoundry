@@ -97,7 +97,7 @@ def login(cli):
     if cli.args.api == "organization":
         organization = use_organization()
         if cli.config.general.network_group and cli.config.general.network:
-            cli.log.debug("configuring network %s in group %s", cli.config.general.network, cli.config.general.network_group)
+            cli.log.debug(f"configuring network {cli.config.general.network} in group {cli.config.general.network_group}")
             network, network_group = use_network(
                 organization=organization,
                 group=cli.config.general.network_group,
@@ -204,7 +204,7 @@ export MOPENV={organization.environment}
         if which_ziti:
             cli.log.debug(f"found ziti CLI executable in {which_ziti}")
         else:
-            cli.log.critical("missing executable '%s' in PATH: %s", ziti_cli, os.environ['PATH'])
+            cli.log.critical(f"missing executable '{ziti_cli}' in PATH: {os.environ['PATH']}")
             exit(1)
         exec = cli.run([ziti_cli, '--version'])
         if exec.returncode == 0:
@@ -518,7 +518,7 @@ def get(cli, echo: bool=True, embed='all'):
                     cli.log.debug(f"valid keys: {str(valid_keys)}")
                     filtered_match = { key: match[key] for key in match.keys() if key in valid_keys}
                 else:
-                    cli.log.error(f"no valid keys requested in list: %s, need at least one of {str(cli.args.keys}"), str(match.keys()))
+                    cli.log.error(f"no valid keys requested in list: {','.join(cli.args.keys)}, need at least one of {','.join(match.keys())}")
                     exit(1)
             else:
                 cli.log.debug("not filtering output keys")
@@ -585,10 +585,10 @@ def list(cli):
                 matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
 
     if len(matches) == 0:
-        cli.log.info("found no %s '%s'", cli.args.resource_type, cli.args.query)
+        cli.log.info(f"found no {cli.args.resource_type} '{cli.args.query}'")
         exit(0)
     else:
-        cli.log.debug("found at least one %s '%s'", cli.args.resource_type, cli.args.query)
+        cli.log.debug(f"found at least one {cli.args.resource_type} '{cli.args.query}'")
 
     valid_keys = set()
     if cli.args.keys:
