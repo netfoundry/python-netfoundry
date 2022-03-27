@@ -14,7 +14,7 @@ from .exceptions import NFAPINoCredentials
 from .utility import (DEFAULT_TOKEN_EXPIRY, ENVIRONMENTS,
                       EMBEDDABLE_NETWORK_RESOURCES, NETWORK_RESOURCES, RESOURCES,
                       STATUS_CODES, find_generic_resources, get_generic_resource, http,
-                      is_uuidv4, normalize_caseless, get_token_cache, jwt_decode, jwt_environment, jwt_expiry)
+                      is_uuidv4, normalize_caseless, get_token_cache, jwt_environment, jwt_expiry)
 
 
 class Organization:
@@ -149,7 +149,7 @@ class Organization:
         if credentials is not None:
             self.credentials = credentials
             os.environ['NETFOUNDRY_API_ACCOUNT'] = self.credentials
-            logging.debug("got param credentials=%s", self.credentials)
+            logging.debug("got Organization(credentials=%s)", self.credentials)
         elif 'NETFOUNDRY_API_ACCOUNT' in os.environ:
             self.credentials = os.environ['NETFOUNDRY_API_ACCOUNT']
             logging.debug("got path to credentials file from env NETFOUNDRY_API_ACCOUNT=%s", self.credentials)
@@ -246,7 +246,7 @@ class Organization:
                     logging.warn("unexpected environment '%s'", self.environment)
 
         if self.environment and not self.audience:
-            self.audience = 'https://gateway.{env}.netfoundry.io/'.format(env=self.environment)
+            self.audience = f'https://gateway.{self.environment}.netfoundry.io/'
 
         if self.environment and self.audience:
             if not re.search(self.environment, self.audience):
@@ -306,7 +306,7 @@ class Organization:
                     proxies=self.proxies)
                 response_code = response.status_code
             except:
-                logging.error('failed to contact the authentication endpoint: {}'.format(token_endpoint))
+                logging.error(f'failed to contact the authentication endpoint: {token_endpoint}')
                 raise
 
             if response_code == STATUS_CODES.codes.OK:
@@ -315,24 +315,14 @@ class Organization:
                     self.token = token_text['access_token']
                     self.expiry = token_text['expires_in'] + epoch
                 except:
-                    raise Exception(
-                        'ERROR: failed to find an access_token in the response and instead got: {}'.format(
-                            response.text
-                        )
-                    )
+                    raise RuntimeError(f"failed to find an access_token in the response and instead got: {response.text}")
                 else:
                     self.expiry_seconds = self.expiry - epoch
                     logging.debug("bearer token expiry in %ds", self.expiry_seconds)
             else:
-                raise Exception(
-                    'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                        STATUS_CODES._codes[response_code][0].upper(),
-                        response_code,
-                        response.text
-                    )
-                )
+                raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
         else:
-            logging.debug("found token with %ss until expiry", self.expiry_seconds)
+            logging.debug(f"found token with {self.expiry_seconds}s until expiry")
 
         # write to the token cache if we have all three things: the token,
         # expiry, and audience URL, unless it matches the token cache, which
@@ -362,9 +352,6 @@ class Organization:
         # Obtain a session token and find own `.caller` identity and `.organizations`
         self.caller = self.get_caller_identity()
 
-        # always resolve Network Groups so we can specify either name or ID when calling super()
-        self.network_groups = self.get_network_groups_by_organization()
-
         if (not organization_id and not organization_label) and organization:
             if is_uuidv4(organization):
                 organization_id = organization
@@ -377,16 +364,10 @@ class Organization:
             self.organizations_by_label = dict()
             for org in self.get_organizations():
                 self.organizations_by_label[org['label']] = org['id']
-            if organization_label in self.organizations_by_label.keys():
+            if self.organizations_by_label.get(organization_label):
                 self.describe = self.get_organization(id=self.organizations_by_label[organization_label])
             else:
-                raise Exception(
-                    'ERROR: failed to find org label {:s} in the list of orgs {:s}'.format(
-                        organization_label,
-                        str(self.organizations_by_label.keys())
-                    )
-                )
-
+                raise RuntimeError(f"failed to find org label {organization_label} in the list of orgs {','.join(self.organizations_by_label.keys())}")
         else:
             self.describe = self.get_organization(id=self.caller['organizationId'])
 
@@ -394,8 +375,9 @@ class Organization:
         self.name = self.describe['name']
         self.id = self.describe['id']
 
+        # always resolve Network Groups so we can specify either name or ID when calling super()
         self.network_groups_by_name = dict()
-        for group in self.network_groups:
+        for group in self.get_network_groups_by_organization():
             self.network_groups_by_name[group['name']] = group['id']
 
     # END init
@@ -426,9 +408,9 @@ class Organization:
         headers = { "authorization": "Bearer " + self.token }
         for url in urls:
             try:
-                caller = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+                caller, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
             except:
-                logging.debug("failed to get caller identity from url: '%s'", url)
+                logging.debug(f"failed to get caller identity from url: '{url}'")
             else:
                 return(caller)
         logging.error("failed to get caller identity from any url")
@@ -442,60 +424,61 @@ class Organization:
         url = self.audience+'identity/v1/identities/'+identity_id
         headers = { "authorization": "Bearer " + self.token }
         try:
-            identity = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            identity, status_symbol, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except:
-            logging.debug("failed to get identity from url: '%s'", url)
-            raise
+            raise RuntimeError(f"failed to get identity from url: '{url}'")
         else:
             return(identity)
 
     def get_identities(self, **kwargs):
-        """Find identities.
+        """Get identities as a collection.
 
         :param str kwargs: filter results by logical AND query parameters
         """
         params = dict()
         for param in kwargs.keys():
             params[param] = kwargs[param]
-        if 'sort' in params.keys():
+        if params.get('sort'):
             logging.warn("query param 'sort' is not supported by Identity Service")
-        if 'size' in params.keys():
+        if params.get('size'):
             logging.warn("query param 'size' is not supported by Identity Service")
-        if 'page' in params.keys():
+        if params.get('page'):
             logging.warn("query param 'page' is not supported by Identity Service")
 
         url = self.audience+'identity/v1/identities'
         headers = { "authorization": "Bearer " + self.token }
         try:
-            identities = find_generic_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params)
+            identities = list()
+            for i in find_generic_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params):
+                identities.extend(i)
         except:
-            logging.debug("failed to get identities from url: '%s'", url)
-            raise
+            raise RuntimeError(f"failed to get identities from url: '{url}'")
         else:
             return(identities)
 
     def get_organizations(self, **kwargs):
-        """Find organizations.
+        """Find organizations as a collection.
 
         :param str kwargs: filter results by logical AND query parameters
         """
         params = dict()
         for param in kwargs.keys():
             params[param] = kwargs[param]
-        if 'sort' in params.keys():
+        if params.get('sort'):
             logging.warn("query param 'sort' is not supported by Identity Service")
-        if 'size' in params.keys():
+        if params.get('size'):
             logging.warn("query param 'size' is not supported by Identity Service")
-        if 'page' in params.keys():
+        if params.get('page'):
             logging.warn("query param 'page' is not supported by Identity Service")
 
         url = self.audience+'identity/v1/organizations'
         headers = { "authorization": "Bearer " + self.token }
         try:
-            organizations = find_generic_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params)
+            organizations = list()
+            for i in find_generic_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params):
+                organizations.extend(i)
         except:
-            logging.debug("failed to get organizations from url: '%s'", url)
-            raise
+            raise RuntimeError(f"failed to get organizations from url: '{url}'")
         else:
             return(organizations)
 
@@ -508,10 +491,9 @@ class Organization:
         url = self.audience+'identity/v1/organizations/'+id
         headers = { "authorization": "Bearer " + self.token }
         try:
-            organization = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            organization, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except:
-            logging.debug("failed to get organization from url: '%s'", url)
-            raise
+            raise RuntimeError(f"failed to get organization from url: '{url}'")
         else:
             return(organization)
 
@@ -524,10 +506,9 @@ class Organization:
         url = self.audience+'rest/v1/network-groups/'+network_group_id
         headers = { "authorization": "Bearer " + self.token }
         try:
-            network_group = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            network_group, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except:
-            logging.debug("failed to get network_group from url: '%s'", url)
-            raise
+            raise RuntimeError(f"failed to get network_group from url: '{url}'")
         else:
             return(network_group)
 
@@ -545,36 +526,36 @@ class Organization:
         params = dict()
         if embed == "all":
             params['embed'] = ','.join(EMBEDDABLE_NETWORK_RESOURCES)
-            logging.debug("requesting embed all resource types in network domain: {:s}".format(params['embed']))
+            logging.debug(f"requesting embed all resource types in network domain: {params['embed']}")
         elif embed:
             valid_types = [type for type in embed.split(',') if RESOURCES[type]['domain'] == "network"]
             params['embed'] = ','.join(valid_types)
-            logging.debug("requesting embed some resource types in network domain: {:s}".format(valid_types))
+            logging.debug(f"requesting embed some resource types in network domain: {valid_types}")
             for type in embed.split(','):
-                if not type in NETWORK_RESOURCES.keys():
-                    logging.warning("not requesting '{:s}', not a resource type in the network domain".format(type))
+                if not NETWORK_RESOURCES.get(type):
+                    logging.warning(f"not requesting '{type}', not a resource type in the network domain")
 
         url = self.audience+'core/v2/networks/'+network_id
         try:
-            network = get_generic_resource(url=url, headers=headers, accept=accept, proxies=self.proxies, verify=self.verify, **params)
+            network, status_symbol = get_generic_resource(url=url, headers=headers, accept=accept, proxies=self.proxies, verify=self.verify, **params)
         except:
-            logging.debug("failed to get network from url: '%s'", url)
-            raise
+            raise RuntimeError(f"failed to get network from url: '{url}'")
         else:
             return(network)
 
     def get_network_groups_by_organization(self, **kwargs):
-        """Find network groups.
+        """Find network groups as a collection.
 
         :param str kwargs: filter results by any supported query param
         """
         url = self.audience+'rest/v1/network-groups'
         headers = { "authorization": "Bearer " + self.token }
         try:
-            network_groups = find_generic_resources(url=url, headers=headers, embedded=RESOURCES['network-groups']._embedded, proxies=self.proxies, verify=self.verify, **kwargs)
+            network_groups = list()
+            for i in find_generic_resources(url=url, headers=headers, embedded=RESOURCES['network-groups']._embedded, proxies=self.proxies, verify=self.verify, **kwargs):
+                network_groups.extend(i)
         except:
-            logging.debug("failed to get network_groups from url: '%s'", url)
-            raise
+            raise RuntimeError(f"failed to get network_groups from url: '{url}'")
         else:
             return(network_groups)
 
@@ -582,7 +563,7 @@ class Organization:
 
     def get_networks_by_organization(self, name: str=None, deleted: bool=False, **kwargs):
         """
-        Find networks known to this organization.
+        Find networks by organization as a collection.
 
         :param str name: filter results by name
         :param str kwargs: filter results by any supported query param
@@ -595,11 +576,14 @@ class Organization:
         }
         for param in kwargs.keys():
             params[param] = kwargs[param]
+        if deleted:
+            params['status'] = 'DELETED'
         try:
-            networks = find_generic_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, proxies=self.proxies, verify=self.verify, **params)
+            networks = list()
+            for i in find_generic_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, proxies=self.proxies, verify=self.verify, **params):
+                networks.extend(i)
         except:
-            logging.debug("failed to get networks from url: '%s'", url)
-            raise
+            raise RuntimeError(f"failed to get networks from url: '{url}'")
         else:
             return(networks)
 
@@ -634,7 +618,7 @@ class Organization:
         return normal_names.count(normalize_caseless(name))
 
     def get_networks_by_group(self, network_group_id: str, deleted: bool=False, **kwargs):
-        """Find networks by network group ID.
+        """Find networks by network group as a collection.
 
         :param network_group_id: required network group UUIDv4
         :param str kwargs: filter results by logical AND query parameters
@@ -650,10 +634,20 @@ class Organization:
         url = self.audience+'core/v2/networks'
         headers = { "authorization": "Bearer " + self.token }
         try:
-            networks = find_generic_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, proxies=self.proxies, verify=self.verify, **params)
+            networks = list()
+            for i in find_generic_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, proxies=self.proxies, verify=self.verify, **params):
+                networks.extend(i)
         except:
-            logging.debug("failed to get networks from url: '%s'", url)
-            raise
+            raise RuntimeError(f"failed to get networks from url: '{url}'")
         else:
             return(networks)
 
+    # if not NETWORK_RESOURCES.get(plural(type)):
+    #     logging.error("unknown resource type '{plural}'. Choices: {choices}".format(
+    #         singular=type,
+    #         plural=plural(type),
+    #         choices=NETWORK_RESOURCES.keys()
+    #     ))
+    #     raise RuntimeError
+    # elif plural(type) in ["edge-routers","network-controllers"]:
+    #     params['embed'] = "host"

@@ -2,6 +2,9 @@
 """Exceptions class"""
 
 
+from netfoundry.utility import RESOURCES
+
+
 class NFAPIError(Exception):
     """Base-class for all exceptions raised by this module."""
 
@@ -33,5 +36,21 @@ class NFAPIHostCustomerHosted(NFAPIError):
 class NFAPIEdgeRouterNotProvisioned(NFAPIError):
     """Network host has not been provisioned."""
 
+
 class NFAPINoCredentials(NFAPIError):
     """Unable to obtain a token because no credentials were configured."""
+
+
+class UnknownResourceType(NFAPIError):
+    """Unknown resource type."""
+
+    def __init__(self, resource_type: str=None) -> None:
+        """Add the type as an attribute to this instance."""
+        self.resource_type = resource_type
+
+    def __str__(self):
+        """Report the invalid type if provided, finally report valid types."""
+        if self.resource_type is not None:
+            return f"Not a valid resource type: '{self.resource_type}'. Try one of: {','.join(RESOURCES.keys())}"
+        else:
+            return f"Not a valid resource type. Try one of: {','.join(RESOURCES.keys())}"

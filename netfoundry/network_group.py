@@ -5,7 +5,7 @@ import json
 import logging
 
 from .utility import (NETWORK_RESOURCES, RESOURCES, STATUS_CODES,
-                      find_generic_resources, get_generic_resource, http, is_uuidv4,
+                      find_generic_resources, http, is_uuidv4,
                       normalize_caseless)
 
 
@@ -17,6 +17,7 @@ class NetworkGroup:
 
     def __init__(self, Organization: object, network_group_id: str=None, network_group_name: str=None, group: str=None):
         """Initialize the network group class with a group name or ID."""
+        self.network_groups = Organization.get_network_groups_by_organization()
         if (not network_group_id and not network_group_name) and group:
             if is_uuidv4(group):
                 network_group_id = group
@@ -24,34 +25,27 @@ class NetworkGroup:
                 network_group_name = group
         if network_group_id:
             self.network_group_id = network_group_id
-            self.network_group_name = [ ng['organizationShortName'] for ng in Organization.network_groups if ng['id'] == network_group_id ][0]
+            self.network_group_name = [ ng['organizationShortName'] for ng in self.network_groups if ng['id'] == network_group_id ][0]
         # TODO: review the use of org short name ref https://mattermost.tools.netfoundry.io/netfoundry/pl/gegyzuybypb9jxnrw1g1imjywh
         elif network_group_name:
             self.network_group_name = network_group_name
-            network_group_matches = [ ng['id'] for ng in Organization.network_groups if ng['organizationShortName'] == network_group_name ]
+            network_group_matches = [ ng['id'] for ng in self.network_groups if ng['organizationShortName'] == network_group_name ]
             if len(network_group_matches) == 1:
-                self.network_group_id = [ ng['id'] for ng in Organization.network_groups if ng['organizationShortName'] == network_group_name ][0]
+                self.network_group_id = [ ng['id'] for ng in self.network_groups if ng['organizationShortName'] == network_group_name ][0]
             else:
-                raise Exception("ERROR: there was not exactly one network group matching the name \"{}\"".format(network_group_name))
-        elif len(Organization.network_groups) > 0:
+                raise RuntimeError(f"there was not exactly one network group matching the name '{network_group_name}'")
+        elif len(self.network_groups) > 0:
             # first network group is typically the only network group
-            self.network_group_id = Organization.network_groups[0]['id']
-            self.network_group_name = Organization.network_groups[0]['organizationShortName']
+            self.network_group_id = self.network_groups[0]['id']
+            self.network_group_name = self.network_groups[0]['organizationShortName']
             # warn if there are other groups
-            if len(Organization.network_groups) > 1:
-                logging.warn("using first network group {:s} and ignoring {:d} other(s) e.g. {:s}, etc...".format(
-                    self.network_group_name,
-                    len(Organization.network_groups) - 1,
-                    Organization.network_groups[1]['organizationShortName']
-                ))
-            elif len(Organization.network_groups) == 1:
-                logging.debug("using the only available network group: {:s}".format(
-                    self.network_group_name
-                ))
+            if len(self.network_groups) > 1:
+                logging.warn(f"using first network group {self.network_group_name} and ignoring {len(self.network_groups) - 1} other(s) e.g. {self.network_groups[1]['organizationShortName']}, etc...")
+            elif len(self.network_groups) == 1:
+                logging.debug(f"using the only available network group: {self.network_group_name}")
         else:
-            raise Exception("need at least one network group in organization")
+            raise RuntimeError("need at least one network group in organization")
 
-        self.Organization = Organization # pass the instance to the group to expose methods
         self.token = Organization.token
         self.proxies = Organization.proxies
         self.verify = Organization.verify
@@ -61,12 +55,14 @@ class NetworkGroup:
         self.id = self.network_group_id
         self.name = self.network_group_name
         self.vanity = normalize_caseless(Organization.label)
-
-
         if self.environment == "production":
-            self.nfconsole = "https://{vanity}.nfconsole.io".format(vanity=self.vanity)
+            self.nfconsole = f"https://{self.vanity}.nfconsole.io"
         else:
-            self.nfconsole = "https://{vanity}.{env}-nfconsole.io".format(vanity=self.vanity, env=self.environment)
+            self.nfconsole = f"https://{self.vanity}.{self.environment}-nfconsole.io"
+
+        network_ids_by_normal_name = dict()
+        for net in Organization.get_networks_by_group(network_group_id=self.network_group_id):
+            network_ids_by_normal_name[normalize_caseless(net['name'])] = id
 
     def nc_data_centers_by_location(self):
         """Get a controller data center by locationCode."""
@@ -77,36 +73,24 @@ class NetworkGroup:
         return(my_nc_data_centers_by_location)
 
     # resolve network UUIDs by name
-    def networks_by_name(self):
-        """Find networks in group by normalized name.
-        
-        Deprecated: use networks_by_normal_name
-        """
-        my_networks_by_name = dict()
-        for net in self.session.get_networks_by_group(self.network_group_id):
-            my_networks_by_name[net['name']] = net['id']
-        return(my_networks_by_name)
-
-    def networks_by_normal_name(self):
-        """Find networks in group by case-insensitive (caseless, normalized) name.
+    def network_id_by_normal_name(self, name):
+        """Find network ID in group by case-insensitive (caseless, normalized) name.
         
         Case-insensitive uniqueness is enforced by the API for each type of entity.
         """
-        my_networks_by_normal_name = dict()
-        for name,id in self.networks_by_name().items():
-            my_networks_by_normal_name[normalize_caseless(name)] = id
-        return(my_networks_by_normal_name)
+        caseless = normalize_caseless(name)
+        if self.network_ids_by_normal_name.get(caseless):
+            return(self.network_ids_by_normal_name[caseless])
+        else:
+            raise RuntimeError(f"no network named '{name}' in this network group")
 
     def network_exists(self, name: str, deleted: bool=False):
-        """Check if a network exists.
+        """Check if a network exists in the current group.
         
         :param name: the case-insensitive string to search
         :param deleted: include deleted networks in results
         """
-        network_normal_names = list()
-        for net in self.session.get_networks_by_group(network_group_id=self.network_group_id, deleted=deleted):
-            network_normal_names.append(normalize_caseless(net['name']))
-        if normalize_caseless(name) in network_normal_names:
+        if normalize_caseless(name) in self.networks:
             return(True)
         else:
             return(False)
@@ -124,10 +108,11 @@ class NetworkGroup:
         url = self.audience+'core/v2/data-centers'
         headers = { "authorization": "Bearer " + self.token }
         try:
-            data_centers = find_generic_resources(url=url, headers=headers, embedded=NETWORK_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params)
+            data_centers = list()
+            for i in find_generic_resources(url=url, headers=headers, embedded=NETWORK_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params):
+                data_centers.extend(i)
         except:
-            logging.debug("failed to get data-centers from url: '%s'", url)
-            raise
+            raise RuntimeError(f"failed to get data-centers from url: '{url}'")
         else:
             return(data_centers)
 
@@ -144,10 +129,11 @@ class NetworkGroup:
         url = self.audience+'product-metadata/v2/download-urls.json'
         headers = dict() # no auth
         try:
-            all_product_metadata = find_generic_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            all_product_metadata = list()
+            for i in find_generic_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify):
+                all_product_metadata.extend(i)
         except:
-            logging.debug("failed to get product-metadata from url: '%s'", url)
-            raise
+            raise RuntimeError(f"failed to get product-metadata from url: '{url}'")
         else:
             if is_active:
                 filtered_product_metadata = dict()
@@ -187,8 +173,8 @@ class NetworkGroup:
         :param size: optional network configuration metadata name from /core/v2/network-configs e.g. "medium"
         """
         my_nc_data_centers_by_location = self.nc_data_centers_by_location()
-        if not location in my_nc_data_centers_by_location.keys():
-            raise Exception("ERROR: unexpected Network location '{:s}'. Valid locations include: {}.".format(location, my_nc_data_centers_by_location.keys()))
+        if not my_nc_data_centers_by_location.get(location):
+            raise RuntimeError(f"unexpected network location '{location}'. Valid locations include: {','.join(my_nc_data_centers_by_location.keys())}.")
 
         # map incongruent api keys from kwargs to function params ("name", "size" are congruent)
         for param,value in kwargs.items():
@@ -227,10 +213,7 @@ class NetworkGroup:
             elif version == "default":
                 pass # do not specify a value for productVersion
             else:
-                raise Exception("ERROR: invalid version \"{version}\". Expected one of {product_versions}".format(
-                    version=version,
-                    product_versions=product_versions))
-
+                raise RuntimeError(f"invalid version '{version}'. Expected one of {product_versions}")
         headers = {
             'Content-Type': 'application/json',
             "authorization": "Bearer " + self.token
@@ -254,21 +237,11 @@ class NetworkGroup:
             try:
                 network = json.loads(response.text)
             except ValueError as e:
-                raise e('ERROR: failed to load created network JSON, got HTTP code {:s} ({:d}) with body {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text)
-                )
+                raise e(f'ERROR: failed to load created network JSON, got HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) with body {response.text}')
             else:
                 return(network)
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
+            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
     def delete_network(self, network_id=None, network_name=None):
         """
@@ -281,10 +254,10 @@ class NetworkGroup:
             networks_by_name = self.networks_by_name()
             if network_id:
                 network_name = next(name for name, uuid in networks_by_name.items() if uuid == network_id)
-            elif network_name and network_name in networks_by_name.keys():
+            elif network_name and networks_by_name.get(network_name):
                 network_id = networks_by_name[network_name]
         except:
-            raise Exception("ERROR: need one of network_id or network_name for a Network in this network group: {:s}".format(self.name))
+            raise RuntimeError(f"need one of network_id or network_name for a network in this network group: {self.name}")
 
         try:
             headers = { "authorization": "Bearer " + self.token }
@@ -300,13 +273,7 @@ class NetworkGroup:
             raise
 
         if not response_code == STATUS_CODES.codes.ACCEPTED:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
+            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
         network = json.loads(response.text)
         return(network)

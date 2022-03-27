@@ -218,25 +218,27 @@ def get_generic_resource(url: str, headers: dict, proxies: dict=dict(), verify: 
             proxies=proxies,
             verify=verify,
         )
+        status_symbol = STATUS_CODES._codes[response.status_code][0].upper()
         response.raise_for_status()
     except RequestException as e:
         logging.error('unexpected HTTP response code {:s} ({:d}) and response {:s}'.format(
-                STATUS_CODES._codes[response.status_code][0].upper(),
+                status_symbol,
                 response.status_code,
                 response.text))
         raise e
     else:
+        
         try:
             resource = response.json()
         except JSONDecodeError as e:
             logging.error("caught exception deserializing HTTP response as JSON")
             raise e
         else:
-            return resource
+            return resource, status_symbol
 
 def find_generic_resources(url: str, headers: dict, embedded: str=None, proxies: dict=dict(), verify: bool=True, accept: str=None, **kwargs):
     """
-    Recurse and return all pages of a type of resource.
+    Generate each page of a type of resource.
 
     :param url: the full URL to get
     :param headers: authorization and accept headers
@@ -249,13 +251,13 @@ def find_generic_resources(url: str, headers: dict, embedded: str=None, proxies:
     params = dict()
     for param in kwargs.keys():
         params[param] = kwargs[param]
-    if not 'sort' in params.keys():
+    if not params.get('sort'):
         params["sort"] = "name,asc"
-    if 'size' in params.keys():
+    if params.get('size'):
         get_all_pages = False
     else:
         params['size'] = 1000
-    if 'page' in params.keys():
+    if params.get('page'):
         get_all_pages = False
     else:
         params['page'] = 0
@@ -264,15 +266,6 @@ def find_generic_resources(url: str, headers: dict, embedded: str=None, proxies:
             headers['accept'] = "application/json;as="+params['accept']
         else:
             logging.warn("ignoring invalid value for header 'accept': '{:s}'".format(accept))
-    if not plural(type) in NETWORK_RESOURCES.keys():
-        logging.error("unknown resource type '{plural}'. Choices: {choices}".format(
-            singular=type,
-            plural=plural(type),
-            choices=NETWORK_RESOURCES.keys()
-        ))
-        raise RuntimeError
-    elif plural(type) in ["edge-routers","network-controllers"]:
-        params['embed'] = "host"
 
     try:
         response = http.get(
@@ -282,10 +275,11 @@ def find_generic_resources(url: str, headers: dict, embedded: str=None, proxies:
             proxies=proxies,
             verify=verify,
         )
+        status_symbol = STATUS_CODES._codes[response.status_code][0].upper()
         response.raise_for_status()
     except RequestException as e:
         logging.error('unexpected HTTP response code {:s} ({:d}) and response {:s}'.format(
-                STATUS_CODES._codes[response.status_code][0].upper(),
+                status_symbol,
                 response.status_code,
                 response.text))
         raise e
@@ -296,40 +290,36 @@ def find_generic_resources(url: str, headers: dict, embedded: str=None, proxies:
             logging.error("caught exception deserializing HTTP response as JSON")
             raise e
         else:
-            if 'page' in resource_page.keys():
+            if resource_page.get('page'):
                 try:
                     total_pages = resource_page['page']['totalPages']
                     total_elements = resource_page['page']['totalElements']
                 except KeyError as e:
-                    logging.error("got 'page' key in HTTP response but missing expected sub-key: %s", e)
-                    raise
+                    raise RuntimeError("got 'page' key in HTTP response but missing expected sub-key: %s", e)
                 else:
                     if total_elements == 0:
-                        return(list())
+                        yield_page = list() # delay yielding until end of flow
                     else:
-                        if embedded:
+                        if embedded: # function param 'embedded' specifies the reference in which the collection of resources should be found
                             try:
-                                all_pages = resource_page['_embedded'][embedded]
+                                yield_page = resource_page['_embedded'][embedded]
                             except KeyError as e:
-                                logging.error("missing key in valid JSON response: '%s', got: '%s'", '_embedded.'+embedded, e)
-                                raise
-                        else:
-                            all_pages = resource_page
+                                raise RuntimeError(f"failed to find embedded collection in valid JSON response at '_embedded.{embedded}', got: '{e}'")
 
-                    if total_pages == 1:
-                        return all_pages
-                    elif total_pages > 1 and get_all_pages: # this is False if page or size param, to stop recursion or get a single page
-                        for next_page in range(1,total_pages):
+                    # yield first, only, and empty pages
+                    yield yield_page
+                    
+                    # then yield subsequent pages, if applicable
+                    if get_all_pages: # this is False if param 'page' or 'size' to stop recursion or get a single page
+                        for next_page in range(1,total_pages): # first page is 0, so now we start with 1
                             params['page'] = next_page
                             try:
                                 # recurse
-                                all_pages.extend(find_generic_resources(url=url, headers=headers, embedded=embedded, proxies=proxies, verify=verify, **params))
+                                yield from find_generic_resources(url=url, headers=headers, embedded=embedded, proxies=proxies, verify=verify, **params)
                             except Exception as e:
-                                logging.error("failed to get page %d of %d, got '%s'", next_page, total_pages)
-                                raise
-                        return all_pages
+                                raise RuntimeError("failed to get page %d of %d, got '%s'", next_page, total_pages)                        
             else:
-                return resource_page
+                yield resource_page
 
 
 @dataclass

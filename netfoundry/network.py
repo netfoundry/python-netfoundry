@@ -25,10 +25,12 @@ class Network:
         :param str network_name: optional name of the network to describe and use
         :param str network_id: optional UUID of the network to describe and use
         """
+        # define some essential attributes
         self.token = NetworkGroup.token
         self.proxies = NetworkGroup.proxies
         self.verify = NetworkGroup.verify
         self.audience = NetworkGroup.audience
+        self.network_group_id = NetworkGroup.id
 
         if (not network_id and not network_name) and network:
             if is_uuidv4(network):
@@ -38,17 +40,18 @@ class Network:
         elif (network_id or network_name) and network:
             logging.warn("ignoring network identifier '%s' because network_id or network_name were provided", network)
 
+
         if network_id:
             self.describe = self.get_network_by_id(network_id)
         elif network_name:
-            self.describe = self.get_network_by_name(name=network_name,group=NetworkGroup.id)
+            self.describe = self.get_network_by_name(name=network_name)
         else:
-            raise Exception("ERROR: need one of network_id or network_name")
+            logging("need one of network_id or network_name")
+            raise RuntimeError
 
-        # populate some attributes
+        # define some convenience attributes
         self.id = self.describe['id']
         self.name = self.describe['name']
-        self.network_group_id = self.describe['networkGroupId']
         self.status = self.describe['status']
         self.network_controller = self.describe['networkController']
         self.product_version = self.describe['productVersion']
@@ -87,10 +90,10 @@ class Network:
         if only_hosted and only_customer:
             raise Exception("ERROR: specify only one of only_hosted or only_customer")
         elif only_hosted:
-            hosted_edge_routers = [er for er in all_edge_routers if 'provider' in er.keys() and not er['provider'] == 'CUSTOMER']
+            hosted_edge_routers = [er for er in all_edge_routers if er.get('provider') and not er['provider'] == 'CUSTOMER']
             return(hosted_edge_routers)
         elif only_customer:
-            customer_edge_routers = [er for er in all_edge_routers if not 'provider' in er.keys() or er['provider'] == 'CUSTOMER']
+            customer_edge_routers = [er for er in all_edge_routers if not er.get('provider') or er['provider'] == 'CUSTOMER']
             return(customer_edge_routers)
         else:
             return(all_edge_routers)
@@ -213,11 +216,11 @@ class Network:
                 range = range+':'+range
             
             if not re.fullmatch(valid_range, range):
-                raise Exception("ERROR: failed to parse client port range: {}".format(range))
+                raise RuntimeError(f"failed to parse client port range: {range}")
 
             bounds = re.split(separators, range)
             if not len(bounds) == 2 or int(bounds[0]) > int(bounds[1]):
-                raise Exception("ERROR: failed to find one lower, one higher port for range: {}".format(range))
+                raise RuntimeError(f"failed to find one lower, one higher port for range: {range}")
             else:
                 valid_port_ranges.append({"low": int(bounds[0]), "high": int(bounds[1])})
 
@@ -250,14 +253,14 @@ class Network:
                         name_lookup = self.get_resource(type=singular(type),id=entity)
                         entity_name = name_lookup['name']
                     except Exception as e:
-                        raise Exception('ERROR: Failed to find exactly one {type} with ID "{id}". Caught exception: {e}'.format(type=singular(type), id=entity, e=e))
+                        raise RuntimeError(f"failed to find exactly one {singular(type)} with ID '{entity}'. Caught exception: {e}")
                     else: valid_entities.append('@'+entity_name) # is an existing endpoint's name resolved from UUID
                 else:
                     try: 
                         name_lookup = self.get_resources(type=plural(type),name=entity)[0]
                         entity_name = name_lookup['name']
                     except Exception as e:
-                        raise Exception('ERROR: Failed to find exactly one {type} named "{name}". Caught exception: {e}'.format(type=singular(type), name=entity, e=e))
+                        raise RuntimeError(f"failed to find exactly one {singular(type)} named '{entity}'. Caught exception: {e}")
                     # append to list after successfully resolving name to ID
                     else: valid_entities.append('@'+entity_name) # is an existing entity's name
 
@@ -271,10 +274,9 @@ class Network:
         url = self.audience+'core/v2/data-centers/'+id
         headers = { "authorization": "Bearer " + self.token }
         try:
-            data_center = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            data_center, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except:
-            logging.debug("failed to get data_center from url: '%s'", url)
-            raise
+            raise RuntimeError(f"failed to get data_center from url: '{url}'")
         else:
             return(data_center)
 
@@ -302,15 +304,18 @@ class Network:
         url = self.audience+'core/v2/data-centers'
         headers = { "authorization": "Bearer " + self.token }
         try:
-            data_centers = find_generic_resources(url=url, headers=headers, embedded=NETWORK_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params)
+            data_centers = list()
+            for i in find_generic_resources(url=url, headers=headers, embedded=NETWORK_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params):
+                data_centers.extend(i)
         except:
-            logging.debug("failed to get data-centers from url: '%s'", url)
-            raise
+            raise RuntimeError(f"failed to get data-centers from url: '{url}'")
         else:
             return(data_centers)
 
     def share_endpoint(self,recipient,endpoint_id):
-        """share the new endpoint enrollment token with an email address
+        """
+        Share an endpoint's enrollment token with an email address.
+
             :recipient [required] the email address
             :endpoint_id [required] the UUID of the endpoint
         """
@@ -337,14 +342,8 @@ class Network:
             raise
 
         if not response_code == STATUS_CODES.codes['ACCEPTED']:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
-            
+            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
+
     def get_resource_by_id(self, type: str, id: str, accept: str=None):
         """Return an object describing a resource entity.
 
@@ -362,15 +361,11 @@ class Network:
             if accept in ["create", "update"]:
                 headers['accept'] = "application/json;as="+accept
             else:
-                logging.warn("ignoring invalid value for param 'accept': '{:s}'".format(accept))
+                logging.warn(f"ignoring invalid value for param 'accept': '{accept}'")
         if not type == "network":
             params["networkId"] = self.id
-        if not plural(type) in NETWORK_RESOURCES.keys():
-            logging.error("unknown resource type '{plural}'. Choices: {choices}".format(
-                singular=type,
-                plural=plural(type),
-                choices=NETWORK_RESOURCES.keys()
-            ))
+        if not NETWORK_RESOURCES.get(plural(type)):
+            raise RuntimeError(f"unknown resource type '{plural(type)}'. Choices: {','.join(NETWORK_RESOURCES.keys())}")
             raise RuntimeError
         elif plural(type) in ["edge-routers","network-controllers"]:
             params['embed'] = "host"
@@ -378,10 +373,9 @@ class Network:
         headers = { "authorization": "Bearer " + self.token }
         url = self.audience+'core/v2/'+plural(type)+'/'+id
         try:
-            resource = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            resource, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except:
-            logging.debug("failed to get resource from url: '%s'", url)
-            raise
+            raise RuntimeError(f"failed to get resource from url: '{url}'")
         else:
             return(resource)
     get_resource = get_resource_by_id
@@ -405,21 +399,22 @@ class Network:
         params = dict()
         for param in kwargs.keys():
             params[param] = kwargs[param]
-        params["networkId"] = self.id
+        if not type == 'network':
+            params["networkId"] = self.id
+        elif params.get('name'):
+            params['findByName'] = params['name']
+            del params['name']
         if deleted:
             params['status'] = "DELETED"
+
         url = self.audience+'core/v2/networks'
         headers = { "authorization": "Bearer " + self.token }
-        params = {
-            "findByName": name
-        }
-        for param in kwargs.keys():
-            params[param] = kwargs[param]
         try:
-            networks = find_generic_resources(url=url, headers=headers, accept=accept, embedded=NETWORK_RESOURCES[type]._embedded, proxies=self.proxies, verify=self.verify, **params)
+            networks = list()
+            for i in find_generic_resources(url=url, headers=headers, accept=accept, embedded=NETWORK_RESOURCES[type]._embedded, proxies=self.proxies, verify=self.verify, **params):
+                networks.extend(i)
         except:
-            logging.debug("failed to get networks from url: '%s'", url)
-            raise
+            raise RuntimeError(f"failed to get networks from url: '{url}'")
         else:
             return(networks)
 
@@ -457,20 +452,17 @@ class Network:
             except NameError as e:
                 raise(e)
         else: type = self_link.split('/')[5] # e.g. endpoints, app-wans, edge-routers, etc...
-        if not type in EXCLUDED_PATCH_PROPERTIES.keys():
-            raise Exception("ERROR: got unexpected type {:s} for patch request to {:s}".format(
-                type, 
-                self_link)
-            )
+        if not EXCLUDED_PATCH_PROPERTIES.get(type):
+            raise RuntimeError(f"got unexpected type {type} for patch request to {self_link}")
         try:
-            before_resource = get_generic_resource(url=self_link, headers=headers, proxies=self.proxies, verify=self.verify, accept='update')
-        except Exception as e:
-            logging.error("failed to get the %s for patching: '%s'", type, e)
+            before_resource, status_symbol = get_generic_resource(url=self_link, headers=headers, proxies=self.proxies, verify=self.verify, accept='update')
+        except:
+            raise RuntimeError(f"failed to get {type} for patching: '{e}'")
         else:
             # compare the patch to the discovered, current state, adding new or updated keys to pruned_patch
             pruned_patch = dict()
             for k in patch.keys():
-                if k not in EXCLUDED_PATCH_PROPERTIES[type] and k in before_resource.keys():
+                if k not in EXCLUDED_PATCH_PROPERTIES[type] and before_resource.get(k):
                     if isinstance(patch[k], list):
                         if not set(before_resource[k]) == set(patch[k]):
                             pruned_patch[k] = list(set(patch[k]))
@@ -480,10 +472,10 @@ class Network:
 
             # attempt to update if there's at least one difference between the current resource and the submitted patch
             if len(pruned_patch.keys()) > 0:
-                if not "name" in pruned_patch.keys():
+                if not pruned_patch.get('name'):
                     pruned_patch["name"] = before_resource["name"]
                 # if entity is a service and "model" is patched then always include "modelType"
-                if type == "services" and not "modelType" in pruned_patch.keys() and "model" in pruned_patch.keys():
+                if type == "services" and not pruned_patch.get('modelType') and pruned_patch.get('model'):
                     pruned_patch["modelType"] = before_resource["modelType"]
                 try:
                     after_response = http.patch(
@@ -498,20 +490,11 @@ class Network:
                     raise
                 if after_response_code in [STATUS_CODES.codes.OK, STATUS_CODES.codes.ACCEPTED]: # HTTP 202
                     try:
-                        after_resource = json.loads(after_response.text)
+                        after_resource = after_response.json()
                     except ValueError as e:
-                        logging.error('failed to load {r} object from PATCH response'.format(r = type))
-                        raise(e)
+                        raise RuntimeError(f"failed to load {type} object from PATCH response")
                 else:
-                    json_formatted = json.dumps(patch, indent=2)
-                    raise Exception(
-                        'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s} for PATCH update {:s}'.format(
-                            STATUS_CODES._codes[after_response_code][0].upper(),
-                            after_response_code,
-                            after_response.text,
-                            json_formatted
-                        )
-                    )
+                    raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[after_response_code][0].upper()} ({after_response_code}) for patch: {json.dumps(patch, indent=2)}")            
 
                 # if API responded with async promise then parse the expected process execution ID
                 if wait and after_response_code == STATUS_CODES.codes.ACCEPTED: # HTTP 202
@@ -558,7 +541,7 @@ class Network:
                 logging.error('need put object with "self" link or need type param')
                 raise Exception('need put object with "self" link or need type param')
             if not id:
-                if 'id' in put.keys():
+                if put.get('id'):
                     id = put['id']
                     logging.debug("got id '%s' from put param object", id)
                 else:
@@ -586,20 +569,11 @@ class Network:
 
         if response_code in [STATUS_CODES.codes.OK, STATUS_CODES.codes.ACCEPTED]: # HTTP 202
             try:
-                resource = json.loads(response.text)
+                resource = response.json()
             except ValueError as e:
-                logging.error('failed to load {r} object from PUT response'.format(r = type))
-                raise(e)
+                raise RuntimeError(f"failed to load JSON from POST response")
         else:
-            json_formatted = json.dumps(put, indent=2)
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s} for PUT update {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text,
-                    json_formatted
-                )
-            )
+            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) for put: {json.dumps(put, indent=2)}")            
 
         # if API responded with async promise then parse the expected process execution ID, error if missing
         if wait and response_code == STATUS_CODES.codes.ACCEPTED: # HTTP 202
@@ -653,20 +627,11 @@ class Network:
 
         if response_code in [STATUS_CODES.codes.OK, STATUS_CODES.codes.ACCEPTED]: # HTTP 202
             try:
-                resource = json.loads(response.text)
+                resource = response.json()
             except ValueError as e:
-                logging.error('failed to load {r} object from POST response'.format(r = type))
-                raise(e)
+                raise RuntimeError(f"failed to load JSON from POST response")
         else:
-            json_formatted = json.dumps(post, indent=2)
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s} for POST create {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text,
-                    json_formatted
-                )
-            )
+            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) for post: {json.dumps(post, indent=2)}")            
 
         # if API responded with async promise then parse the expected process execution ID, error if missing
         if response_code == STATUS_CODES.codes.ACCEPTED: # HTTP 202
@@ -736,20 +701,13 @@ class Network:
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, NETWORK_RESOURCES['endpoints'].create_responses):
             try:
-                started = json.loads(response.text)
+                started = response.json()
             except ValueError as e:
-                raise e('ERROR: failed to load endpoint JSON, got HTTP code {:s} ({:d}) with body {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text)
-                )
+                raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response '{response.text}'")
                     
         else:
-            raise Exception('ERROR: got unexpected HTTP code {:s} ({:d}) with body {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text)
-            )
+            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}")
+
         # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
         process_id = started['_links']['process']['href'].split('/')[6]
 
@@ -845,19 +803,11 @@ class Network:
             try:
                 started = json.loads(response.text)
             except ValueError as e:
-                logging.error('failed to load {:s} object from POST response'.format("Edge Router"))
-                raise(e)
+                raise RuntimeError(f"failed to load JSON from POST response")
             else:
-#                print('DEBUG: created Edge Router trace ID {:s}'.format(response.headers._store['x-b3-traceid'][1]))
-                pass
+                logging.debug(f"created Edge Router trace ID {response.headers._store['x-b3-traceid'][1]}'")
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
+            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
         # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
         process_id = started['_links']['process']['href'].split('/')[6]
@@ -922,18 +872,11 @@ class Network:
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, NETWORK_RESOURCES['edge-router-policies'].create_responses):
             try:
-                started = json.loads(response.text)
+                started = response.json()
             except ValueError as e:
-                logging.error('failed to load {:s} object from POST response'.format("Edge Router Policy"))
-                raise(e)
+                raise RuntimeError(f"failed to load JSON from POST response")
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
+            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
         # ERPs are created in a blocking, synchronous manner, and so zitiId should be defined
         if wait and not started['zitiId']:
@@ -1076,18 +1019,11 @@ class Network:
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, NETWORK_RESOURCES['services'].create_responses):
             try:
-                started = json.loads(response.text)
+                started = response.json()
             except ValueError as e:
-                logging.error('failed to load {:s} object from POST response'.format("service"))
-                raise(e)
+                raise RuntimeError(f"failed to load JSON from POST response")
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
+            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
         # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
         process_id = started['_links']['process']['href'].split('/')[6]
@@ -1173,18 +1109,11 @@ class Network:
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, NETWORK_RESOURCES['service-policies'].create_responses):
             try:
-                started = json.loads(response.text)
+                started = response.json()
             except ValueError as e:
-                logging.error('failed to load {:s} object from POST response'.format("service policy"))
-                raise(e)
+                raise RuntimeError(f"failed to load JSON from POST response")
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
+            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
         # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
         process_id = started['_links']['process']['href'].split('/')[6]
@@ -1262,18 +1191,11 @@ class Network:
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, NETWORK_RESOURCES['service-edge-router-policies'].create_responses):
             try:
-                started = json.loads(response.text)
+                started = response.json()
             except ValueError as e:
-                logging.error('failed to load {:s} object from POST response'.format("service edge router policy"))
-                raise(e)
+                raise RuntimeError(f"failed to load JSON from POST response")
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
+            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
         # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
         process_id = started['_links']['process']['href'].split('/')[6]
@@ -1366,18 +1288,11 @@ class Network:
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, NETWORK_RESOURCES['services'].create_responses):
             try:
-                started = json.loads(response.text)
+                started = response.json()
             except ValueError as e:
-                logging.error('failed to load {:s} object from POST response'.format("service"))
-                raise(e)
+                raise RuntimeError(f"failed to load JSON from POST response")
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
+            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
         # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
         process_id = started['_links']['process']['href'].split('/')[6]
@@ -1408,7 +1323,7 @@ class Network:
     @docstring_parameters(valid_service_protocols=VALID_SERVICE_PROTOCOLS)
     def create_service_transparent(self, name: str, client_hosts: list, client_ports: list, transparent_hosts: list, client_protocols: list=["tcp"], attributes: list=[],
         endpoints: list=[], edge_routers: list=["#all"], encryption_required: bool=True, dry_run: bool=False):
-        """create an endpoint-hosted service where intercepted packets' source and destination are preserved by the terminator when communicating with the server at egress.
+        """Create an endpoint-hosted service where intercepted packets' source and destination are preserved by the terminator when communicating with the server at egress.
 
         :param str name: name of service
         :param list client_hosts: IPv4/CIDR to intercept.
@@ -1421,7 +1336,6 @@ class Network:
         :param bool encryption_required: Default is to enable edge-to-edge encryption.
         :param bool dry_run: True returns only the entity model without sending a request to create. This is useful for comparing states.
         """
-        
         try:
 
 
@@ -1535,7 +1449,7 @@ class Network:
         server_hosts: list=[], server_ports: list=[], server_protocols: list=[], attributes: list=[], 
         edge_router_attributes: list=["#all"], encryption_required: bool=True, dry_run: bool=False, 
         wait: int=60, sleep: int=10, progress: bool=False):
-        """create an "advanced" PSM-based (platform service model) endpoint-hosted service.
+        """Create an "advanced" PSM-based (platform service model) endpoint-hosted service.
 
         Multiple client intercepts may be specified i.e. lists of domain names or IP addresses, ports, and protocols. If alternative 
         server details are not given they are assumed to be the same as the intercept. If server details are provided then all intercepts 
@@ -1555,7 +1469,6 @@ class Network:
         :param: encryption_required is optional Boolean. Default is to enable edge-to-edge encryption.
         :param: dry_run is optional Boolean where True returns only the entity model without sending a request.
         """
-        
         try:
             # validate roles
             for role in attributes:
@@ -1684,18 +1597,11 @@ class Network:
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, NETWORK_RESOURCES['services'].create_responses):
             try:
-                started = json.loads(response.text)
+                started = response.json()
             except ValueError as e:
-                logging.error('failed to load {:s} object from POST response'.format("service"))
-                raise(e)
+                raise RuntimeError(f"failed to load JSON from POST response")
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
+            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
         # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
         process_id = started['_links']['process']['href'].split('/')[6]
@@ -1764,18 +1670,11 @@ class Network:
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, NETWORK_RESOURCES['app-wans'].create_responses):
             try:
-                started = json.loads(response.text)
+                started = response.json()
             except ValueError as e:
-                logging.error('failed to load {:s} object from POST response'.format("AppWAN"))
-                raise(e)
+                raise RuntimeError(f"failed to load JSON from POST response")
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
+            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
         # AppWANs are created in a blocking, synchronous manner, and so zitiId should be defined
         if wait and not started['zitiId']:
@@ -1784,89 +1683,38 @@ class Network:
         else:
             return(started)
 
-    def get_network_by_name(self,name: str, group: str=None):
-        """Get one network by name.
+    def get_network_by_name(self, name: str):
+        """Get one network from the current group by network name.
 
         :param: name required name of the NF network may contain quoted whitespace
-        :param: group optional string UUID to limit results by network group ID
         """
+        params = {
+            "findByNetworkGroupId": self.network_group_id,
+            "findByName": name,
+        }
         try:
-            headers = { 
-                "authorization": "Bearer " + self.token 
-            }
-            params = {
-                "findByName": name
-            }
-            if group is not None:
-                params['findByNetworkGroupId'] = group
-
-            response = http.get(
-                self.audience+'core/v2/networks',
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers,
-                params=params
-            )
-            response_code = response.status_code
-        except:
-            raise
-
-        if response_code == STATUS_CODES.codes.OK: # HTTP 200
-            try:
-                networks = json.loads(response.text)
-            except ValueError as e:
-                logging.error('failed to load endpoints object from GET response')
-                raise(e)
+            networks = self.get_resources(type='networks',**params)
+        except Exception as e:
+            raise RuntimeError(f"failed to get networks: {e}")
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
-        hits = networks['page']['totalElements']
-        if hits == 1:
-            network = networks['_embedded'][NETWORK_RESOURCES['networks']._embedded][0]
-            return(network)
-        else:
-            raise Exception("ERROR: failed to find exactly one match for {}".format(name))
+            if len(networks) == 1:
+                return(networks[0])
+            else:
+                raise RuntimeError(f"failed to find exactly one network named '{name}', found {len(networks)}: '{','.join([n['name'] for n in networks])}'")
 
     def get_network_by_id(self,network_id):
         """Return the network object for a particular UUID.
 
         :param str network_id: the UUID of the network
         """
+        url = self.audience+'core/v2/networks/'+id
+        headers = { "authorization": "Bearer " + self.token }
         try:
-            headers = { 
-                "authorization": "Bearer " + self.token 
-            }
-            response = http.get(
-                self.audience+'core/v2/networks/'+network_id,
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers
-            )
-            response_code = response.status_code
+            network, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except:
-            raise
-
-        if response_code == STATUS_CODES.codes.OK: # HTTP 200
-            try:
-                network = json.loads(response.text)
-            except ValueError as e:
-                logging.error('failed to load {r} object from GET response'.format(r = "network"))
-                raise(e)
+            raise RuntimeError(f"failed to get network from url: '{url}'")
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
-
-        return(network)
+            return(network)
 
     def get_controller_secrets(self, id: str):
         """Return the controller management login credentials as {zitiUserId: ASDF, zitiPassword: ASDF}.
@@ -1874,38 +1722,20 @@ class Network:
         Note that this function requires privileged access to the controller and is intended for emergency, read-only operations by customer support engineers.
         :param id: the UUID of the network controller
         """
+        url = self.audience+'core/v2/network-controllers/'+id+'/secrets'
+        headers = { "authorization": "Bearer " + self.token }
         try:
-            headers = { "authorization": "Bearer " + self.token }
-            entity_url = self.audience+'core/v2/network-controllers/'+id+'/secrets'
-            response = http.get(
-                entity_url,
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers
-            )
-            response_code = response.status_code
+            secrets, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except:
-            raise
-
-        if response_code == STATUS_CODES.codes.OK:
-            try:
-                secrets = json.loads(response.text)
-            except:
-                raise Exception('ERROR parsing response as object, got:\n{}'.format(response.text))
+            raise RuntimeError(f"failed to get secrets from url: '{url}'")
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
-        try:
-            ziti_secrets_keys = ['zitiUserId','zitiPassword']
-            assert(set(ziti_secrets_keys) & set(secrets.keys()) == set(ziti_secrets_keys))
-        except AssertionError as e:
-            raise e
-        return(secrets)
+            try:
+                ziti_secrets_keys = ['zitiUserId','zitiPassword']
+                assert(set(ziti_secrets_keys) & set(secrets.keys()) == set(ziti_secrets_keys))
+            except AssertionError as e:
+                logging.error("unexpected secrets keys in '%s', got HTTP response code '%s'", secrets.keys(), status_symbol)
+                raise e
+            return(secrets)
 
     def get_controller_session(self, id: str):
         """Return the controller management API login session token as {sessionToken: UUID, expiresAt: DATETIME}.
@@ -1913,39 +1743,20 @@ class Network:
         Note that this function requires privileged access to the controller and is intended for emergency, read-only operations by customer support engineers.
         :param id: the UUID of the network controller
         """
+        url = self.audience+'core/v2/network-controllers/'+id+'/session'
+        headers = { "authorization": "Bearer " + self.token }
         try:
-            headers = { "authorization": "Bearer " + self.token }
-            entity_url = self.audience+'core/v2/network-controllers/'+id+'/session'
-            response = http.get(
-                entity_url,
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers
-            )
-            response_code = response.status_code
+            session, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except:
-            raise
-
-        if response_code == STATUS_CODES.codes.OK: # HTTP 200
-            try:
-                session = response.json()
-            except ValueError as e:
-                logging.error('failed loading session as an object from response document')
-                raise(e)
+            raise RuntimeError(f"failed to get session from url: '{url}'")
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
-        try:
-            ziti_session_keys = ['expiresAt','sessionToken']
-            assert(set(ziti_session_keys) & set(session.keys()) == set(ziti_session_keys))
-        except AssertionError as e:
-            raise e
-        return(session)
+            try:
+                ziti_session_keys = ['expiresAt','sessionToken']
+                assert(set(ziti_session_keys) & set(session.keys()) == set(ziti_session_keys))
+            except AssertionError as e:
+                logging.error("unexpected session keys in '%s', got HTTP response code '%s'", session.keys(), status_symbol)
+                raise e
+            return(session)
 
     def wait_for_property_defined(self, property_name: str, property_type: object=str, entity_type: str="network", wait: int=60, sleep: int=3, id: str=None, progress: bool=False):
         """Poll until expiry for the expected property to become defined with the any value of the expected type.
@@ -1964,21 +1775,11 @@ class Network:
         now = time.time()
 
         if not wait >= sleep:
-            raise Exception(
-                "ERROR: wait duration ({:d}) must be greater than or equal to polling interval ({:d})".format(
-                    wait, sleep
-                )
-            )
+            raise RuntimeError(f"wait duration ({wait}) must be greater than or equal to polling interval ({sleep})")
 
         # poll for status until expiry
         if progress:
-            sys.stdout.write(
-                '\twaiting for property {:s} ({:s}) or until {:s}.'.format(
-                    property_name,
-                    str(property_type),
-                    time.ctime(now+wait)
-                )
-            )
+            sys.stdout.write(f"\twaiting for property {property_name} ({str(property_type)}) or until {time.ctime(now+wait)}.")
 
 #        response_code = int()
         property_value = None
@@ -1993,7 +1794,7 @@ class Network:
                 raise
 
             # if expected property value is not null then evaluate type, else sleep
-            if property_name in entity.keys() and entity[property_name]:
+            if entity.get(property_name) and entity[property_name]:
                 property_value = entity[property_name]
                 # if expected type then return, else sleep
                 if isinstance(property_value, property_type):
@@ -2002,11 +1803,11 @@ class Network:
                     return(entity)
                 else:
                     if progress:
-                        sys.stdout.write('\n{:^19s}:{:^19s} ({:s}):'.format(entity['name'],property_name, str(property_type)))
+                        sys.stdout.write(f"\n{entity['name']:^19s}:{property_name:^19s} ({str(property_type)}):")
                     time.sleep(sleep)
             else:
                 if progress:
-                    sys.stdout.write('\n{:^19s}:{:^19s} ({:s}):'.format("fetching",property_name, str(property_type)))
+                    sys.stdout.write(f"\n{'fetching':^19s}:{property_name:^19s} ({str(property_type)}):")
                 time.sleep(sleep)
 
         # 
@@ -2014,16 +1815,9 @@ class Network:
             print() # newline terminates progress meter
 
         if not property_value:
-            raise Exception('ERROR: failed to find any value for property "{:s}"'.format(
-                    property_name
-                )
-            )
+            raise RuntimeError(f"failed to find any value for property '{property_name}'")
         else:
-            raise Exception('ERROR: timed out waiting for property {:s} to have expected type: {:s}'.format(
-                    property_name,
-                    str(property_type),
-                )
-            )
+            raise RuntimeError(f"timed out waiting for property {property_name} to have expected type: {str(property_type)}")
 
     @docstring_parameters(resource_entity_types=str(NETWORK_RESOURCES.keys()))
     def wait_for_entity_name_exists(self, entity_name: str, entity_type: str, wait: int=60, sleep: int=3, progress: bool=False):
@@ -2038,27 +1832,14 @@ class Network:
         now = time.time()
 
         if not wait >= sleep:
-            raise Exception(
-                "ERROR: wait duration ({:d}) must be greater than or equal to polling interval ({:d})".format(
-                    wait, sleep
-                )
-            )
+            raise RuntimeError(f"wait duration ({wait}) must be greater than or equal to polling interval ({sleep})")
 
-        if not plural(entity_type) in NETWORK_RESOURCES.keys():
-            raise Exception("ERROR: unknown type \"{type}\". Choices: {choices}".format(
-                type=entity_type,
-                choices=str(NETWORK_RESOURCES.keys())
-            ))
+        if not NETWORK_RESOURCES.get(plural(entity_type)):
+            raise Exception(f"ERROR: unknown type '{entity_type}'. Choices: {','.join(NETWORK_RESOURCES.keys())}")
 
         # poll for status until expiry
         if progress:
-            sys.stdout.write(
-                '\twaiting for entity {:s} ({:s}) or until {:s}.'.format(
-                    entity_name,
-                    str(entity_type),
-                    time.ctime(now+wait)
-                )
-            )
+            sys.stdout.write(f"\twaiting for entity {entity_name} ({str(entity_type)}) or until {time.ctime(now+wait)}.")
 
         found_entities = []
         while time.time() < now+wait:
@@ -2075,27 +1856,20 @@ class Network:
             if len(found_entities) > 1:
                 if progress:
                     print() # newline terminates progress meter
-                raise Exception(
-                    'ERROR: Found more than one {type} named "{name}".'.format(
-                        type=singular(entity_type), name=entity_name
-                    )
-                )
+                raise RuntimeError(f"found more than one {singular(entity_type)} named '{entity_name}'.")
             elif len(found_entities) == 1:
                 if progress:
                     print() # newline terminates progress meter
                 return(found_entities[0])
             else:
                 if progress:
-                    sys.stdout.write('\n{:^19s}:{:^19s} ({:s}):'.format("fetching",entity_name, singular(entity_type)))
+                    sys.stdout.write(f"\n{'fetching':^19s}:{entity_name:^19s} ({str(entity_type)}):")
                 time.sleep(sleep)
 
         if progress:
             print() # newline terminates progress meter
 
-        raise Exception('ERROR: failed to find one {type} named "{name}".'.format(
-                type=singular(entity_type), name=entity_name
-            )
-        )
+        raise RuntimeError(f"failed to find one {singular(entity_type)} named '{entity_name}'")
 
     def wait_for_status(self, expect: str="PROVISIONED", type: str="network", wait: int=300, sleep: int=20, id: str=None, progress: bool=False):
         """Continuously poll for the expected status until return Boolean true or raise exception.
@@ -2113,20 +1887,11 @@ class Network:
         now = time.time()
 
         if not wait >= sleep:
-            raise Exception(
-                "ERROR: wait duration ({:d}) must be greater than or equal to polling interval ({:d})".format(
-                    wait, sleep
-                )
-            )
+            raise RuntimeError(f"wait duration ({wait}) must be greater than or equal to polling interval ({sleep})")
 
         # poll for status until expiry
         if progress:
-            sys.stdout.write(
-                '\twaiting for status {:s} or until {:s}.'.format(
-                    expect,
-                    time.ctime(now+wait)
-                )
-            )
+            sys.stdout.write(f"\twaiting for status {expect} or until {time.ctime(now+wait)}.")
 
         status = str()
         response_code = int()
@@ -2145,7 +1910,7 @@ class Network:
                     status and not entity_status['status'] == status # print on subsequent changes
                 ):
                     if progress:
-                        sys.stdout.write('\n{:^19s}:{:^19s}:'.format(entity_status['name'],entity_status['status']))
+                        sys.stdout.write(f"\n{entity_status['name']:^19s}:{entity_status['status']:^19s}:")
                 status = entity_status['status']
             else:
                 response_code = entity_status['response_code']
@@ -2158,20 +1923,9 @@ class Network:
         if status == expect:
             return(True)
         elif not status:
-            raise Exception(
-                'failed to read status while waiting for {:s}; got {} ({:d})'.format(
-                    expect,
-                    entity_status['http_status'],
-                    entity_status['response_code']
-                )
-            )
+            raise RuntimeError(f"failed to read status while waiting for {expect}; got {entity_status['http_status']} ({entity_status['response_code']}")
         else:
-            raise Exception(
-                'timed out with status {} while waiting for {:s}'.format(
-                    status,
-                    expect
-                )
-            )
+            raise RuntimeError(f"timed out with status {status} while waiting for {expect}")
 
     def wait_for_statuses(self, expected_statuses: list, type: str="network", wait: int=300, sleep: int=20, id: str=None, progress: bool=False):
         """Continuously poll for the expected statuses until expiry.
@@ -2189,20 +1943,11 @@ class Network:
         now = time.time()
 
         if not wait >= sleep:
-            raise Exception(
-                "ERROR: wait duration ({:d}) must be greater than or equal to polling interval ({:d})".format(
-                    wait, sleep
-                )
-            )
+            raise RuntimeError(f"wait duration ({wait}) must be greater than or equal to polling interval ({sleep})")
 
         # poll for status until expiry
         if progress:
-            sys.stdout.write(
-                '\twaiting for any status in {} or until {:s}.'.format(
-                    expected_statuses,
-                    time.ctime(now+wait)
-                )
-            )
+            sys.stdout.write(f"\twaiting for any status in {expected_statuses} or until {time.ctime(now+wait)}.")
 
         status = str()
         response_code = int()
@@ -2221,7 +1966,7 @@ class Network:
                     status and not entity_status['status'] == status # print on subsequent changes
                 ):
                     if progress:
-                        sys.stdout.write('\n{:^19s}:{:^19s}:'.format(entity_status['name'],entity_status['status']))
+                        sys.stdout.write(f"\n{entity_status['name']:^19s}:{entity_status['status']:^19s}:")
                 status = entity_status['status']
             else:
                 response_code = entity_status['response_code']
@@ -2234,28 +1979,16 @@ class Network:
         if status in expected_statuses:
             return(True)
         elif not status:
-            raise Exception(
-                'failed to read status while waiting for any status in {}; got {} ({:d})'.format(
-                    expected_statuses,
-                    entity_status['http_status'],
-                    entity_status['response_code']
-                )
-            )
+            raise RuntimeError(f"failed to read status while waiting for any status in {expected_statuses}; got {entity_status['http_status']} ({entity_status['response_code']})")
         else:
-            raise Exception(
-                'timed out with status {} while waiting for any status in {}'.format(
-                    status,
-                    expected_statuses
-                )
-            )
+            raise RuntimeError(f"timed out with status {status} while waiting for any status in {expected_statuses}")
 
     def get_resource_status(self, type: str, id: str=None):
-        """Return an object describing an entity's API status or the symbolic HTTP code.
+        """Get an entity's API status or the symbolic HTTP code.
         
         :param type: the type of entity e.g. network, endpoint, service, edge-router, edge-router-policy, posture-check
         :param id: the UUID of the entity having a status if not a network
         """
-
         params = dict()
         if not type == "network":
             params["networkId"] = self.id
@@ -2273,15 +2006,17 @@ class Network:
 
         headers = { "authorization": "Bearer " + self.token }
         try:
-            resource = get_generic_resource(url=entity_url, headers=headers, proxies=self.proxies, verify=self.verify)
+            resource, status_symbol = get_generic_resource(url=entity_url, headers=headers, proxies=self.proxies, verify=self.verify)
         except:
             logging.debug("failed to get resource from url: '%s'", entity_url)
             raise
         else:
-            status = resource['status']
-            if 'name' in resource.keys():
+            if resource.get('status'):
+                status = resource['status']
+            
+            if resource.get('name'):
                 name = resource['name']
-            elif 'processorName' in resource.keys():
+            elif resource.get('processorName'):
                 name = resource['processorName']
             else:
                 logging.warning('no "name" property found')
@@ -2306,19 +2041,13 @@ class Network:
 
         if response_code == STATUS_CODES.codes.OK:
             try:
-                registration_object = json.loads(response.text)
+                registration_object = response.json()
             except:
-                raise Exception('ERROR parsing response as object, got:\n{}'.format(response.text))
+                raise RuntimeError(f"failed while parsing response as object, got:\n{response.text}")
             else:
                 return(registration_object)
         else:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
+            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
     get_edge_router_registration = rotate_edge_router_registration
 
@@ -2340,7 +2069,7 @@ class Network:
                 if id is None:
                     raise Exception("ERROR: need entity UUID to delete")
                 entity_url = self.audience+'core/v2/'+plural(type)+'/'+id
-            logging.debug("deleting {:s}".format(entity_url))
+            logging.debug(f"deleting {entity_url}")
             params = dict()
             # if type == "service":
             #     params["beta"] = ''
@@ -2357,13 +2086,7 @@ class Network:
             raise
 
         if not response_code in expected_responses:
-            raise Exception(
-                'ERROR: got unexpected HTTP code {:s} ({:d}) and response {:s}'.format(
-                    STATUS_CODES._codes[response_code][0].upper(),
-                    response_code,
-                    response.text
-                )
-            )
+            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
         if not wait == 0:
             try:
