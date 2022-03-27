@@ -67,7 +67,7 @@ class StoreListKeys(argparse.Action):
         setattr(namespace, self.dest, values.split(','))
 
 @cli.argument('-p','--profile', default='default', help='login profile for storing and retrieving concurrent, discrete sessions')
-@cli.argument('-C', '--credentials', nargs='+', help='API account JSON file from web console')
+@cli.argument('-C', '-credentials', help='API account JSON file from web console')
 @cli.argument('-O', '--organization', help="label or ID of an alternative organization (default is caller's org)" )
 @cli.argument('-N', '--network', help='caseless name of the network to manage')
 @cli.argument('-G', '--network-group', help="shortname or ID of a network group to search for network_name")
@@ -79,120 +79,122 @@ class StoreListKeys(argparse.Action):
 @cli.entrypoint('configure the CLI to manage a network')
 def main(cli):
     """Configure the CLI to manage a network."""
-    cli.args['api'] = 'organization'
+    cli.args['login_target'] = 'organization'
     cli.args['full_summary'] = False
     cli.args['shell'] = False
     login(cli)
 
-@cli.argument('-F','--full', dest='full_summary', help="describe the configured organization, network-group, and network, if applicable", arg_only=True, action="store_true", default=False)
+@cli.argument('-F','--full', dest='full_summary', help="describe the configured organization, network-group, and network", arg_only=True, action="store_true", default=False)
 @cli.argument('-s','--shell', help="only print a shell source script for configuring the parent shell with a token", arg_only=True, action="store_true", default=False)
 @cli.argument('-O','--output', arg_only=True, help="format the output", default="text", choices=['text', 'yaml','json'])
 @cli.argument('-v','--ziti-version', help=argparse.SUPPRESS, default='0.22.0') # minium ziti CLI version supports --cli-identity and --read-only
 @cli.argument('-c','--ziti-cli', help=argparse.SUPPRESS)
-@cli.argument('api', help=argparse.SUPPRESS, arg_only=True, nargs='?', default="organization", choices=['organization', 'ziti'])
+@cli.argument('login_target', help=argparse.SUPPRESS, arg_only=True, nargs='?', default="organization", choices=['organization', 'ziti'])
 @cli.subcommand('login to a management API')
 def login(cli):
     """Login to an API and cache the expiring token."""
     # if logging in to a NF org (default)
-    if cli.args.api == "organization":
-        organization = use_organization()
-        if cli.config.general.network_group and cli.config.general.network:
-            cli.log.debug(f"configuring network {cli.config.general.network} in group {cli.config.general.network_group}")
-            network, network_group = use_network(
-                organization=organization,
-                group=cli.config.general.network_group,
-                network_name=cli.config.general.network
-            )
-        elif cli.config.general.network:
-            cli.log.debug(f"configuring network {cli.config.general.network} and local group if unique name for this organization")
-            network, network_group = use_network(
-                organization=organization,
-                network_name=cli.config.general.network
-            )
-        elif cli.config.general.network_group:
-            cli.log.debug(f"configuring network group {cli.config.general.network_group}")
-            network_group = use_network_group(organization, group=cli.config.general.network_group)
-            network = None
-        else:
-            cli.log.debug("not configuring network or network group")
-            network, network_group = None, None
-
-        summary_object = dict()
-        summary_object['caller'] = organization.caller
-        summary_object['organization'] = organization.describe
-        if network_group:
-            summary_object['network_group'] = network_group.describe
-            summary_object['network_group']['networks_count'] = len(network_group.networks_by_normal_name().keys())
-        if network:
-            summary_object['network'] = network.describe
-
-        # compose a summary table from selected details if text, not yaml or
-        # json (unless shell which means to suppress normal output and only
-        # configure the current shell)
-        if cli.args.full_summary and not cli.args.shell:
-            if cli.args.output == "text":
-                summary_table = []
-                summary_table.append(['organization', 'logged in to "{org_name}" ({org_label}@{env}) \nas {fullname} ({email}) \nuntil {expiry_timestamp} (T-{expiry_seconds}s)'.format(
-                        fullname=summary_object['caller']['name'],
-                        email=summary_object['caller']['email'],
-                        org_label=organization.label,
-                        org_name=organization.name,
-                        env=organization.environment,
-                        expiry_timestamp=time.strftime('%H:%M GMT%z', time.localtime(organization.expiry)),
-                        expiry_seconds=int(organization.expiry_seconds)
-                    )])
-                if network_group:
-                        summary_table.append(['network group', '"{fullname}" ({shortname}) \n with {count} networks'.format(
-                            fullname=summary_object['network_group']['name'],
-                            shortname=summary_object['network_group']['organizationShortName'],
-                            count=summary_object['network_group']['networks_count']
-                    )])
-                if network:
-                        summary_table.append(['network', '"{fullname}" ({data_center}) \n is {version} and status {status}'.format(
-                            fullname=summary_object['network']['name'],
-                            data_center=summary_object['network']['region'],
-                            version=summary_object['network']['productVersion'],
-                            status=summary_object['network']['status']
-                    )])
-                if cli.config.general.borders:
-                    table_borders = "presto"
-                else:
-                    table_borders = "plain"
-                cli.echo(
-                    '{fg_lightgreen_ex}'
-                    +tabulate(tabular_data=summary_table, headers=['domain', 'summary'], tablefmt=table_borders)
+    if cli.args.login_target == "organization":
+        spinner = get_spinner(f"Logging in profile {cli.config.general.profile}")
+        with spinner:
+            organization = use_organization()
+            if cli.config.general.network_group and cli.config.general.network:
+                cli.log.debug(f"configuring network {cli.config.general.network} in group {cli.config.general.network_group}")
+                network, network_group = use_network(
+                    organization=organization,
+                    group=cli.config.general.network_group,
+                    network_name=cli.config.general.network
                 )
-
-            elif cli.args.full_summary and not cli.args.shell and cli.args.output == "yaml":
-                cli.echo(
-                    '{fg_lightgreen_ex}'
-                    +yaml_dumps(summary_object, indent=4)
+            elif cli.config.general.network:
+                cli.log.debug(f"configuring network {cli.config.general.network} and local group if unique name for this organization")
+                network, network_group = use_network(
+                    organization=organization,
+                    network_name=cli.config.general.network
                 )
-            elif cli.args.full_summary and not cli.args.shell and cli.args.output == "json":
-                cli.echo(
-                    '{fg_lightgreen_ex}'
-                    +json_dumps(summary_object, indent=4)
-                )
+            elif cli.config.general.network_group:
+                cli.log.debug(f"configuring network group {cli.config.general.network_group}")
+                network_group = use_network_group(organization, group=cli.config.general.network_group)
+                network = None
+            else:
+                cli.log.debug("not configuring network or network group")
+                network, network_group = None, None
 
-        elif cli.args.shell:
-            cli.echo(
-                f"""
+            summary_object = dict()
+            summary_object['caller'] = organization.caller
+            summary_object['organization'] = organization.describe
+            if network_group:
+                summary_object['network_group'] = network_group.describe
+                summary_object['network_group']['networks_count'] = len(network_group.networks_by_normal_name().keys())
+            if network:
+                summary_object['network'] = network.describe
+
+            # compose a summary table from selected details if text, not yaml or
+            # json (unless shell which means to suppress normal output and only
+            # configure the current shell)
+            if cli.args.full_summary and not cli.args.shell:
+                if cli.args.output == "text":
+                    summary_table = []
+                    summary_table.append(['organization', 'logged in to "{org_name}" ({org_label}@{env}) \nas {fullname} ({email}) \nuntil {expiry_timestamp} (T-{expiry_seconds}s)'.format(
+                            fullname=summary_object['caller']['name'],
+                            email=summary_object['caller']['email'],
+                            org_label=organization.label,
+                            org_name=organization.name,
+                            env=organization.environment,
+                            expiry_timestamp=time.strftime('%H:%M GMT%z', time.localtime(organization.expiry)),
+                            expiry_seconds=int(organization.expiry_seconds)
+                        )])
+                    if network_group:
+                            summary_table.append(['network group', '"{fullname}" ({shortname}) \n with {count} networks'.format(
+                                fullname=summary_object['network_group']['name'],
+                                shortname=summary_object['network_group']['organizationShortName'],
+                                count=summary_object['network_group']['networks_count']
+                        )])
+                    if network:
+                            summary_table.append(['network', '"{fullname}" ({data_center}) \n is {version} and status {status}'.format(
+                                fullname=summary_object['network']['name'],
+                                data_center=summary_object['network']['region'],
+                                version=summary_object['network']['productVersion'],
+                                status=summary_object['network']['status']
+                        )])
+                    if cli.config.general.borders:
+                        table_borders = "presto"
+                    else:
+                        table_borders = "plain"
+                    cli.echo(
+                        '{fg_lightgreen_ex}'
+                        +tabulate(tabular_data=summary_table, headers=['domain', 'summary'], tablefmt=table_borders)
+                    )
+
+                elif cli.args.full_summary and not cli.args.shell and cli.args.output == "yaml":
+                    cli.echo(
+                        '{fg_lightgreen_ex}'
+                        +yaml_dumps(summary_object, indent=4)
+                    )
+                elif cli.args.full_summary and not cli.args.shell and cli.args.output == "json":
+                    cli.echo(
+                        '{fg_lightgreen_ex}'
+                        +json_dumps(summary_object, indent=4)
+                    )
+
+            elif cli.args.shell:
+                cli.echo(
+                    f"""
 # $ source <(nfctl --credentials credentials.json login organization)
 export NETFOUNDRY_API_TOKEN="{organization.token}"
 export MOPENV={organization.environment}
 """)
-        else:
-            cli.log.info('logged in to "{org_name}" ({org_label}@{env}) as {fullname} ({email}) until {expiry_timestamp} (T-{expiry_seconds}s)'.format(
-                        fullname=summary_object['caller']['name'],
-                        email=summary_object['caller']['email'],
-                        org_label=organization.label,
-                        org_name=organization.name,
-                        env=organization.environment,
-                        expiry_timestamp=time.strftime('%H:%M GMT%z', time.localtime(organization.expiry)),
-                        expiry_seconds=int(organization.expiry_seconds)
-            ))
+            else:
+                cli.log.info('logged in to "{org_name}" ({org_label}@{env}) as {fullname} ({email}) until {expiry_timestamp} (T-{expiry_seconds}s)'.format(
+                            fullname=summary_object['caller']['name'],
+                            email=summary_object['caller']['email'],
+                            org_label=organization.label,
+                            org_name=organization.name,
+                            env=organization.environment,
+                            expiry_timestamp=time.strftime('%H:%M GMT%z', time.localtime(organization.expiry)),
+                            expiry_seconds=int(organization.expiry_seconds)
+                ))
 
-    elif cli.args.api == "ziti":
+    elif cli.args.login_target == "ziti":
         if cli.config.login.ziti_cli:
             ziti_cli = cli.config.login.ziti_cli
         else:
@@ -267,7 +269,7 @@ export MOPENV={organization.environment}
 @cli.subcommand('logout from an identity organization')
 def logout(cli):
     """Logout by deleting the cached token."""
-    spinner = get_spinner("Logging out profile '{:s}'".format(cli.config.general.profile))
+    spinner = get_spinner(f"Logging out profile '{cli.config.general.profile}'")
     # use the session with some organization, default is to use the first and there's typically only one
     try:
         with spinner:
@@ -554,34 +556,38 @@ def list(cli):
         spinner = get_spinner(f"Finding {cli.args.resource_type} by {str(cli.args.query)}")
     else:
         spinner = get_spinner(f"Finding all {cli.args.resource_type}")
-    with spinner:
-        if cli.args.resource_type == "organizations":
+    if cli.args.resource_type == "organizations":
+        with spinner:
             matches = organization.get_organizations(**cli.args.query)
-        elif cli.args.resource_type == "network-groups":
+    elif cli.args.resource_type == "network-groups":
+        with spinner:
             matches = organization.get_network_groups_by_organization(**cli.args.query)
-        elif cli.args.resource_type == "identities":
+    elif cli.args.resource_type == "identities":
+        with spinner:
             matches = organization.get_identities(**cli.args.query)
-        elif cli.args.resource_type == "networks":
-            if cli.config.general.network_group:
-                network_group = use_network_group(organization, group=cli.config.general.network_group)
+    elif cli.args.resource_type == "networks":
+        if cli.config.general.network_group:
+            network_group = use_network_group(organization, group=cli.config.general.network_group)
+            with spinner:
                 matches = organization.get_networks_by_group(network_group.id, **cli.args.query)
-            else:
-                matches = []
-                for i in organization.get_networks_by_organization(generate=True, **cli.args.query):
-                    matches.extend(i)
         else:
-            if cli.config.general.network:
-                network, network_group = use_network(
-                    organization=organization,
-                    group=cli.config.general.network_group, # None unless configured
-                    network_name=cli.config.general.network
-                )
-            else:
-                cli.log.error("first configure a network to list resources in a network e.g. --network ACMENet")
-                exit(1)
-            if cli.args.resource_type == "data-centers":
+            with spinner:
+                matches = organization.get_networks_by_organization(**cli.args.query)
+    else:
+        if cli.config.general.network:
+            network, network_group = use_network(
+                organization=organization,
+                group=cli.config.general.network_group, # None unless configured
+                network_name=cli.config.general.network
+            )
+        else:
+            cli.log.error("first configure a network to list resources in a network e.g. --network ACMENet")
+            exit(1)
+        if cli.args.resource_type == "data-centers":
+            with spinner:
                 matches = network.get_edge_router_data_centers(**cli.args.query)
-            else:
+        else:
+            with spinner:
                 matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
 
     if len(matches) == 0:
@@ -655,7 +661,8 @@ def delete(cli):
                     with spinner:
                         network.delete_network(progress=False, wait=cli.config.delete.wait)
                 except KeyboardInterrupt as e:
-                    cli.log.debug("wait cancelled by user")
+                    cli.log.info("Cancelled")
+                    exit(1)
                 except Exception as e:
                     cli.log.error(f"unknown error in {e}")
                     exit(1)
@@ -664,7 +671,8 @@ def delete(cli):
             else:
                 cli.echo(f"not deleting network '{match['name']}'.")
         except KeyboardInterrupt as e:
-            cli.log.debug("input cancelled by user")
+            cli.log.info("Cancelled")
+            exit(1)
         except Exception as e:
             cli.log.error(f"unknown error in {e}")
             exit(1)
@@ -676,7 +684,8 @@ def delete(cli):
                     with spinner:
                         network.delete_resource(type=cli.args.resource_type, id=match['id'])
                 except KeyboardInterrupt as e:
-                    cli.log.debug("wait cancelled by user")
+                    cli.log.info("Cancelled")
+                    exit(1)
                 except Exception as e:
                     cli.log.error(f"unknown error in {e}")
                     exit(1)
@@ -685,7 +694,8 @@ def delete(cli):
             else:
                 cli.echo("not deleting {type} '{name}'".format(type=cli.args.resource_type, name=match['name']))
         except KeyboardInterrupt as e:
-            cli.log.debug("input cancelled by user")
+            cli.log.info("Cancelled")
+            exit(1)
         except Exception as e:
             cli.log.error(f"unknown error in {e}")
             exit(1)
@@ -733,7 +743,7 @@ def use_organization(prompt: bool=True):
             try:
                 token_from_prompt = questions.password(prompt='Enter Bearer Token:', confirm=False, validate=is_jwt)
             except KeyboardInterrupt as e:
-                cli.log.debug("input cancelled by user")
+                cli.log.info("Cancelled")
                 exit(1)
             except Exception as e:
                 cli.log.error(f"unknown error in {e}")
@@ -812,23 +822,21 @@ def use_network(organization: object, network_name: str=None, group: str=None, o
             with spinner:
                 network.wait_for_statuses(["DELETING","DELETED"],wait=999,progress=False)
         except KeyboardInterrupt as e:
-            cli.log.debug("wait cancelled by user")
-        except Exception as e:
-            cli.log.error(f"unknown error in {e}")
+            cli.log.info("Cancelled")
             exit(1)
+        except Exception as e:
+            raise RuntimeError(f"unknown error in {e}")
         else:
             cli.log.info(f"network '{network_name}' deleted")
     elif operation in ['create','read','update']:
         if not network.status == 'PROVISIONED':
-            spinner = get_spinner(f"waiting for {network_name} to have status PROVISIONED")
             try:
-                with spinner:
-                    network.wait_for_status("PROVISIONED",wait=999,progress=False)
+                network.wait_for_status("PROVISIONED",wait=999,progress=False)
             except KeyboardInterrupt as e:
-                cli.log.debug("wait cancelled by user")
-            except Exception as e:
-                cli.log.error(f"unknown error in {e}")
+                cli.log.info("Cancelled")
                 exit(1)
+            except Exception as e:
+                raise RuntimeError(f"unknown error in {e}")
             else:
                 cli.log.info(f"network '{network_name}' ready")
 
