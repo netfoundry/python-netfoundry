@@ -249,11 +249,10 @@ class NetworkGroup:
         :param name: optional network name to delete
         """
         try:
-            networks_by_name = self.networks_by_name()
             if network_id:
                 network_name = next(name for name, uuid in self.network_ids_by_normal_name.items() if uuid == network_id)
-            elif network_name and self.network_ids_by_normal_name.get(network_name):
-                network_id = networks_by_name[network_name]
+            elif network_name and self.network_ids_by_normal_name.get(normalize_caseless(network_name)):
+                network_id = self.network_ids_by_normal_name[normalize_caseless(network_name)]
         except Exception as e:
             raise RuntimeError(f"need one of network_id or network_name for a network in this network group: {self.name}, got {e}")
 
