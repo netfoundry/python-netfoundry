@@ -27,7 +27,7 @@ setuptools.setup(
         'requests >= 2.27',
         'pyjwt >= 2.3',
         'inflect >= 5.3',
-        'milc >= 1.6',
+        'milc >= 1.6.6',
         'pyyaml >= 5.4',
         'platformdirs >= 2.4',
         'tabulate >= 0.8',
