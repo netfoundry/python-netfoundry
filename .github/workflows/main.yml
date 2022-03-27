@@ -78,8 +78,8 @@ jobs:
           --network ${NETWORK_NAME} \
           --create-client \
           --create-private \
-          --regions Americas \
-          -- create
+          --regions us-west-2 us-east-2 \
+          --provider AWS
         nfctl \
           --verbose \
           --profile default \
