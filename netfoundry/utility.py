@@ -285,7 +285,7 @@ def find_generic_resources(url: str, headers: dict, embedded: str=None, proxies:
             logging.error("caught exception deserializing HTTP response as JSON")
             raise e
         else:
-            if resource_page.get('page'):
+            if isinstance(resource_page, dict) and resource_page.get('page'):
                 try:
                     total_pages = resource_page['page']['totalPages']
                     total_elements = resource_page['page']['totalElements']
@@ -316,7 +316,19 @@ def find_generic_resources(url: str, headers: dict, embedded: str=None, proxies:
             else:
                 yield resource_page
 
+class Utility:
+    """Legacy interface to utility functions."""
+    def __init__(self):
+        pass
 
+    def caseless_equal(self, left, right):
+        return caseless_equal(left, right)
+
+    def snake(self, camel_str):
+        return camel2snake(camel_str)
+
+    def camel(self, snake_str):
+        return snake2camel(snake_str)
 @dataclass
 class ResourceTypeParent:
     """Parent class for ResourceType class."""
