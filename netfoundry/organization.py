@@ -89,9 +89,8 @@ class Organization:
             # create and correct mode to 0o700
             cache_dir_path.mkdir(mode=stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR, parents=True, exist_ok=True)
             cache_dir_path.chmod(mode=stat.S_IRUSR|stat.S_IWUSR|stat.S_IXUSR)
-        except:
-            logging.error("failed to create cache dir '%s'", cache_dir_path.__str__())
-            raise
+        except Exception as e:
+            raise RuntimeError(f"failed to create cache dir '{cache_dir_path.__str__()}', got {e}")
         else:
             cache_dir_stats = os.stat(cache_dir_path)
             logging.debug("token cache dir exists with mode %s", stat.filemode(cache_dir_stats.st_mode))
@@ -135,7 +134,7 @@ class Organization:
         if self.token and not self.expiry:
             try:
                 self.expiry = jwt_expiry(self.token)
-            except:
+            except Exception as e:
                 self.expiry = epoch + DEFAULT_TOKEN_EXPIRY
                 self.expiry_seconds = DEFAULT_TOKEN_EXPIRY
                 logging.debug("failed to parse token as JWT, estimating expiry in %ds", DEFAULT_TOKEN_EXPIRY)
@@ -166,8 +165,7 @@ class Organization:
                 credentials_configured = True
                 logging.debug("configured API account credentials from env NETFOUNDRY_CLIENT_ID, NETFOUNDRY_PASSWORD, NETFOUNDRY_OAUTH_URL")
             else:
-                logging.error("some but not all credentials vars present. Need NETFOUNDRY_CLIENT_ID, NETFOUNDRY_PASSWORD, and NETFOUNDRY_OAUTH_URL or a credentials file in default file locations or NETFOUNDRY_API_ACCOUNT as path to credentials file.")
-                raise Exception()
+                raise RuntimeError("some but not all credentials vars present. Need NETFOUNDRY_CLIENT_ID, NETFOUNDRY_PASSWORD, and NETFOUNDRY_OAUTH_URL or a credentials file in default file locations or NETFOUNDRY_API_ACCOUNT as path to credentials file.")
         else:
             self.credentials = "credentials.json"
             logging.debug("token renewal will look for default credentials file name 'credentials.json' in project (cwd), user, and device default paths")
@@ -233,12 +231,11 @@ class Organization:
         if not self.audience and self.token and not self.environment:
             try:
                 self.environment = jwt_environment(self.token)
-            except:
+            except Exception as e:
                 # an exception here is very unlikely because the called
                 # function is designed to provide a sane default in case the
                 # token can't be parsed
-                logging.debug("unexpected error extracting environment from JWT")
-                raise
+                raise RuntimeError("unexpected error extracting environment from JWT")
             else:
                 logging.debug("parsed token as JWT and found environment %s", self.environment)
             finally:
@@ -259,9 +256,8 @@ class Organization:
         if self.token and not self.expiry: # if token was obtained in this pass then expiry is already defined by response 'expires_in' property 
             try:
                 self.expiry = jwt_expiry(self.token)
-            except:
-                logging.debug("unexpected error getting expiry from token")
-                raise
+            except Exception as e:
+                raise RuntimeError("unexpected error getting expiry from token, got {e}")
             else:
                 self.expiry_seconds = self.expiry - epoch
                 logging.debug("bearer token expiry in %ds", self.expiry_seconds)
@@ -305,16 +301,15 @@ class Organization:
                     verify=self.verify,
                     proxies=self.proxies)
                 response_code = response.status_code
-            except:
-                logging.error(f'failed to contact the authentication endpoint: {token_endpoint}')
-                raise
+            except Exception as e:
+                raise RuntimeError(f'failed to contact the authentication endpoint: {token_endpoint}, got {e}')                
 
             if response_code == STATUS_CODES.codes.OK:
                 try:
                     token_text = json.loads(response.text)
                     self.token = token_text['access_token']
                     self.expiry = token_text['expires_in'] + epoch
-                except:
+                except Exception as e:
                     raise RuntimeError(f"failed to find an access_token in the response and instead got: {response.text}")
                 else:
                     self.expiry_seconds = self.expiry - epoch
@@ -340,7 +335,7 @@ class Organization:
                         'audience': self.audience
                     }
                     self.token_cache_file_path.write_text(json.dumps(token_cache_out, indent=4))
-                except:
+                except Exception as e:
                     logging.warn("failed to cache token in '%s'", self.token_cache_file_path.__str__())
                 else:
                     logging.debug("cached token in '%s'", self.token_cache_file_path.__str__())
@@ -409,13 +404,12 @@ class Organization:
         for url in urls:
             try:
                 caller, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
-            except:
+            except Exception as e:
                 logging.debug(f"failed to get caller identity from url: '{url}'")
             else:
                 return(caller)
-        logging.error("failed to get caller identity from any url")
-        raise RuntimeError
-
+        raise RuntimeError("failed to get caller identity from any url")
+        
     def get_identity(self, identity_id: str):
         """Get an identity by ID.
 
@@ -425,8 +419,8 @@ class Organization:
         headers = { "authorization": "Bearer " + self.token }
         try:
             identity, status_symbol, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
-        except:
-            raise RuntimeError(f"failed to get identity from url: '{url}'")
+        except Exception as e:
+            raise RuntimeError(f"failed to get identity from url: '{url}', got {e}")
         else:
             return(identity)
 
@@ -451,8 +445,8 @@ class Organization:
             identities = list()
             for i in find_generic_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params):
                 identities.extend(i)
-        except:
-            raise RuntimeError(f"failed to get identities from url: '{url}'")
+        except Exception as e:
+            raise RuntimeError(f"failed to get identities from url: '{url}', got {e}")
         else:
             return(identities)
 
@@ -477,8 +471,8 @@ class Organization:
             organizations = list()
             for i in find_generic_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params):
                 organizations.extend(i)
-        except:
-            raise RuntimeError(f"failed to get organizations from url: '{url}'")
+        except Exception as e:
+            raise RuntimeError(f"failed to get organizations from url: '{url}', got {e}")
         else:
             return(organizations)
 
@@ -492,8 +486,8 @@ class Organization:
         headers = { "authorization": "Bearer " + self.token }
         try:
             organization, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
-        except:
-            raise RuntimeError(f"failed to get organization from url: '{url}'")
+        except Exception as e:
+            raise RuntimeError(f"failed to get organization from url: '{url}', got {e}")
         else:
             return(organization)
 
@@ -507,8 +501,8 @@ class Organization:
         headers = { "authorization": "Bearer " + self.token }
         try:
             network_group, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
-        except:
-            raise RuntimeError(f"failed to get network_group from url: '{url}'")
+        except Exception as e:
+            raise RuntimeError(f"failed to get network_group from url: '{url}', got {e}")
         else:
             return(network_group)
 
@@ -538,8 +532,8 @@ class Organization:
         url = self.audience+'core/v2/networks/'+network_id
         try:
             network, status_symbol = get_generic_resource(url=url, headers=headers, accept=accept, proxies=self.proxies, verify=self.verify, **params)
-        except:
-            raise RuntimeError(f"failed to get network from url: '{url}'")
+        except Exception as e:
+            raise RuntimeError(f"failed to get network from url: '{url}', got {e}")
         else:
             return(network)
 
@@ -554,8 +548,8 @@ class Organization:
             network_groups = list()
             for i in find_generic_resources(url=url, headers=headers, embedded=RESOURCES['network-groups']._embedded, proxies=self.proxies, verify=self.verify, **kwargs):
                 network_groups.extend(i)
-        except:
-            raise RuntimeError(f"failed to get network_groups from url: '{url}'")
+        except Exception as e:
+            raise RuntimeError(f"failed to get network_groups from url: '{url}', got {e}")
         else:
             return(network_groups)
 
@@ -582,8 +576,8 @@ class Organization:
             networks = list()
             for i in find_generic_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, proxies=self.proxies, verify=self.verify, **params):
                 networks.extend(i)
-        except:
-            raise RuntimeError(f"failed to get networks from url: '{url}'")
+        except Exception as e:
+            raise RuntimeError(f"failed to get networks from url: '{url}', got {e}")
         else:
             return(networks)
 
@@ -637,8 +631,8 @@ class Organization:
             networks = list()
             for i in find_generic_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, proxies=self.proxies, verify=self.verify, **params):
                 networks.extend(i)
-        except:
-            raise RuntimeError(f"failed to get networks from url: '{url}'")
+        except Exception as e:
+            raise RuntimeError(f"failed to get networks from url: '{url}', got {e}")
         else:
             return(networks)
 

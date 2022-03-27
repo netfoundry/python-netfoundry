@@ -96,6 +96,7 @@ def main():
     )
     parser.add_argument("--location-codes",
         dest="location_codes",
+        default=["us-west-1"],
         nargs="+",
         help="cloud location codes in which to host Edge Routers"
     )
@@ -152,46 +153,45 @@ def main():
 
     # existing hosted routers
     hosted_edge_routers = network.edge_routers(only_hosted=True)
-    # a list of places where Endpoints are dialing from
+    # a list of places where endpoints are dialing from
 
     # a list of locations to place a hosted router
     fabric_placements = list()
     if args.location_codes:
-        for location in args.location_codes:
-            existing_count = len([er for er in hosted_edge_routers if er['provider'] == args.provider and er['locationCode'] == args.location_code])
+        for location_code in args.location_codes:
+            existing_count = len([er for er in hosted_edge_routers if er['provider'] == args.provider and er['locationCode'] == location])
             if existing_count < 1:
-                fabric_placements += [location]
+                fabric_placements += [location_code]
             else:
                 logging.info("found a hosted router in {location}".format(location=location))
 
-        for location in fabric_placements:
+        for location_code in fabric_placements:
             er = network.create_edge_router(
-                name=location['locationName']+" ["+location['provider']+"]",
+                name=f"Hosted Router {location_code} [{args.provider}]",
                 attributes=[
                     "#defaultRouters",
-                    "#"+location['locationCode'],
-                    "#"+location['provider']
+                    f"#{location_code}",
+                    f"#{args.provider}",
                 ],
                 provider=args.provider,
-                location_code=location['locationCode']
+                location_code=location_code
             )
             hosted_edge_routers.extend(er)
-            logging.info("placed router in {provider} ({location_name})".format(
-                provider=location['provider'],
-                location_name=location['locationName']
-            ))
+            logging.info(f"placed router in {args.provider} ({location_code})")
 
     for router_id in [r['id'] for r in hosted_edge_routers]:
         try:
             network.wait_for_status("PROVISIONED",id=router_id,type="edge-router",wait=999,progress=True)
-        except:
-            raise
+        except Exception as e:
+            raise RuntimeError(f"error while waiting for router status, got {e}")
 
     # create a simple global Edge Router Policy unless one exists with the same name
     blanket_policy_name = "defaultRouters"
     if not network.edge_router_policy_exists(name=blanket_policy_name):
-        try: network.create_edge_router_policy(name=blanket_policy_name,edge_router_attributes=["#defaultRouters"],endpoint_attributes=["#all"])
-        except: raise
+        try: 
+            network.create_edge_router_policy(name=blanket_policy_name,edge_router_attributes=["#defaultRouters"],endpoint_attributes=["#all"])
+        except Exception as e: 
+            raise RuntimeError(f"error creating edge router policy, got {e}")
 
     clients = list()
     client1_name = "Desktop1"
@@ -373,8 +373,8 @@ def main():
     try:
         network.wait_for_status("PROVISIONED",id=customer_router['id'],type="edge-router",wait=999,progress=True)
         customer_router_registration = network.rotate_edge_router_registration(id=customer_router['id'])
-    except:
-        raise
+    except Exception as e:
+        raise RuntimeError(f"error getting router registration, got {e}")
     print("INFO: Ready to register branch exit Edge Router {name} with key {key} (expires {expiry})".format(
         name=customer_router_name,
         key=customer_router_registration['registrationKey'],
@@ -391,7 +391,7 @@ def main():
         app_wan1 = network.app_wans(name=app_wan1_name)[0]
         print("INFO: found AppWAN \"{:s}\"".format(app_wan1['name']))
 
-    print("SUCCESS! The next step is to enroll one or more of your client Endpoints on some device(s) and visit one of the demo Service URLs described in the demo document ({doc})."
+    print("SUCCESS! The next step is to enroll one or more of your client endpoints on some device(s) and visit one of the demo Service URLs described in the demo document ({doc})."
             "You may also log in to the web console ({nfconsole}) to play with your Network".format(doc="https://developer.netfoundry.io/v2/tools/#demos",nfconsole=network_group.nfconsole))
     for svc in demo_services:
         print("* {name}:\thttp://{url}/".format(name=demo_services[svc]['entity']['name'],url=demo_services[svc]['entity']['model']['clientIngress']['host']))
@@ -415,7 +415,7 @@ def query_yes_no(question: str, default: str="no"):
     elif default == "no":
         prompt = " [y/N] "
     else:
-        raise ValueError("invalid default answer: '%s'" % default)
+        raise ValueError(f"invalid default answer: '{default}'")
 
     while True:
         sys.stdout.write(question + prompt)

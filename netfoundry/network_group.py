@@ -5,7 +5,7 @@ import json
 import logging
 
 from .utility import (NETWORK_RESOURCES, RESOURCES, STATUS_CODES,
-                      find_generic_resources, http, is_uuidv4,
+                      find_generic_resources, get_generic_resource, http, is_uuidv4,
                       normalize_caseless)
 
 
@@ -60,9 +60,9 @@ class NetworkGroup:
         else:
             self.nfconsole = f"https://{self.vanity}.{self.environment}-nfconsole.io"
 
-        network_ids_by_normal_name = dict()
+        self.network_ids_by_normal_name = dict()
         for net in Organization.get_networks_by_group(network_group_id=self.network_group_id):
-            network_ids_by_normal_name[normalize_caseless(net['name'])] = id
+            self.network_ids_by_normal_name[normalize_caseless(net['name'])] = id
 
     def nc_data_centers_by_location(self):
         """Get a controller data center by locationCode."""
@@ -90,7 +90,7 @@ class NetworkGroup:
         :param name: the case-insensitive string to search
         :param deleted: include deleted networks in results
         """
-        if normalize_caseless(name) in self.networks:
+        if self.network_ids_by_normal_name.get(normalize_caseless(name)):
             return(True)
         else:
             return(False)
@@ -111,7 +111,7 @@ class NetworkGroup:
             data_centers = list()
             for i in find_generic_resources(url=url, headers=headers, embedded=NETWORK_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params):
                 data_centers.extend(i)
-        except:
+        except Exception as e:
             raise RuntimeError(f"failed to get data-centers from url: '{url}'")
         else:
             return(data_centers)
@@ -129,10 +129,8 @@ class NetworkGroup:
         url = self.audience+'product-metadata/v2/download-urls.json'
         headers = dict() # no auth
         try:
-            all_product_metadata = list()
-            for i in find_generic_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify):
-                all_product_metadata.extend(i)
-        except:
+            all_product_metadata, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+        except Exception as e:
             raise RuntimeError(f"failed to get product-metadata from url: '{url}'")
         else:
             if is_active:
@@ -228,7 +226,7 @@ class NetworkGroup:
                 headers=headers
             )
             response_code = response.status_code
-        except:
+        except Exception as e:
             raise
 
         any_in = lambda a, b: any(i in b for i in a)
@@ -253,11 +251,11 @@ class NetworkGroup:
         try:
             networks_by_name = self.networks_by_name()
             if network_id:
-                network_name = next(name for name, uuid in networks_by_name.items() if uuid == network_id)
-            elif network_name and networks_by_name.get(network_name):
+                network_name = next(name for name, uuid in self.network_ids_by_normal_name.items() if uuid == network_id)
+            elif network_name and self.network_ids_by_normal_name.get(network_name):
                 network_id = networks_by_name[network_name]
-        except:
-            raise RuntimeError(f"need one of network_id or network_name for a network in this network group: {self.name}")
+        except Exception as e:
+            raise RuntimeError(f"need one of network_id or network_name for a network in this network group: {self.name}, got {e}")
 
         try:
             headers = { "authorization": "Bearer " + self.token }
@@ -269,12 +267,12 @@ class NetworkGroup:
                 headers=headers
             )
             response_code = response.status_code
-        except:
-            raise
+            network = response.json()
+        except Exception as e:
+            raise RuntimeError(f"failed deleting network {entity_url} or loading JSON from response, got {e}")
 
         if not response_code == STATUS_CODES.codes.ACCEPTED:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
-        network = json.loads(response.text)
         return(network)
 

@@ -39,7 +39,8 @@ def singular(plural):
     """Singularize a plural form."""
     return(p.singular_noun(plural))
 
-def camel(kebab, case: str="lower"):                # "lower" dromedary or "upper" Pascal 
+def kebab2camel(kebab, case: str="lower"):          # "lower" dromedary or "upper" Pascal
+    """Convert kebab case to camel case."""
     kebab_words = kebab.split('-')
     camel_words = list()
     if case in ["lower","dromedary"]:
@@ -56,12 +57,12 @@ def camel(kebab, case: str="lower"):                # "lower" dromedary or "uppe
     camel = ''.join(camel_words)
     return camel
 
-def camel(snake_str):
+def snake2camel(snake_str):
     """Convert a string from snake case to camel case."""
     first, *others = snake_str.split('_')
     return ''.join([first.lower(), *map(str.title, others)])
 
-def snake(camel_str):
+def camel2snake(camel_str):
     """Convert a string from camel case to snake case."""
     return sub(r'(?<!^)(?=[A-Z])', '_', camel_str).lower()
 
@@ -82,14 +83,11 @@ def get_token_cache(path):
     try:
         token_cache = json.loads(path.read_text())
     except FileNotFoundError as e:
-        logging.debug("cache file '%s' not found", path.__str__())
-        raise
+        raise RuntimeError(f"cache file '{path.__str__()}' not found")
     except JSONDecodeError as e:
-        logging.debug("failed to parse cache file '%s' as JSON, got %s", path.__str__(), e)
-        raise
+        raise RuntimeError(f"failed to parse cache file '{path.__str__()}' as JSON, got {e}")
     except Exception as e:
-        logging.debug("failed to read cache file '%s', got %s", path.__str__(), e)
-        raise
+        raise RuntimeError(f"failed to read cache file '{path.__str__()}', got {e}")
     else:
         cache_file_stats = os.stat(path)
         logging.debug("parsed token cache file '%s' as JSON with mode %s", path.__str__(), filemode(cache_file_stats.st_mode))
@@ -113,9 +111,8 @@ def jwt_expiry(token):
     except KeyError:
         logging.debug("failed to extract expiry epoch from claimset as key 'exp', estimating +%ds", DEFAULT_TOKEN_EXPIRY)
         expiry = time.time() + DEFAULT_TOKEN_EXPIRY
-    except:
-        logging.error("unexpect error")
-        raise
+    except Exception as e:
+        raise RuntimeError(f"unexpect error, got {e}")
     else:
         logging.debug("successfully extracted expiry from JWT")
     finally:
@@ -135,9 +132,9 @@ def jwt_environment(token):
     except KeyError:
         environment = "production"
         logging.debug("failed to extract the issuer URL from claimset as key 'iss', assuming environment is Production")
-    except:
-        logging.error("unexpect error")
-        raise
+    except Exception as e:
+        raise RuntimeError(f"unexpect error, got {e}")
+        
     else:
         if re.match(r'https://cognito-', iss):
             environment = re.sub(r'https://gateway\.([^.]+)\.netfoundry\.io.*',r'\1',claim['scope'])
@@ -159,12 +156,10 @@ def jwt_decode(token):
     """Parse the token and return claimset."""
     try:
         claim = jwt.decode(jwt=token, algorithms=["RS256"], options={"verify_signature": False})
-    except jwt.exceptions.PyJWTError:
-        logging.error("failed to parse bearer token as JWT")
-        raise
-    except:
-        logging.error("unexpect error parsing JWT")
-        raise
+    except jwt.exceptions.PyJWTError as e:
+        raise e("failed to parse bearer token as JWT")
+    except Exception as e:
+        raise RuntimeError(f"unexpect error parsing JWT, got {e}")
     return claim
 
 def is_jwt(token):
@@ -173,9 +168,9 @@ def is_jwt(token):
         jwt_decode(token)
     except jwt.exceptions.PyJWTError:
         return False
-    except:
-        logging.error("unexpect error parsing JWT")
-        raise
+    except Exception as e:
+        raise RuntimeError(f"unexpect error parsing JWT, got {e}")
+        
     else:
         return True
 
@@ -359,7 +354,7 @@ class ResourceType(ResourceTypeParent):
         """Compute and assign _embedded if not supplied and then check types in parent class."""
         if self._embedded == 'default':
             singular_name = singular(self.name)
-            camel_name = camel(singular_name)+'List'       # edgeRouterList
+            camel_name = kebab2camel(singular_name)+'List'       # edgeRouterList
             self._embedded = camel_name
         return super().__post_init__()
 

@@ -230,8 +230,8 @@ export MOPENV={env}
         try:
             session = network.get_controller_session(network.network_controller['id'])
             ziti_token = session['sessionToken']
-        except:
-            raise
+        except Exception as e:
+            raise RuntimeError(f"failed to get the ziti token from session '{session or None}'")
         else:
             if cli.config.general.proxy:
                 proxies = {
@@ -324,8 +324,7 @@ def create(cli):
             create_input_lines = cli.args.file.read()
             cli.log.debug("got lines from file: %s", str(create_input_lines))
         except Exception as e:
-            cli.log.error("failed to read the input file: %s", e)
-            raise e
+            raise RuntimeError(f"failed to read the input file: {e}")
     else:
         cli.log.warning("you may input from a file with --file")
         exit(1)
@@ -637,15 +636,15 @@ def delete(cli):
             else:
                 scrambled = []
                 for i in range(4):
-                    scrambled.extend([''.join(random.sample(network.name, len(match.name)))])
-                scrambled.extend([match.name])
+                    scrambled.extend([''.join(random.sample(network.name, len(match['name'])))])
+                scrambled.extend([match['name']])
                 random.shuffle(scrambled)
                 descrambled = questions.choice("{style_bright}Enter the number of the unscrambled {fg_yellow}network{fg_reset} name to {fg_red}IRREVERSIBLY DELETE", scrambled, default=None, confirm=True, prompt='{style_bright}{fg_red}DELETE{fg_reset} which {fg_yellow}network? ')
-                if match.name == descrambled:
+                if match['name'] == descrambled:
                     delete_confirmed = True
 
             if delete_confirmed:
-                spinner = get_spinner(f"deleting network '{match.name}'")
+                spinner = get_spinner(f"deleting network '{match['name']}'")
                 try:
                     with spinner:
                         network.delete_network(progress=False, wait=cli.config.delete.wait)
@@ -657,7 +656,7 @@ def delete(cli):
                 else:
                     cli.log.info(sub('deleting', 'deleted', spinner.text))
             else:
-                cli.echo(f"not deleting network '{match.name}'.")
+                cli.echo(f"not deleting network '{match['name']}'.")
         except KeyboardInterrupt as e:
             cli.log.debug("input cancelled by user")
         except Exception as e:

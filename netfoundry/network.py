@@ -46,8 +46,7 @@ class Network:
         elif network_name:
             self.describe = self.get_network_by_name(name=network_name)
         else:
-            logging("need one of network_id or network_name")
-            raise RuntimeError
+            raise RuntimeError("need one of network_id or network_name")
 
         # define some convenience attributes
         self.id = self.describe['id']
@@ -88,7 +87,7 @@ class Network:
         """
         all_edge_routers = self.get_resources(name=name, type="edge-routers")
         if only_hosted and only_customer:
-            raise Exception("ERROR: specify only one of only_hosted or only_customer")
+            raise RuntimeError("specify only one of only_hosted or only_customer")
         elif only_hosted:
             hosted_edge_routers = [er for er in all_edge_routers if er.get('provider') and not er['provider'] == 'CUSTOMER']
             return(hosted_edge_routers)
@@ -275,8 +274,8 @@ class Network:
         headers = { "authorization": "Bearer " + self.token }
         try:
             data_center, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
-        except:
-            raise RuntimeError(f"failed to get data_center from url: '{url}'")
+        except Exception as e:
+            raise RuntimeError(f"failed to get data_center from url: '{url}', got {e}")
         else:
             return(data_center)
 
@@ -293,13 +292,13 @@ class Network:
         params["productVersion"] = self.product_version
         params["hostType"] = "ER"
         if location_code:
-            params["locationCode"] = location_code
+            params["locationCode"] = location_code # not yet implemented in API
         if provider is not None:
             if provider in DC_PROVIDERS:
                 params['provider'] = provider
             else:
-                logging.error("unknown cloud provider '{:s}'. Need one of {:s}".format(provider,str(DC_PROVIDERS)))
-                raise RuntimeError
+                raise RuntimeError(f"unknown cloud provider '{provider}'. Need one of {str(DC_PROVIDERS)}")
+                
 
         url = self.audience+'core/v2/data-centers'
         headers = { "authorization": "Bearer " + self.token }
@@ -307,10 +306,13 @@ class Network:
             data_centers = list()
             for i in find_generic_resources(url=url, headers=headers, embedded=NETWORK_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params):
                 data_centers.extend(i)
-        except:
-            raise RuntimeError(f"failed to get data-centers from url: '{url}'")
+        except Exception as e:
+            raise RuntimeError(f"failed to get data-centers from url: '{url}', got {e}")
         else:
-            return(data_centers)
+            if location_code:
+                return [dc for dc in data_centers if dc['locationCode'] == location_code]
+            else:
+                return data_centers
 
     def share_endpoint(self,recipient,endpoint_id):
         """
@@ -338,8 +340,8 @@ class Network:
                 json=body
             )
             response_code = response.status_code
-        except:
-            raise
+        except Exception as e:
+            raise RuntimeError("error posting to share endpoint to email, got {e}")
 
         if not response_code == STATUS_CODES.codes['ACCEPTED']:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
@@ -366,7 +368,6 @@ class Network:
             params["networkId"] = self.id
         if not NETWORK_RESOURCES.get(plural(type)):
             raise RuntimeError(f"unknown resource type '{plural(type)}'. Choices: {','.join(NETWORK_RESOURCES.keys())}")
-            raise RuntimeError
         elif plural(type) in ["edge-routers","network-controllers"]:
             params['embed'] = "host"
 
@@ -374,8 +375,8 @@ class Network:
         url = self.audience+'core/v2/'+plural(type)+'/'+id
         try:
             resource, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
-        except:
-            raise RuntimeError(f"failed to get resource from url: '{url}'")
+        except Exception as e:
+            raise RuntimeError(f"failed to get resource from url: '{url}', got {e}")
         else:
             return(resource)
     get_resource = get_resource_by_id
@@ -399,7 +400,7 @@ class Network:
         params = dict()
         for param in kwargs.keys():
             params[param] = kwargs[param]
-        if not type == 'network':
+        if not plural(type) == 'networks':
             params["networkId"] = self.id
         elif params.get('name'):
             params['findByName'] = params['name']
@@ -407,16 +408,16 @@ class Network:
         if deleted:
             params['status'] = "DELETED"
 
-        url = self.audience+'core/v2/networks'
+        url = self.audience+'core/v2/'+plural(type)
         headers = { "authorization": "Bearer " + self.token }
         try:
-            networks = list()
+            resources = list()
             for i in find_generic_resources(url=url, headers=headers, accept=accept, embedded=NETWORK_RESOURCES[type]._embedded, proxies=self.proxies, verify=self.verify, **params):
-                networks.extend(i)
-        except:
-            raise RuntimeError(f"failed to get networks from url: '{url}'")
+                resources.extend(i)
+        except Exception as e:
+            raise RuntimeError(f"failed to get {plural(type)} from url: '{url}', got {e}")
         else:
-            return(networks)
+            return(resources)
 
 
     def resource_exists_in_network(self, name: str, type: str, deleted: bool=False):
@@ -448,15 +449,16 @@ class Network:
         try: 
             self_link = patch['_links']['self']['href']
         except KeyError:
-            try: self_link = self.audience+'core/v2/'+plural(type)+'/'+id
+            try:
+                self_link = self.audience+'core/v2/'+plural(type)+'/'+id
             except NameError as e:
-                raise(e)
+                raise RuntimeError("error composing URL to patch resource, got {e}")
         else: type = self_link.split('/')[5] # e.g. endpoints, app-wans, edge-routers, etc...
         if not EXCLUDED_PATCH_PROPERTIES.get(type):
             raise RuntimeError(f"got unexpected type {type} for patch request to {self_link}")
         try:
             before_resource, status_symbol = get_generic_resource(url=self_link, headers=headers, proxies=self.proxies, verify=self.verify, accept='update')
-        except:
+        except Exception as e:
             raise RuntimeError(f"failed to get {type} for patching: '{e}'")
         else:
             # compare the patch to the discovered, current state, adding new or updated keys to pruned_patch
@@ -486,13 +488,13 @@ class Network:
                         json=pruned_patch
                     )
                     after_response_code = after_response.status_code
-                except:
-                    raise
+                except Exception as e:
+                    raise RuntimeError(f"error with PATCH request to {self_link}, got {e}")
                 if after_response_code in [STATUS_CODES.codes.OK, STATUS_CODES.codes.ACCEPTED]: # HTTP 202
                     try:
                         after_resource = after_response.json()
                     except ValueError as e:
-                        raise RuntimeError(f"failed to load {type} object from PATCH response")
+                        raise RuntimeError(f"failed to load {type} object from PATCH response, got {e}")
                 else:
                     raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[after_response_code][0].upper()} ({after_response_code}) for patch: {json.dumps(patch, indent=2)}")            
 
@@ -505,21 +507,21 @@ class Network:
                     if wait:
                         try:
                             self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait, sleep=sleep, progress=progress)
-                        except:
-                            raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
+                        except Exception as e:
+                            raise RuntimeError(f"timed out waiting for process status 'FINISHED', got {e}")
                         try:
                             # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
                             #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
                             finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type=type, 
                                                                         id=after_resource['id'], wait=3, sleep=1)
-                        except:
-                            raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
+                        except Exception as e:
+                            raise RuntimeError(f"timed out waiting for property 'zitiId' to be defined, got {e}")
                         return(finished)
                     else: # if not wait then merely verify the async process was at least started if not finished
                         try:
                             self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2, progress=progress)
-                        except:
-                            raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
+                        except Exception as e:
+                            raise RuntimeError(f"timed out waiting for process status 'STARTED' or 'FINISHED', got {e}")
                 return(after_resource)
             else:
                 # no change, return the existing unmodified entity
@@ -564,14 +566,14 @@ class Network:
                 json=put
             )
             response_code = response.status_code
-        except:
-            raise
+        except Exception as e:
+            raise RuntimeError(f"error with PUT to {self_link}, got {e}")
 
         if response_code in [STATUS_CODES.codes.OK, STATUS_CODES.codes.ACCEPTED]: # HTTP 202
             try:
                 resource = response.json()
             except ValueError as e:
-                raise RuntimeError(f"failed to load JSON from POST response")
+                raise RuntimeError(f"failed to load JSON from POST response, got {e}")
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) for put: {json.dumps(put, indent=2)}")            
 
@@ -584,20 +586,20 @@ class Network:
             if wait:
                 try:
                     self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait, sleep=sleep, progress=progress)
-                except:
+                except Exception as e:
                     raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
                 try:
                     # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
                     #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
                     finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type=type, 
                                                                 id=resource['id'], wait=3, sleep=1)
-                except:
+                except Exception as e:
                     raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
                 return(finished)
             else: # if not wait then merely verify the async process was at least started if not finished
                 try:
                     self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2, progress=progress)
-                except:
+                except Exception as e:
                     raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
 
         return(resource)
@@ -622,14 +624,14 @@ class Network:
                 json=post
             )
             response_code = response.status_code
-        except:
-            raise
+        except Exception as e:
+            raise RuntimeError(f"error POST to {self.audience+'core/v2/'+plural(type)}, got {e}")
 
         if response_code in [STATUS_CODES.codes.OK, STATUS_CODES.codes.ACCEPTED]: # HTTP 202
             try:
                 resource = response.json()
             except ValueError as e:
-                raise RuntimeError(f"failed to load JSON from POST response")
+                raise RuntimeError(f"failed to load JSON from POST response, got {e}")
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) for post: {json.dumps(post, indent=2)}")            
 
@@ -642,20 +644,20 @@ class Network:
             if wait:
                 try:
                     self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait, sleep=sleep, progress=progress)
-                except:
+                except Exception as e:
                     raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
                 try:
                     # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
                     #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
                     finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type=type, 
                                                                 id=resource['id'], wait=3, sleep=1)
-                except:
+                except Exception as e:
                     raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
                 return(finished)
             else: # if not wait then merely verify the async process was at least started if not finished
                 try:
                     self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2, progress=progress)
-                except:
+                except Exception as e:
                     raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
 
         return(resource)
@@ -693,8 +695,8 @@ class Network:
                 json=body
             )
             response_code = response.status_code
-        except:
-            raise
+        except Exception as e:
+            raise RuntimeError(f"error with POST to {self.audience+'core/v2/endpoints'}, got {e}")
 
         started = None
         any_in = lambda a, b: any(i in b for i in a)
@@ -717,20 +719,20 @@ class Network:
         if wait:
             try:
                 self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait, sleep=sleep, progress=progress)
-            except:
+            except Exception as e:
                 raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
             try:
                 # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
                 #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
                 finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="endpoint", 
                                                             id=started['id'], wait=3, sleep=1)
-            except:
+            except Exception as e:
                 raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
             return(finished)
         else:
             try:
                 self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2, progress=progress)
-            except:
+            except Exception as e:
                 raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
             return(started)
 
@@ -795,15 +797,15 @@ class Network:
                 json=body
             )
             response_code = response.status_code
-        except:
-            raise
+        except Exception as e:
+            raise RuntimeError(f"error with POST to {self.audience+'core/v2/edge-routers'}, got {e}")
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, NETWORK_RESOURCES['edge-routers'].create_responses):
             try:
                 started = json.loads(response.text)
             except ValueError as e:
-                raise RuntimeError(f"failed to load JSON from POST response")
+                raise RuntimeError(f"failed to load JSON from POST response, got {e}")
             else:
                 logging.debug(f"created Edge Router trace ID {response.headers._store['x-b3-traceid'][1]}'")
         else:
@@ -818,14 +820,14 @@ class Network:
         if wait:
             try:
                 self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait, sleep=sleep, progress=progress)
-            except:
+            except Exception as e:
                 raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
             try:
                 # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
                 #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
                 finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="edge-router", 
                                                             id=started['id'], wait=3, sleep=1)
-            except:
+            except Exception as e:
                 raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
             if tunneler_enabled:
                 router_endpoint = self.wait_for_entity_name_exists(entity_name=name, entity_type="endpoint", wait=wait)
@@ -833,7 +835,7 @@ class Network:
         else:
             try:
                 self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2, progress=progress)
-            except:
+            except Exception as e:
                 raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
             return(started)
 
@@ -866,15 +868,15 @@ class Network:
                 json=body
             )
             response_code = response.status_code
-        except:
-            raise
+        except Exception as e:
+            raise RuntimeError(f"error with POST to {self.audience+'core/v2/edge-router-policies'}, got {e}")
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, NETWORK_RESOURCES['edge-router-policies'].create_responses):
             try:
                 started = response.json()
             except ValueError as e:
-                raise RuntimeError(f"failed to load JSON from POST response")
+                raise RuntimeError(f"failed to load JSON from POST response, got {e}")
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
@@ -919,7 +921,7 @@ class Network:
             }
             for role in attributes:
                 if not role[0:1] == '#':
-                    raise Exception('ERROR: invalid role "{:s}". Must begin with "#"'.format(role))
+                    raise Exception(f'invalid role "{role}". Must begin with "#"')
             body = {
                 "networkId": self.id,
                 "name": name,
@@ -1013,15 +1015,15 @@ class Network:
                 params=params
             )
             response_code = response.status_code
-        except:
-            raise
+        except Exception as e:
+            raise RuntimeError(f"error with POST to {self.audience+'core/v2/services'}, got {e}")
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, NETWORK_RESOURCES['services'].create_responses):
             try:
                 started = response.json()
             except ValueError as e:
-                raise RuntimeError(f"failed to load JSON from POST response")
+                raise RuntimeError(f"failed to load JSON from POST response, got {e}")
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
@@ -1034,20 +1036,20 @@ class Network:
         if wait:
             try:
                 self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait, sleep=sleep, progress=progress)
-            except:
+            except Exception as e:
                 raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
             try:
                 # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
                 #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
                 finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service", 
                                                             id=started['id'], wait=3, sleep=1)
-            except:
+            except Exception as e:
                 raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
             return(finished)
         else:
             try:
                 self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2, progress=progress)
-            except:
+            except Exception as e:
                 raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
             return(started)
 
@@ -1102,8 +1104,8 @@ class Network:
                 params=params
             )
             response_code = response.status_code
-        except:
-            raise
+        except Exception as e:
+            raise RuntimeError(f"error with POST to {self.audience+'core/v2/service-policies'}, got {e}")
 
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
@@ -1111,7 +1113,7 @@ class Network:
             try:
                 started = response.json()
             except ValueError as e:
-                raise RuntimeError(f"failed to load JSON from POST response")
+                raise RuntimeError(f"failed to load JSON from POST response, got {e}")
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
@@ -1124,20 +1126,20 @@ class Network:
         if wait:
             try:
                 self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait, sleep=sleep, progress=progress)
-            except:
+            except Exception as e:
                 raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
             try:
                 # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
                 #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
                 finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service-policy", 
                                                             id=started['id'], wait=3, sleep=1)
-            except:
+            except Exception as e:
                 raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
             return(finished)
         else:
             try:
                 self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2, progress=progress)
-            except:
+            except Exception as e:
                 raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
             return(started)
 
@@ -1184,8 +1186,8 @@ class Network:
                 params=params
             )
             response_code = response.status_code
-        except:
-            raise
+        except Exception as e:
+            raise RuntimeError(f"error with POST to {self.audience+'core/v2/service-edge-router-policies'}, got {e}")
 
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
@@ -1193,7 +1195,7 @@ class Network:
             try:
                 started = response.json()
             except ValueError as e:
-                raise RuntimeError(f"failed to load JSON from POST response")
+                raise RuntimeError(f"failed to load JSON from POST response, got {e}")
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
@@ -1206,20 +1208,20 @@ class Network:
         if wait:
             try:
                 self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait, sleep=sleep, progress=progress)
-            except:
+            except Exception as e:
                 raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
             try:
                 # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
                 #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
                 finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service-edge-router-policy", 
                                                             id=started['id'], wait=3, sleep=1)
-            except:
+            except Exception as e:
                 raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
             return(finished)
         else:
             try:
                 self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2, progress=progress)
-            except:
+            except Exception as e:
                 raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
             return(started)
 
@@ -1281,8 +1283,8 @@ class Network:
                 params=params
             )
             response_code = response.status_code
-        except:
-            raise
+        except Exception as e:
+            raise RuntimeError(f"error with POST to {self.audience+'core/v2/services'}, got {e}")
 
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
@@ -1290,7 +1292,7 @@ class Network:
             try:
                 started = response.json()
             except ValueError as e:
-                raise RuntimeError(f"failed to load JSON from POST response")
+                raise RuntimeError(f"failed to load JSON from POST response, got {e}")
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
@@ -1303,20 +1305,20 @@ class Network:
         if wait:
             try:
                 self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait, sleep=sleep, progress=progress)
-            except:
+            except Exception as e:
                 raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
             try:
                 # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
                 #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
                 finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service", 
                                                             id=started['id'], wait=3, sleep=1)
-            except:
+            except Exception as e:
                 raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
             return(finished)
         else:
             try:
                 self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2, progress=progress)
-            except:
+            except Exception as e:
                 raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
             return(started)
 
@@ -1389,7 +1391,7 @@ class Network:
                 dry_run=dry_run
             )
 
-        except:
+        except Exception as e:
             raise
 
         transparent_service = {
@@ -1433,7 +1435,7 @@ class Network:
             else:
                 service_result = "NOT FOUND"
 
-        except:
+        except Exception as e:
             raise
 
         transparent_service = {
@@ -1590,8 +1592,8 @@ class Network:
                 params=params
             )
             response_code = response.status_code
-        except:
-            raise
+        except Exception as e:
+            raise RuntimeError(f"error with POST to {self.audience+'core/v2/services'}, got {e}")
 
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
@@ -1599,7 +1601,7 @@ class Network:
             try:
                 started = response.json()
             except ValueError as e:
-                raise RuntimeError(f"failed to load JSON from POST response")
+                raise RuntimeError(f"failed to load JSON from POST response, got {e}")
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
@@ -1612,20 +1614,20 @@ class Network:
         if wait:
             try:
                 self.wait_for_status(expect="FINISHED",type="process", id=process_id, wait=wait, sleep=sleep, progress=progress)
-            except:
+            except Exception as e:
                 raise Exception("ERROR: timed out waiting for process status 'FINISHED'")
             try:
                 # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
                 #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
                 finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service", 
                                                             id=started['id'], wait=3, sleep=1)
-            except:
+            except Exception as e:
                 raise Exception("ERROR: timed out waiting for property 'zitiId' to be defined")
             return(finished)
         else:
             try:
                 self.wait_for_statuses(expected_statuses=["STARTED","FINISHED"],type="process", id=process_id, wait=5, sleep=2, progress=progress)
-            except:
+            except Exception as e:
                 raise Exception("ERROR: timed out waiting for process status 'STARTED' or 'FINISHED'")
             return(started)
 
@@ -1664,15 +1666,16 @@ class Network:
                 json=body
             )
             response_code = response.status_code
-        except:
-            raise
+        except Exception as e:
+            raise RuntimeError(f"error with POST to {self.audience+'core/v2/app-wans'}, got {e}")
+ 
         any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, NETWORK_RESOURCES['app-wans'].create_responses):
             try:
                 started = response.json()
             except ValueError as e:
-                raise RuntimeError(f"failed to load JSON from POST response")
+                raise RuntimeError(f"failed to load JSON from POST response, got {e}")
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
@@ -1707,11 +1710,11 @@ class Network:
 
         :param str network_id: the UUID of the network
         """
-        url = self.audience+'core/v2/networks/'+id
+        url = self.audience+'core/v2/networks/'+network_id
         headers = { "authorization": "Bearer " + self.token }
         try:
             network, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
-        except:
+        except Exception as e:
             raise RuntimeError(f"failed to get network from url: '{url}'")
         else:
             return(network)
@@ -1726,7 +1729,7 @@ class Network:
         headers = { "authorization": "Bearer " + self.token }
         try:
             secrets, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
-        except:
+        except Exception as e:
             raise RuntimeError(f"failed to get secrets from url: '{url}'")
         else:
             try:
@@ -1747,7 +1750,7 @@ class Network:
         headers = { "authorization": "Bearer " + self.token }
         try:
             session, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
-        except:
+        except Exception as e:
             raise RuntimeError(f"failed to get session from url: '{url}'")
         else:
             try:
@@ -1790,7 +1793,7 @@ class Network:
 
             try:
                 entity = self.get_resource(type=entity_type, id=id)
-            except:
+            except Exception as e:
                 raise
 
             # if expected property value is not null then evaluate type, else sleep
@@ -1849,7 +1852,7 @@ class Network:
 
             try:
                 found_entities = self.get_resources(type=plural(entity_type), name=entity_name)
-            except:
+            except Exception as e:
                 raise
 
             # if expected entity exists then verify name, else sleep
@@ -1902,8 +1905,8 @@ class Network:
 
             try:
                 entity_status = self.get_resource_status(type=type, id=id)
-            except:
-                raise
+            except Exception as e:
+                raise RuntimeError(f"unknown error getting status for type={type}, id={id}")
 
             if entity_status['status']: # attribute is not None if HTTP OK
                 if not status or ( # print the starting status
@@ -1958,7 +1961,7 @@ class Network:
 
             try:
                 entity_status = self.get_resource_status(type=type, id=id)
-            except:
+            except Exception as e:
                 raise
 
             if entity_status['status']: # attribute is not None if HTTP OK
@@ -2007,19 +2010,24 @@ class Network:
         headers = { "authorization": "Bearer " + self.token }
         try:
             resource, status_symbol = get_generic_resource(url=entity_url, headers=headers, proxies=self.proxies, verify=self.verify)
-        except:
-            logging.debug("failed to get resource from url: '%s'", entity_url)
-            raise
+        except Exception as e:
+            raise RuntimeError(f"failed to get resource from url: '{entity_url}', got {e}")
+            
         else:
             if resource.get('status'):
                 status = resource['status']
+            else:
+                status = status_symbol
             
             if resource.get('name'):
                 name = resource['name']
             elif resource.get('processorName'):
                 name = resource['processorName']
-            else:
-                logging.warning('no "name" property found')
+            logging.debug(f"found {name or entity_url} with status {status}")
+            return {
+                "status": status,
+                "name": name or None,
+            }
 
     def rotate_edge_router_registration(self, id: str):
         """Rotate and return the registration key like {"registrationKey": str, "expiresAt": date}.
@@ -2036,13 +2044,13 @@ class Network:
                 headers=headers,
             )
             response_code = response.status_code
-        except:
-            raise
+        except Exception as e:
+            raise RuntimeError(f"error with POST to {self.audience+'core/v2/edge-routers/'+id+'/registration-key'}, got {e}")
 
         if response_code == STATUS_CODES.codes.OK:
             try:
                 registration_object = response.json()
-            except:
+            except Exception as e:
                 raise RuntimeError(f"failed while parsing response as object, got:\n{response.text}")
             else:
                 return(registration_object)
@@ -2082,8 +2090,8 @@ class Network:
                 params=params
             )
             response_code = response.status_code
-        except:
-            raise
+        except Exception as e:
+            raise RuntimeError(f"error with DELETE to {entity_url}, got {e}")
 
         if not response_code in expected_responses:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
@@ -2099,7 +2107,7 @@ class Network:
                     sleep=1,
                     progress=progress
                 )
-            except:
+            except Exception as e:
                 raise
 
         return(True)
