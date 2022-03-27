@@ -31,7 +31,8 @@ setuptools.setup(
         'pyyaml >= 5.4',
         'platformdirs >= 2.4',
         'tabulate >= 0.8',
-        'packaging >= 20.9'
+        'packaging >= 20.9',
+        'nanoid >= 2.0',
     ]
 )
 
