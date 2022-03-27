@@ -7,8 +7,8 @@ import sys
 import time
 from unicodedata import name  # enforce a timeout; sleep
 
-from .utility import (DC_PROVIDERS, EXCLUDED_PATCH_PROPERTIES, MAJOR_REGIONS,
-                      NETWORK_RESOURCES, STATUS_CODES, VALID_SEPARATORS,
+from .utility import (DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES,
+                      NETWORK_RESOURCES, RESOURCES, STATUS_CODES, VALID_SEPARATORS,
                       VALID_SERVICE_PROTOCOLS, docstring_parameters,
                       find_generic_resources, get_generic_resource, http, is_uuidv4, plural,
                       singular, normalize_caseless)
@@ -453,8 +453,10 @@ class Network:
                 self_link = self.audience+'core/v2/'+plural(type)+'/'+id
             except NameError as e:
                 raise RuntimeError("error composing URL to patch resource, got {e}")
-        else: type = self_link.split('/')[5] # e.g. endpoints, app-wans, edge-routers, etc...
-        if not EXCLUDED_PATCH_PROPERTIES.get(type):
+        else:
+            type = self_link.split('/')[5] # e.g. endpoints, app-wans, edge-routers, etc...
+
+        if not MUTABLE_NETWORK_RESOURCES.get(type): # prune properties that can't be patched
             raise RuntimeError(f"got unexpected type {type} for patch request to {self_link}")
         try:
             before_resource, status_symbol = get_generic_resource(url=self_link, headers=headers, proxies=self.proxies, verify=self.verify, accept='update')
@@ -464,7 +466,7 @@ class Network:
             # compare the patch to the discovered, current state, adding new or updated keys to pruned_patch
             pruned_patch = dict()
             for k in patch.keys():
-                if k not in EXCLUDED_PATCH_PROPERTIES[type] and before_resource.get(k):
+                if k not in RESOURCES[type].no_update_props and before_resource.get(k):
                     if isinstance(patch[k], list):
                         if not set(before_resource[k]) == set(patch[k]):
                             pruned_patch[k] = list(set(patch[k]))

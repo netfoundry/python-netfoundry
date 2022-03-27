@@ -358,6 +358,7 @@ class ResourceType(ResourceTypeParent):
     _embedded: str = field(default='default')               # the key under which lists are found in the API e.g. networkControllerList 
                                                             #   (computed if not provided as dromedary case singular)
     create_responses: list = field(default_factory=list)    # expected HTTP response codes for create operation
+    no_update_props: list = field(default_factory=list)    # expected HTTP response codes for create operation    
     create_template: dict = field(default_factory=lambda: {
         'hint': "No template was found for this resource type. Replace the contents of this buffer with the request body as YAML or JSON to create a resource. networkId will be added automatically."
     })                                                      # object to load when creating from scratch in nfctl
@@ -438,6 +439,7 @@ RESOURCES = {
         domain='network',
         mutable=True,
         embeddable=True,
+        no_update_props=['registration'],
         create_responses=["ACCEPTED"],
     ),
     'edge-router-policies': ResourceType(
@@ -505,17 +507,6 @@ MAJOR_REGIONS = {
 }
 
 DC_PROVIDERS = ["AWS", "AZURE", "GCP", "OCP"]
-
-EXCLUDED_PATCH_PROPERTIES = {
-    "edge-routers": ["registration"],
-    "services": [],
-    "endpoints": [],
-    "edge-router-policies": [],
-    "networks": [],
-    "app-wans": [],
-    "posture-checks": []
-}
-
 VALID_SERVICE_PROTOCOLS = ["tcp", "udp"]
 VALID_SEPARATORS = '[:-]' # : or - will match regex pattern
 
