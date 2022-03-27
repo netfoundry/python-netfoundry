@@ -29,6 +29,7 @@ from tabulate import tabulate
 from yaml import dump as yaml_dumps
 from yaml import full_load as yaml_loads
 from yaml import parser
+from nanoid import non_secure_generate
 
 from ._version import get_versions
 from .exceptions import NFAPINoCredentials
@@ -37,6 +38,7 @@ from .network_group import NetworkGroup
 from .organization import Organization
 from .utility import (MUTABLE_NETWORK_RESOURCES, NETWORK_RESOURCES, RESOURCES,
                       is_jwt, normalize_caseless, plural, singular)
+from .demo import main as nfdemo
 
 set_metadata(version="v"+get_versions()['version']) # must precend import milc.cli
 #import milc.subcommand.config
@@ -382,6 +384,7 @@ def edit(cli):
     accepts a file to edit as first positional parameter and waits for exit to
     return e.g. "code --wait".
     """
+    cli.args['accept'] = 'update'
     edit_resource_object, network, network_group, organization = get(cli, echo=False)
     cli.log.debug("opening %s '%s' for editing", cli.args.resource_type, edit_resource_object['name'])
     update_request_object = edit_object_as_yaml(edit_resource_object)
@@ -684,6 +687,19 @@ def delete(cli):
             cli.log.error("unknown error in %s", e)
             exit(1)
 
+@cli.subcommand('create a functioning demo network')
+def demo(cli):
+    """Create a functioning demo network."""
+    use_organization()
+    if cli.args.network:
+        network_name = cli.args.network
+    else:
+        network_name = f'BibbidiBobbidiBoo{non_secure_generate("1234567890abcdef", 5)}'
+    demo_params = ['--network', network_name]
+    if cli.config.general.proxy:
+        demo_params.extend(['--proxy', cli.config.general.proxy])
+    nfdemo(demo_params)
+
 def use_organization(prompt: bool=True):
     """Assume an identity in an organization."""
     if cli.config.general.credentials:
@@ -825,7 +841,7 @@ def edit_object_as_yaml(edit: object):
         return edit
     save_error = False
     editor = os.environ.get('NETFOUNDRY_EDITOR',os.environ.get('EDITOR','vim'))
-    instructions_bytes = "# just exit to confirm, or\n#  abort by leaving an empty file\n".encode()
+    instructions_bytes = "# save and exit this editor to confirm, or\n#  abort by saving an empty file, comments ignored\n".encode()
     edit_bytes = yaml_dumps(edit, default_flow_style=False).encode()
     with tempfile.NamedTemporaryFile(suffix=".yml", delete=False) as tf:
         temp_file = tf.name

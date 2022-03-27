@@ -201,7 +201,7 @@ def get_generic_resource(url: str, headers: dict, proxies: dict=dict(), verify: 
         params[param] = kwargs[param]
     if accept:
         if accept in ["create", "update"]:
-            headers['accept'] = "application/json;as="+params['accept']
+            headers['accept'] = f"application/json;as={accept}"
         else:
             logging.warn("ignoring invalid value for header 'accept': '{:s}'".format(accept))
 

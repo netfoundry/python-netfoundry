@@ -17,18 +17,11 @@ from .organization import Organization
 from .utility import DC_PROVIDERS
 
 
-def main():
+def main(raw_args=None):
     """Run the demo script."""
     print("DEBUG: running demo script in \"{:s}\"".format(sys.argv[0]))
 
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "command",
-        nargs='?',
-        default="create",
-        help="the command to run",
-        choices=["create","delete"]
-    )
     parser.add_argument(
         "-d", "--verbose", "--debug",
         dest="verbose",
@@ -94,8 +87,8 @@ def main():
         help="cloud provider to host Edge Routers",
         choices=DC_PROVIDERS
     )
-    parser.add_argument("--location-codes",
-        dest="location_codes",
+    parser.add_argument("--regions",
+        dest="regions",
         default=["us-west-1"],
         nargs="+",
         help="cloud location codes in which to host Edge Routers"
@@ -105,7 +98,7 @@ def main():
         help="'http://localhost:8080'"+
         " 'socks5://localhost:9046'"
     )
-    args = parser.parse_args()
+    args = parser.parse_args(raw_args)
 
     if args.verbose:
         logging_level = logging.DEBUG
@@ -132,24 +125,12 @@ def main():
     if network_group.network_exists(network_name):
         # use the Network
         network = Network(network_group, network_name=network_name)
-        if args.command == "create":
-            network.wait_for_status("PROVISIONED",wait=999,progress=True)
-        elif args.command == "delete":
-            if args.yes or query_yes_no("Permanently destroy Network \"{network_name}\" now?".format(network_name=network_name)):
-                network.delete_network(progress=True)
-            else:
-                print("Not deleting Network \"{network_name}\".".format(network_name=network_name))
-            sys.exit()
-    elif args.command == "create":
+        network.wait_for_status("PROVISIONED",wait=999,progress=True)
+    else:
+        logging.debug(f"creating network named {network_name}")
         network_id = network_group.create_network(name=network_name,size=args.size,version=args.version)['id']
         network = Network(network_group, network_id=network_id)
         network.wait_for_status("PROVISIONED",wait=999,progress=True)
-    elif args.command == "delete":
-        print("Network \"{network_name}\" does not exist.".format(network_name=network_name))
-        sys.exit()
-    else: # catch unhandled cases if the script changes in the future, not currently possible to match 'else' because only create, delete are valid args.
-        raise Exception("ERROR: failed to find a network named \"{name}\" and no valid command in \"{command}\"." 
-                        +" Need \"create\" (default) or \"delete\".".format(name=network_name, command=args.command))
 
     # existing hosted routers
     hosted_edge_routers = network.edge_routers(only_hosted=True)
@@ -157,27 +138,32 @@ def main():
 
     # a list of locations to place a hosted router
     fabric_placements = list()
-    if args.location_codes:
-        for location_code in args.location_codes:
-            existing_count = len([er for er in hosted_edge_routers if er['provider'] == args.provider and er['locationCode'] == location])
+    if args.regions:
+        for region in args.regions:
+            existing_count = len([er for er in hosted_edge_routers if er['provider'] == args.provider and er['region'] == region])
             if existing_count < 1:
-                fabric_placements += [location_code]
+                fabric_placements += [region]
             else:
-                logging.info("found a hosted router in {location}".format(location=location))
+                logging.info(f"found a hosted router in {region}")
 
-        for location_code in fabric_placements:
+        for region in fabric_placements:
             er = network.create_edge_router(
-                name=f"Hosted Router {location_code} [{args.provider}]",
+                name=f"Hosted Router {region} [{args.provider}]",
                 attributes=[
                     "#defaultRouters",
-                    f"#{location_code}",
+                    f"#{region}",
                     f"#{args.provider}",
                 ],
                 provider=args.provider,
-                location_code=location_code
+                location_code=region
             )
             hosted_edge_routers.extend(er)
-            logging.info(f"placed router in {args.provider} ({location_code})")
+            logging.info(f"placed router in {args.provider} ({region})")
+
+    try:
+        assert(len(hosted_edge_routers) > 0)
+    except Exception as e:
+        raise RuntimeError("unexpected error with router placements, found zero hosted router")
 
     for router_id in [r['id'] for r in hosted_edge_routers]:
         try:
