@@ -157,7 +157,7 @@ def main(raw_args=None):
                 provider=args.provider,
                 location_code=region
             )
-            hosted_edge_routers.extend(er)
+            hosted_edge_routers.extend([er])
             logging.info(f"placed router in {args.provider} ({region})")
 
     try:
