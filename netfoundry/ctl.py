@@ -668,7 +668,7 @@ def delete(cli):
     else: # network child resource, not the network itself
         try:
             if cli.args.yes or questions.yesno("{warn_color}IRREVERSIBLY DELETE {type_color}{type} {name_color}'{name}'{fg_reset}".format(warn_color='{style_bright}{fg_red}', type_color='{fg_yellow}', type=cli.args.resource_type, name_color='{fg_cyan}', name=match['name'], fg_reset='{fg_reset}'), default=False):
-                spinner.text = "deleting {type} '{name}'".format(type=cli.args.resource_type, name=match['name'])
+                spinner = get_spinner(f"deleting {cli.args.resource_type} '{match['name'] or match['id']}'")
                 try:
                     with spinner:
                         network.delete_resource(type=cli.args.resource_type, id=match['id'])
