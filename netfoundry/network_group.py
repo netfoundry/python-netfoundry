@@ -250,7 +250,11 @@ class NetworkGroup:
         """
         try:
             if network_id:
-                network_name = next(name for name, uuid in self.network_ids_by_normal_name.items() if uuid == network_id)
+                try:
+                    network_name = next(name for name, uuid in self.network_ids_by_normal_name.items() if uuid == network_id)
+                except StopIteration:
+                    logging.debug(f"failed to resolve {network_id} to a network name")
+                    network_name = "NONAME"
             elif network_name and self.network_ids_by_normal_name.get(normalize_caseless(network_name)):
                 network_id = self.network_ids_by_normal_name[normalize_caseless(network_name)]
         except Exception as e:

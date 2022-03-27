@@ -12,36 +12,38 @@ import os
 import platform
 import random
 import re
-import shutil
 import sys
 import tempfile
 import time
 from json import dumps as json_dumps
 from json import loads as json_loads
+from posixpath import split
 from re import sub
+from shlex import split
+from shutil import which
 from subprocess import CalledProcessError
 
 #from cryptography.hazmat.primitives.serialization import Encoding, pkcs7
 from jwt.exceptions import PyJWTError
 from milc import set_metadata
+from nanoid import non_secure_generate
 from packaging import version
 from tabulate import tabulate
 from yaml import dump as yaml_dumps
 from yaml import full_load as yaml_loads
 from yaml import parser
-from nanoid import non_secure_generate
 
 from ._version import get_versions
+from .demo import main as nfdemo
 from .exceptions import NFAPINoCredentials
 from .network import Network
 from .network_group import NetworkGroup
 from .organization import Organization
 from .utility import (MUTABLE_NETWORK_RESOURCES, NETWORK_RESOURCES, RESOURCES,
                       is_jwt, normalize_caseless, plural, singular)
-from .demo import main as nfdemo
 
 set_metadata(version="v"+get_versions()['version']) # must precend import milc.cli
-#import milc.subcommand.config
+import milc.subcommand.config
 from milc import cli, questions
 
 
@@ -174,12 +176,11 @@ def login(cli):
 
         elif cli.args.shell:
             cli.echo(
-                """
+                f"""
 # $ source <(nfctl --credentials credentials.json login organization)
-export NETFOUNDRY_API_TOKEN="{token}"
-export MOPENV={env}
-""".format(token=organization.token, env=organization.environment)
-            )
+export NETFOUNDRY_API_TOKEN="{organization.token}"
+export MOPENV={organization.environment}
+""")
         else:
             cli.log.info('logged in to "{org_name}" ({org_label}@{env}) as {fullname} ({email}) until {expiry_timestamp} (T-{expiry_seconds}s)'.format(
                         fullname=summary_object['caller']['name'],
@@ -199,7 +200,7 @@ export MOPENV={env}
                 ziti_cli = 'ziti.exe'
             else:
                 ziti_cli = 'ziti'
-        which_ziti = shutil.which(ziti_cli)
+        which_ziti = which(ziti_cli)
         if which_ziti:
             cli.log.debug("found ziti CLI executable in %s", which_ziti)
         else:
@@ -207,14 +208,14 @@ export MOPENV={env}
             exit(1)
         exec = cli.run([ziti_cli, '--version'])
         if exec.returncode == 0:
-            cli.log.debug("found ziti CLI '{ziti_cli}' version '{ziti_version}'".format(ziti_cli=which_ziti, ziti_version=exec.stdout))
+            cli.log.debug(f"found ziti CLI '{which_ziti}' version '{exec.stdout}'")
         else:
-            cli.log.error("failed to get ziti CLI version: %s", exec.stderr)
+            cli.log.error(f"failed to get ziti CLI version: {exec.stderr}")
             exit(exec.returncode)
         try:
             assert(version.parse(exec.stdout) >= version.parse(cli.config.login.ziti_version))
         except AssertionError as e:
-            cli.log.error("found ziti CLI '{ziti_cli}' but version is not at least {ziti_version}: {e}".format(ziti_cli=which_ziti, ziti_version=cli.config.login.ziti_version, e=e))
+            cli.log.error(f"found ziti CLI '{which_ziti}' but version is not at least {cli.config.login.ziti_version}: {e}")
             exit(1)
 
         organization = use_organization()
@@ -255,7 +256,7 @@ export MOPENV={env}
             ziti_mgmt_port = str(443)
             exec = cli.run([ziti_cli, 'edge', 'login', '--read-only', '--cli-identity', ziti_cli_identity, ziti_ctrl_ip+':'+ziti_mgmt_port, '--token', ziti_token], capture_output=False)
             if exec.returncode == 0: # if succeeded
-                exec = cli.run('{ziti} edge use {identity}'.format(ziti=ziti_cli, identity=ziti_cli_identity).split(), capture_output=False)
+                exec = cli.run(f"{ziti_cli} edge use {ziti_cli_identity}".shutil.split(), capture_output=False)
                 if not exec.returncode == 0: # if error
                     cli.log.error("failed to switch default ziti login identity to '%s'", ziti_cli_identity)
                     exit(exec.returncode)
@@ -797,13 +798,13 @@ def use_network(organization: object, network_name: str=None, group: str=None, o
             cli.log.error("there were {count} networks named '{name}' visible to your identity. Try filtering with '--network-group'.".format(count=existing_count, name=network_name))
             exit(1)
         else:
-            cli.log.error("failed to find a network named '{name}'.".format(name=network_name))
+            cli.log.error(f"failed to find a network named '{network_name}'.")
             exit(1)
 
     # use the Network
     network = Network(network_group, network=network_name)
     if operation == delete:
-        spinner = get_spinner('waiting for {net} to have status DELETING or DELETED'.format(net=network_name))
+        spinner = get_spinner(f"waiting for {network_name} to have status DELETING or DELETED")
         try:
             with spinner:
                 network.wait_for_statuses(["DELETING","DELETED"],wait=999,progress=False)
@@ -813,10 +814,10 @@ def use_network(organization: object, network_name: str=None, group: str=None, o
             cli.log.error("unknown error in %s", e)
             exit(1)
         else:
-            cli.log.info("network '{net}' deleted".format(net=network_name))
+            cli.log.info(f"network '{network_name}' deleted")
     elif operation in ['create','read','update']:
         if not network.status == 'PROVISIONED':
-            spinner.text = 'waiting for {net} to have status PROVISIONED'.format(net=network_name)
+            spinner = get_spinner(f"waiting for {network_name} to have status PROVISIONED")
             try:
                 with spinner:
                     network.wait_for_status("PROVISIONED",wait=999,progress=False)
@@ -826,7 +827,7 @@ def use_network(organization: object, network_name: str=None, group: str=None, o
                 cli.log.error("unknown error in %s", e)
                 exit(1)
             else:
-                cli.log.info("network '{net}' ready".format(net=network_name))
+                cli.log.info(f"network '{network_name}' ready")
 
     return network, network_group
 
