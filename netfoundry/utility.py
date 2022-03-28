@@ -66,6 +66,14 @@ def camel2snake(camel_str):
     """Convert a string from camel case to snake case."""
     return sub(r'(?<!^)(?=[A-Z])', '_', camel_str).lower()
 
+def abbreviate(kebab):
+    """Abbreviate a kebab-case string with the first letter of each word."""
+    kebab_words = kebab.split('-')
+    letters = list()
+    for word in kebab_words:
+        letters.extend(word[0])
+    return ''.join(letters)
+
 def normalize_caseless(text):
     """Normalize a string as lowercase unicode KD form.
     
@@ -332,6 +340,13 @@ class Utility:
 
     def camel(self, snake_str):
         return snake2camel(snake_str)
+
+
+NETWORK_RESOURCES = dict()
+MUTABLE_NETWORK_RESOURCES = dict()
+MUTABLE_RESOURCE_ABBREVIATIONS = dict()
+EMBEDDABLE_NETWORK_RESOURCES = dict()
+RESOURCE_ABBREVIATIONS = dict()
 @dataclass
 class ResourceTypeParent:
     """Parent class for ResourceType class."""
@@ -361,17 +376,31 @@ class ResourceType(ResourceTypeParent):
     _embedded: str = field(default='default')               # the key under which lists are found in the API e.g. networkControllerList 
                                                             #   (computed if not provided as dromedary case singular)
     create_responses: list = field(default_factory=list)    # expected HTTP response codes for create operation
-    no_update_props: list = field(default_factory=list)    # expected HTTP response codes for create operation    
+    no_update_props: list = field(default_factory=list)     # expected HTTP response codes for create operation    
     create_template: dict = field(default_factory=lambda: {
         'hint': "No template was found for this resource type. Replace the contents of this buffer with the request body as YAML or JSON to create a resource. networkId will be added automatically."
     })                                                      # object to load when creating from scratch in nfctl
+    abbreviation: str = field(default='default')
 
     def __post_init__(self):
         """Compute and assign _embedded if not supplied and then check types in parent class."""
         if self._embedded == 'default':
             singular_name = singular(self.name)
             camel_name = kebab2camel(singular_name)+'List'       # edgeRouterList
-            self._embedded = camel_name
+            setattr(self, '_embedded', camel_name)
+        if self.abbreviation == 'default':
+            setattr(self, 'abbreviation', abbreviate(self.name))
+        if RESOURCE_ABBREVIATIONS.get(self.abbreviation):
+            raise RuntimeError(f"abbreviation collision for {self.name} ({self.abbreviation})")
+        else:
+            RESOURCE_ABBREVIATIONS[self.abbreviation] = self
+        if self.domain == 'network':
+            NETWORK_RESOURCES[self.name] = self
+            if self.embeddable:
+                EMBEDDABLE_NETWORK_RESOURCES[self.name] = self
+            if self.mutable:
+                MUTABLE_NETWORK_RESOURCES[self.name] = self
+                MUTABLE_RESOURCE_ABBREVIATIONS[self.abbreviation] = self
         return super().__post_init__()
 
 RESOURCES = {
@@ -494,10 +523,6 @@ RESOURCES = {
         create_responses=["ACCEPTED"]
     )
 }
-
-NETWORK_RESOURCES = {type:spec for type,spec in RESOURCES.items() if spec.domain == "network"}
-MUTABLE_NETWORK_RESOURCES = {type:spec for type,spec in RESOURCES.items() if spec.domain == "network" and spec.mutable}
-EMBEDDABLE_NETWORK_RESOURCES = {type:spec for type,spec in RESOURCES.items() if spec.domain == "network" and spec.embeddable}
 
 # TODO: [MOP-13441] associate locations with a short list of major geographic regions / continents
 MAJOR_REGIONS = {

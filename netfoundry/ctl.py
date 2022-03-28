@@ -43,8 +43,9 @@ from .exceptions import NFAPINoCredentials
 from .network import Network
 from .network_group import NetworkGroup
 from .organization import Organization
-from .utility import (MUTABLE_NETWORK_RESOURCES, NETWORK_RESOURCES, RESOURCES,
-                      is_jwt, normalize_caseless, plural, singular)
+from .utility import (MUTABLE_NETWORK_RESOURCES,
+                      MUTABLE_RESOURCE_ABBREVIATIONS, RESOURCE_ABBREVIATIONS,
+                      RESOURCES, is_jwt, normalize_caseless, plural, singular)
 
 set_metadata(version="v"+get_versions()['version'], author="NetFoundry", name="nfctl") # must precend import milc.cli
 import milc.subcommand.config
@@ -551,10 +552,12 @@ def get(cli, echo: bool=True, embed='all'):
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
 @cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create','update'], help="request the as=create or as=update alternative form of the resources")
-@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[type for type in RESOURCES.keys()])
+@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[type,RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
 @cli.subcommand('find resources as lists')
 def list(cli):
     """Find resources as lists."""
+    if RESOURCE_ABBREVIATIONS.get(cli.args.resource_type):
+        cli.args.resource_type = RESOURCE_ABBREVIATIONS[cli.args.resource_type].name
     if cli.args.accept and not MUTABLE_NETWORK_RESOURCES.get(cli.args.resource_type):
         cli.log.warn("the --as=ACCEPT param is not applicable to resources outside the network domain")
     if cli.args.output == "text":
@@ -642,7 +645,7 @@ def list(cli):
         cli.echo(highlighted)
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
-@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[singular(type) for type in MUTABLE_NETWORK_RESOURCES.keys()])
+@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[choice for group in [[type,RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
 @cli.argument('-w','--wait', help='seconds to wait', default=0)
 @cli.subcommand('delete a resource in the network domain')
 def delete(cli):
