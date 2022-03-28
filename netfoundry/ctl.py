@@ -220,53 +220,55 @@ export MOPENV={organization.environment}
             cli.log.error(f"found ziti CLI '{which_ziti}' but version is not at least {cli.config.login.ziti_version}: {e}")
             exit(1)
 
-        organization = use_organization()
-        network, network_group = use_network(
-            organization=organization,
-            group=cli.config.general.network_group,
-            network_name=cli.config.general.network
-        )
-        tempdir = tempfile.mkdtemp()
-        network_controller = network.get_resource_by_id(type="network-controller", id=network.network_controller['id'])
-        if 'domainName' in network_controller.keys() and network_controller['domainName']:
-            ziti_ctrl_ip = network_controller['domainName']
-        else:
-            ziti_ctrl_ip = network_controller['_embedded']['host']['ipAddress']
-        try:
-            session = network.get_controller_session(network.network_controller['id'])
-            ziti_token = session['sessionToken']
-        except Exception as e:
-            raise RuntimeError(f"failed to get the ziti token from session '{session or None}'")
-        else:
-            if cli.config.general.proxy:
-                proxies = {
-                    'http': cli.config.general.proxy,
-                    'https': cli.config.general.proxy
-                }
+        spinner = get_spinner(f"Logging in to Ziti controller management API")
+        with spinner:
+            organization = use_organization()
+            network, network_group = use_network(
+                organization=organization,
+                group=cli.config.general.network_group,
+                network_name=cli.config.general.network
+            )
+            tempdir = tempfile.mkdtemp()
+            network_controller = network.get_resource_by_id(type="network-controller", id=network.network_controller['id'])
+            if 'domainName' in network_controller.keys() and network_controller['domainName']:
+                ziti_ctrl_ip = network_controller['domainName']
             else:
-                proxies = dict()
-            ### commented because new ziti CLI has built-in certs opt-in and caching
-            # well_known_response = http_get('https://'+ziti_ctrl_ip+'/.well-known/est/cacerts', proxies=proxies, verify=False)
-            # well_known_decoding = b64decode(well_known_response.text)
-            # well_known_certs = pkcs7.load_der_pkcs7_certificates(well_known_decoding)
-            # well_known_pem = tempdir+'/well-known-certs.pem'
-            # with open(well_known_pem, 'wb') as pem:
-            #     for cert in well_known_certs:
-            #         pem.write(cert.public_bytes(Encoding.PEM))
-            network_name_safe = '_'.join(network.name.casefold().split())
-            ziti_cli_identity = '-'.join([organization.environment.casefold(), organization.label.casefold(), network_group.name.casefold(), network_name_safe])
-            ziti_mgmt_port = str(443)
-            exec = cli.run([ziti_cli, 'edge', 'login', '--read-only', '--cli-identity', ziti_cli_identity, ziti_ctrl_ip+':'+ziti_mgmt_port, '--token', ziti_token], capture_output=False)
-            if exec.returncode == 0: # if succeeded
-                exec = cli.run(f"{ziti_cli} edge use {ziti_cli_identity}".shutil.split(), capture_output=False)
-                if not exec.returncode == 0: # if error
-                    cli.log.error(f"failed to switch default ziti login identity to '{ziti_cli_identity}'")
+                ziti_ctrl_ip = network_controller['_embedded']['host']['ipAddress']
+            try:
+                session = network.get_controller_session(network.network_controller['id'])
+                ziti_token = session['sessionToken']
+            except Exception as e:
+                raise RuntimeError(f"failed to get the ziti token from session '{session or None}', got {e}")
+            else:
+                if cli.config.general.proxy:
+                    proxies = {
+                        'http': cli.config.general.proxy,
+                        'https': cli.config.general.proxy
+                    }
+                else:
+                    proxies = dict()
+                ### commented because new ziti CLI has batteries-included certs trust opt-in and caching
+                # well_known_response = http_get('https://'+ziti_ctrl_ip+'/.well-known/est/cacerts', proxies=proxies, verify=False)
+                # well_known_decoding = b64decode(well_known_response.text)
+                # well_known_certs = pkcs7.load_der_pkcs7_certificates(well_known_decoding)
+                # well_known_pem = tempdir+'/well-known-certs.pem'
+                # with open(well_known_pem, 'wb') as pem:
+                #     for cert in well_known_certs:
+                #         pem.write(cert.public_bytes(Encoding.PEM))
+                network_name_safe = '_'.join(network.name.casefold().split())
+                ziti_cli_identity = '-'.join([organization.environment.casefold(), organization.label.casefold(), network_group.name.casefold(), network_name_safe])
+                ziti_mgmt_port = "443"
+                exec = cli.run([ziti_cli, 'edge', 'login', '--read-only', '--cli-identity', ziti_cli_identity, ziti_ctrl_ip+':'+ziti_mgmt_port, '--token', ziti_token], capture_output=False)
+                if exec.returncode == 0: # if succeeded
+                    exec = cli.run(f"{ziti_cli} edge use {ziti_cli_identity}".shutil.split(), capture_output=False)
+                    if not exec.returncode == 0: # if error
+                        cli.log.error(f"failed to switch default ziti login identity to '{ziti_cli_identity}'")
+                        exit(exec.returncode)
+                else:
+                    cli.log.error("failed to login")
                     exit(exec.returncode)
-            else:
-                cli.log.error("failed to login")
-                exit(exec.returncode)
 
-@cli.subcommand('logout from an identity organization')
+@cli.subcommand('logout current profile from an organization')
 def logout(cli):
     """Logout by deleting the cached token."""
     spinner = get_spinner(f"Logging out profile '{cli.config.general.profile}'")
@@ -294,7 +296,7 @@ def copy(cli):
     accepts a file to edit as first positional parameter and waits for exit to
     return e.g. "code --wait".
     """
-    spinner = get_spinner("Fetching resource to copy")
+    spinner = get_spinner(f"Getting {cli.args.resource_type} for copying")
     cli.args['accept'] = 'create'
     cli.args['output'] = 'text' # implies tty which allows INFO messages
     with spinner:
@@ -304,7 +306,7 @@ def copy(cli):
     if not copy_request_object: # is False if editing cancelled by empty buffer
         return True
     else:
-        spinner.text = "Copying {edit} to {copy}".format(edit=edit_resource_object['name'], copy=copy_request_object['name'])
+        spinner.text = f"Copying {edit_resource_object['name']} to {copy_request_object['name']}"
         with spinner:
             network.create_resource(post=copy_request_object, type=cli.args.resource_type)
         cli.log.info(sub('Copying', 'Copied', spinner.text))
@@ -327,7 +329,7 @@ def create(cli):
     elif cli.args.file:
         try:
             create_input_lines = cli.args.file.read()
-            cli.log.debug(f"got lines from file: {str(create_input_lines)}")
+            cli.log.debug(f"got {len(create_input_lines)}B from file: {cli.args.file}")
         except Exception as e:
             raise RuntimeError(f"failed to read the input file: {e}")
     else:
@@ -351,10 +353,9 @@ def create(cli):
     if not create_object: # is False if editing cancelled by empty buffer
         return True
 
-    organization = use_organization()
-
-    spinner = get_spinner("Creating {:s}".format(cli.args.resource_type))
+    spinner = get_spinner(f"Creating {cli.args.resource_type}")
     with spinner:
+        organization = use_organization()
         if cli.args.resource_type == "network":
             if cli.config.general.network_group:
                 network_group = use_network_group(organization=organization)
@@ -388,13 +389,18 @@ def edit(cli):
     return e.g. "code --wait".
     """
     cli.args['accept'] = 'update'
-    edit_resource_object, network, network_group, organization = get(cli, echo=False)
+    spinner = get_spinner(f"Getting {cli.args.resource_type} for editing")
     cli.log.debug(f"opening {cli.args.resource_type} '{edit_resource_object['name']}' for editing")
+    with spinner:
+        edit_resource_object, network, network_group, organization = get(cli, echo=False)
     update_request_object = edit_object_as_yaml(edit_resource_object)
     if not update_request_object: # is False if editing cancelled by empty buffer
         return True
     else:
-        network.put_resource(put=update_request_object, type=cli.args.resource_type)
+        spinner.text = f"Updating {cli.args.resource_type}"
+        with spinner:
+            network.put_resource(put=update_request_object, type=cli.args.resource_type)
+        cli.log.info(sub("Updating", "Updated", spinner.text))
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
 @cli.argument('-O','--output', arg_only=True, help="format the output", default="yaml", choices=['text', 'yaml','json'])
@@ -411,12 +417,14 @@ def get(cli, echo: bool=True, embed='all'):
     """
     if not cli.config.general.verbose and cli.args.output in ["yaml","json"]: # don't change level if output=text
         cli.log.setLevel(logging.WARN) # don't emit INFO messages to stdout because they will break deserialization
-    organization = use_organization()
     match = {}
     matches = []
     query_keys = [*cli.args.query]
-    spinner = get_spinner("Getting {:s}".format(cli.args.resource_type))
+    spinner = get_spinner(f"Getting {cli.args.resource_type}")
+    if not echo:
+        spinner.enabled = False
     with spinner:
+        organization = use_organization()
         if cli.args.resource_type == "organization":
             if 'id' in query_keys:
                 if len(query_keys) > 1:
@@ -514,7 +522,7 @@ def get(cli, echo: bool=True, embed='all'):
         else:
             if cli.args.keys:
                 # intersection of the set of observed, present keys in the
-                # match and the set of configured, desired keys
+                # match and the set of desired keys
                 valid_keys = set(match.keys()) & set(cli.args.keys)
                 if valid_keys: # if at least one element in intersection set
                     cli.log.debug(f"valid keys: {str(valid_keys)}")
@@ -526,7 +534,7 @@ def get(cli, echo: bool=True, embed='all'):
                 cli.log.debug("not filtering output keys")
                 filtered_match = match
             if cli.args.output in ["yaml","text"]:
-                cli.echo(yaml_dumps(filtered_match, indent=4, default_flow_style=False))
+                cli.echo('{fg_lightgreen_ex}'+yaml_dumps(filtered_match, indent=4, default_flow_style=False))
             elif cli.args.output == "json":
                 cli.echo(json_dumps(filtered_match, indent=4))
     elif len(matches) == 0:
@@ -567,8 +575,8 @@ def list(cli):
             matches = organization.get_identities(**cli.args.query)
     elif cli.args.resource_type == "networks":
         if cli.config.general.network_group:
-            network_group = use_network_group(organization, group=cli.config.general.network_group)
             with spinner:
+                network_group = use_network_group(organization, group=cli.config.general.network_group)
                 matches = organization.get_networks_by_group(network_group.id, **cli.args.query)
         else:
             with spinner:
@@ -874,7 +882,7 @@ def edit_object_as_yaml(edit: object):
         for line in edited.splitlines():
             edited_no_comments += re.sub('^(\s+)?#.*','',line)
         if len(edited_no_comments) == 0:
-            cli.log.warning("cancelled due to empty file")
+            cli.log.info("Cancelled")
             return False
         else:
             try:
