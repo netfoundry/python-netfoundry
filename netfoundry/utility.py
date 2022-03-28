@@ -263,6 +263,10 @@ def find_generic_resources(url: str, headers: dict, embedded: str=None, proxies:
     else:
         if '/data-centers' in url:
             params['size'] = 3000 # workaround last page bug in MOP-17993
+        elif '/identity' in url:  # workaround sort param bug in MOP-18018
+            del params['sort']
+        elif '/hosts' in url:     # workaround sort param bug in MOP-17863
+            del params['sort']
         else:
             params['size'] = DEFAULT_PAGE_SIZE
     if params.get('page'):
