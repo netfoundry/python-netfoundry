@@ -72,7 +72,7 @@ class StoreListKeys(argparse.Action):
         setattr(namespace, self.dest, values.split(','))
 
 @cli.argument('-p','--profile', default='default', help='login profile for storing and retrieving concurrent, discrete sessions')
-@cli.argument('-C', '-credentials', help='API account JSON file from web console')
+@cli.argument('-C', '--credentials', help='API account JSON file from web console')
 @cli.argument('-O', '--organization', help="label or ID of an alternative organization (default is caller's org)" )
 @cli.argument('-N', '--network', help='caseless name of the network to manage')
 @cli.argument('-G', '--network-group', help="shortname or ID of a network group to search for network_name")
@@ -171,11 +171,17 @@ def login(cli):
                     )
 
                 elif cli.args.full_summary and not cli.args.shell and cli.args.output == "yaml":
-                    highlighted = highlight(yaml_dumps(summary_object, indent=4), yaml_lexer, Terminal256Formatter(style=cli.config.general.style))
-                    cli.echo(highlighted)
+                    if cli.config.general.color:
+                        highlighted = highlight(yaml_dumps(summary_object, indent=4), yaml_lexer, Terminal256Formatter(style=cli.config.general.style))
+                        cli.echo(highlighted)
+                    else:
+                        cli.echo(yaml_dumps(summary_object, indent=4))
                 elif cli.args.full_summary and not cli.args.shell and cli.args.output == "json":
-                    highlighted = highlight(json_dumps(summary_object, indent=4), json_lexer, Terminal256Formatter(style=cli.config.general.style))
-                    cli.echo(highlighted)
+                    if cli.config.general.color:
+                        highlighted = highlight(json_dumps(summary_object, indent=4), json_lexer, Terminal256Formatter(style=cli.config.general.style))
+                        cli.echo(highlighted)
+                    else:
+                        cli.echo(json_dumps(summary_object, indent=4))
 
             elif cli.args.shell:
                 cli.echo(
@@ -519,9 +525,9 @@ def get(cli, echo: bool=True, embed='all'):
                         cli.log.warning(f"using 'id' only, ignoring params: '{','.join(query_keys)}'")
                     match = network.get_resource_by_id(type=cli.args.resource_type, id=cli.args.query['id'], accept=cli.args.accept)
                 else:
-                    matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
+                    matches = network.get_resources(type=cli.args.resource_type, accept=cli.args.accept, **cli.args.query)
                     if len(matches) == 1:
-                        match = network.get_resource_by_id(type=cli.args.resource_type, id=matches[0]['id'], accept=cli.args.accept)
+                        match = matches[0]
 
     if match:
         cli.log.debug(f"found exactly one {cli.args.resource_type} by '{','.join(query_keys)}'")
@@ -542,10 +548,17 @@ def get(cli, echo: bool=True, embed='all'):
                 cli.log.debug("not filtering output keys")
                 filtered_match = match
             if cli.args.output in ["yaml","text"]:
-                highlighted = highlight(yaml_dumps(filtered_match, indent=4), yaml_lexer, Terminal256Formatter(style=cli.config.general.style))
+                if cli.config.general.color:
+                    highlighted = highlight(yaml_dumps(filtered_match, indent=4), yaml_lexer, Terminal256Formatter(style=cli.config.general.style))
+                    cli.echo(highlighted)
+                else:
+                    cli.echo(yaml_dumps(filtered_match, indent=4))
             elif cli.args.output == "json":
-                highlighted = highlight(json_dumps(filtered_match, indent=4), json_lexer, Terminal256Formatter(style=cli.config.general.style))
-            cli.echo(highlighted)
+                if cli.config.general.color:
+                    highlighted = highlight(json_dumps(filtered_match, indent=4), json_lexer, Terminal256Formatter(style=cli.config.general.style))
+                    cli.echo(highlighted)
+                else:
+                    cli.echo(json_dumps(filtered_match, indent=4))
     elif len(matches) == 0:
         cli.log.warning(f"found no {cli.args.resource_type} by '{','.join(query_keys)}'")
         exit(1)
@@ -646,11 +659,17 @@ def list(cli):
             +tabulate(tabular_data=[match.values() for match in filtered_matches], headers=table_headers, tablefmt=table_borders)
         )
     elif cli.args.output == "yaml":
-        highlighted = highlight(yaml_dumps(filtered_matches, indent=4), yaml_lexer, Terminal256Formatter(style=cli.config.general.style))
-        cli.echo(highlighted)
+        if cli.config.general.color:
+            highlighted = highlight(yaml_dumps(filtered_matches, indent=4), yaml_lexer, Terminal256Formatter(style=cli.config.general.style))
+            cli.echo(highlighted)
+        else:
+            cli.echo(yaml_dumps(filtered_matches, indent=4))
     elif cli.args.output == "json":
-        highlighted = highlight(json_dumps(filtered_matches, indent=4), json_lexer, Terminal256Formatter(style=cli.config.general.style))
-        cli.echo(highlighted)
+        if cli.config.general.color:
+            highlighted = highlight(json_dumps(filtered_matches, indent=4), json_lexer, Terminal256Formatter(style=cli.config.general.style))
+            cli.echo(highlighted)
+        else:
+            cli.echo(json_dumps(filtered_matches, indent=4))
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[choice for group in [[singular(type),RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
