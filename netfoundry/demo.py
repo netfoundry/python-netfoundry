@@ -19,8 +19,6 @@ from .utility import DC_PROVIDERS
 
 def main(raw_args=None):
     """Run the demo script."""
-    print("DEBUG: running demo script in \"{:s}\"".format(sys.argv[0]))
-
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-d", "--verbose", "--debug",

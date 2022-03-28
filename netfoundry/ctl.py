@@ -8,14 +8,15 @@ PYTHON_ARGCOMPLETE_OK
 """
 import argparse
 import logging
-import os
+from os import environ, path
 import platform
-import random
+from random import sample, shuffle, choice
 import re
 import sys
 import tempfile
 import time
 from json import dumps as json_dumps
+from json import load as json_load
 from json import loads as json_loads
 from posixpath import split
 from re import sub
@@ -26,7 +27,6 @@ from subprocess import CalledProcessError
 #from cryptography.hazmat.primitives.serialization import Encoding, pkcs7
 from jwt.exceptions import PyJWTError
 from milc import set_metadata
-from nanoid import non_secure_generate
 from packaging import version
 from tabulate import tabulate
 from yaml import dump as yaml_dumps
@@ -206,7 +206,7 @@ export MOPENV={organization.environment}
         if which_ziti:
             cli.log.debug(f"found ziti CLI executable in {which_ziti}")
         else:
-            cli.log.critical(f"missing executable '{ziti_cli}' in PATH: {os.environ['PATH']}")
+            cli.log.critical(f"missing executable '{ziti_cli}' in PATH: {environ['PATH']}")
             exit(1)
         exec = cli.run([ziti_cli, '--version'])
         if exec.returncode == 0:
@@ -429,7 +429,7 @@ def get(cli, echo: bool=True, embed='all'):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warning(f"using 'id' only, ignoring query params: '{','.join(query_keys)}'")
+                    cli.log.warning(f"using 'id' only, ignoring params: '{','.join(query_keys)}'")
                 match = organization.get_organization(id=cli.args.query['id'])
             else:
                 matches = organization.get_organizations(**cli.args.query)
@@ -439,7 +439,7 @@ def get(cli, echo: bool=True, embed='all'):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warning(f"using 'id' only, ignoring query params: '{','.join(query_keys)}'")
+                    cli.log.warning(f"using 'id' only, ignoring params: '{','.join(query_keys)}'")
                 match = organization.get_network_group(network_group_id=cli.args.query['id'])
             else:
                 matches = organization.get_network_groups_by_organization(**cli.args.query)
@@ -449,7 +449,7 @@ def get(cli, echo: bool=True, embed='all'):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warning(f"using 'id' only, ignoring query params: '{','.join(query_keys)}'")
+                    cli.log.warning(f"using 'id' only, ignoring params: '{','.join(query_keys)}'")
                 match = organization.get_identity(identity_id=cli.args.query['id'])
             elif not query_keys:
                 match = organization.caller
@@ -461,7 +461,7 @@ def get(cli, echo: bool=True, embed='all'):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warning(f"using 'id' only, ignoring query params: '{','.join(query_keys)}'")
+                    cli.log.warning(f"using 'id' only, ignoring params: '{','.join(query_keys)}'")
                 match = organization.get_network(network_id=cli.args.query['id'], embed=embed, accept=cli.args.accept)
             else:
                 if cli.config.general.network_group and not cli.config.general.network:
@@ -498,7 +498,7 @@ def get(cli, echo: bool=True, embed='all'):
                     cli.log.warning("data centers fetched by ID may not support this network's product version, try provider or locationCode params for safety")
                     if len(query_keys) > 1:
                         query_keys.remove('id')
-                        cli.log.warning(f"using 'id' only, ignoring query params: '{','.join(query_keys)}'")
+                        cli.log.warning(f"using 'id' only, ignoring params: '{','.join(query_keys)}'")
                     match = network.get_data_center_by_id(id=cli.args.query['id'])
                 else:
                     matches = network.get_edge_router_data_centers(**cli.args.query)
@@ -508,7 +508,7 @@ def get(cli, echo: bool=True, embed='all'):
                 if 'id' in query_keys:
                     if len(query_keys) > 1:
                         query_keys.remove('id')
-                        cli.log.warning(f"using 'id' only, ignoring query params: '{','.join(query_keys)}'")
+                        cli.log.warning(f"using 'id' only, ignoring params: '{','.join(query_keys)}'")
                     match = network.get_resource_by_id(type=cli.args.resource_type, id=cli.args.query['id'], accept=cli.args.accept)
                 else:
                     matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
@@ -516,7 +516,7 @@ def get(cli, echo: bool=True, embed='all'):
                         match = network.get_resource_by_id(type=cli.args.resource_type, id=matches[0]['id'], accept=cli.args.accept)
 
     if match:
-        cli.log.debug(f"found exactly one {cli.args.resource_type} '{cli.args.query}'")
+        cli.log.debug(f"found exactly one {cli.args.resource_type} by '{','.join(query_keys)}'")
         if not echo: # edit() uses echo=False to get a match for updating
             return match, network, network_group, organization
         else:
@@ -536,12 +536,15 @@ def get(cli, echo: bool=True, embed='all'):
             if cli.args.output in ["yaml","text"]:
                 cli.echo('{fg_lightgreen_ex}'+yaml_dumps(filtered_match, indent=4, default_flow_style=False))
             elif cli.args.output == "json":
-                cli.echo(json_dumps(filtered_match, indent=4))
+                cli.echo('{fg_lightgreen_ex}'+json_dumps(filtered_match, indent=4))
     elif len(matches) == 0:
-        cli.log.warning(f"found no {cli.args.resource_type} '{cli.args.query}'")
+        cli.log.warning(f"found no {cli.args.resource_type} by '{','.join(query_keys)}'")
         exit(1)
     else: # len(matches) > 1:
-        cli.log.error(f"found more than one {cli.args.resource_type} '{cli.args.query}'")
+        if cli.args.query:
+            cli.log.error(f"found more than one {cli.args.resource_type} by param(s): '{','.join(query_keys)}', try a more specific query")
+        else:
+            cli.log.error(f"found more than one {cli.args.resource_type}, try using a query like 'name=AcmeThing%' (% is wildcard)")
         exit(len(matches))
 
 
@@ -554,55 +557,49 @@ def list(cli):
     """Find resources as lists."""
     if cli.args.output == "text":
         if not sys.stdout.isatty():
-            cli.log.warning("nfctl does not have a stable CLI interface. Use with caution in scripts.")
+            cli.log.warning("{fg_yello}nfctl does not have a stable CLI interface. Use with caution in scripts. Please raise a GitHub issue if that's something you would value.")
     else: # output is YAML or JSON
         # don't emit INFO messages to stdout because they will break deserialization
         cli.log.setLevel(logging.WARN)
-
-    organization = use_organization()
+    query_keys = [*cli.args.query]
     if cli.args.query:
-        spinner = get_spinner(f"Finding {cli.args.resource_type} by {str(cli.args.query)}")
+        spinner = get_spinner(f"Finding {cli.args.resource_type} by '{','.join(query_keys)}'")
     else:
         spinner = get_spinner(f"Finding all {cli.args.resource_type}")
-    if cli.args.resource_type == "organizations":
-        with spinner:
+    with spinner:
+        organization = use_organization()
+        if cli.args.resource_type == "organizations":
             matches = organization.get_organizations(**cli.args.query)
-    elif cli.args.resource_type == "network-groups":
-        with spinner:
+        elif cli.args.resource_type == "network-groups":
             matches = organization.get_network_groups_by_organization(**cli.args.query)
-    elif cli.args.resource_type == "identities":
-        with spinner:
+        elif cli.args.resource_type == "identities":
             matches = organization.get_identities(**cli.args.query)
-    elif cli.args.resource_type == "networks":
-        if cli.config.general.network_group:
-            with spinner:
+        elif cli.args.resource_type == "networks":
+            if cli.config.general.network_group:
                 network_group = use_network_group(organization, group=cli.config.general.network_group)
                 matches = organization.get_networks_by_group(network_group.id, **cli.args.query)
-        else:
-            with spinner:
+            else:
                 matches = organization.get_networks_by_organization(**cli.args.query)
-    else:
-        if cli.config.general.network:
-            network, network_group = use_network(
-                organization=organization,
-                group=cli.config.general.network_group, # None unless configured
-                network_name=cli.config.general.network
-            )
         else:
-            cli.log.error("first configure a network to list resources in a network e.g. --network ACMENet")
-            exit(1)
-        if cli.args.resource_type == "data-centers":
-            with spinner:
+            if cli.config.general.network:
+                network, network_group = use_network(
+                    organization=organization,
+                    group=cli.config.general.network_group, # None unless configured
+                    network_name=cli.config.general.network
+                )
+            else:
+                cli.log.error("first configure a network to list resources in a network e.g. --network ACMENet")
+                exit(1)
+            if cli.args.resource_type == "data-centers":
                 matches = network.get_edge_router_data_centers(**cli.args.query)
-        else:
-            with spinner:
+            else:
                 matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
 
     if len(matches) == 0:
-        cli.log.info(f"found no {cli.args.resource_type} '{cli.args.query}'")
+        cli.log.info(f"found no {cli.args.resource_type} by '{','.join(query_keys)}'")
         exit(0)
     else:
-        cli.log.debug(f"found at least one {cli.args.resource_type} '{cli.args.query}'")
+        cli.log.debug(f"found at least one {cli.args.resource_type} by '{','.join(query_keys)}'")
 
     valid_keys = set()
     if cli.args.keys:
@@ -636,18 +633,20 @@ def list(cli):
             +tabulate(tabular_data=[match.values() for match in filtered_matches], headers=table_headers, tablefmt=table_borders)
         )
     elif cli.args.output == "yaml":
-        cli.echo(yaml_dumps(filtered_matches, indent=4, default_flow_style=False))
+        cli.echo('{fg_lightgreen_ex}'+yaml_dumps(filtered_matches, indent=4, default_flow_style=False))
     elif cli.args.output == "json":
-        cli.echo(json_dumps(filtered_matches, indent=4))
+        cli.echo('{fg_lightgreen_ex}'+json_dumps(filtered_matches, indent=4))
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[singular(type) for type in MUTABLE_NETWORK_RESOURCES.keys()])
-@cli.argument('-w','--wait', help='seconds to wait for completion of delete', default=0)
+@cli.argument('-w','--wait', help='seconds to wait', default=0)
 @cli.subcommand('delete a resource in the network domain')
 def delete(cli):
     """Delete a resource in the network domain."""
     cli.args['accept'] = None
-    match, network, network_group, organization = get(cli, echo=False, embed=None)
+    spinner = get_spinner(f"Finding {cli.args.resource_type} by {','.join(cli.args.query)}")
+    with spinner:
+        match, network, network_group, organization = get(cli, echo=False, embed=None)
     if cli.args.resource_type == 'network':
         try:
             delete_confirmed = False
@@ -656,28 +655,25 @@ def delete(cli):
             else:
                 scrambled = []
                 for i in range(4):
-                    scrambled.extend([''.join(random.sample(network.name, len(match['name'])))])
+                    scrambled.extend([''.join(sample(network.name, len(match['name'])))])
                 scrambled.extend([match['name']])
-                random.shuffle(scrambled)
+                shuffle(scrambled)
                 descrambled = questions.choice("{style_bright}Enter the number of the unscrambled {fg_yellow}network{fg_reset} name to {fg_red}IRREVERSIBLY DELETE", scrambled, default=None, confirm=True, prompt='{style_bright}{fg_red}DELETE{fg_reset} which {fg_yellow}network? ')
                 if match['name'] == descrambled:
                     delete_confirmed = True
 
             if delete_confirmed:
-                spinner = get_spinner(f"deleting network '{match['name']}'")
+                spinner.text = f"Deleting network '{match['name']}'"
                 try:
                     with spinner:
                         network.delete_network(progress=False, wait=cli.config.delete.wait)
-                except KeyboardInterrupt as e:
-                    cli.log.info("Cancelled")
-                    exit(1)
                 except Exception as e:
-                    cli.log.error(f"unknown error in {e}")
+                    cli.log.error(f"unknown error deleting network, got {e}")
                     exit(1)
                 else:
-                    cli.log.info(sub('deleting', 'deleted', spinner.text))
+                    cli.log.info(sub('Deleting', 'Deleted', spinner.text))
             else:
-                cli.echo(f"not deleting network '{match['name']}'.")
+                cli.log.info(f"Not deleting network '{match['name']}'.")
         except KeyboardInterrupt as e:
             cli.log.info("Cancelled")
             exit(1)
@@ -686,8 +682,8 @@ def delete(cli):
             exit(1)
     else: # network child resource, not the network itself
         try:
-            if cli.args.yes or questions.yesno("{warn_color}IRREVERSIBLY DELETE {type_color}{type} {name_color}'{name}'{fg_reset}".format(warn_color='{style_bright}{fg_red}', type_color='{fg_yellow}', type=cli.args.resource_type, name_color='{fg_cyan}', name=match['name'], fg_reset='{fg_reset}'), default=False):
-                spinner = get_spinner(f"deleting {cli.args.resource_type} '{match['name'] or match['id']}'")
+            if cli.args.yes or questions.yesno("{style_bright}{fg_red}IRREVERSIBLY DELETE{fg_yellow} "+cli.args.resource_type+" {fg_cyan}"+match['name']+" {fg_reset}", default=False):
+                spinner = get_spinner(f"Deleting {cli.args.resource_type} '{match['name'] or match['id']}'")
                 try:
                     with spinner:
                         network.delete_resource(type=cli.args.resource_type, id=match['id'])
@@ -698,9 +694,9 @@ def delete(cli):
                     cli.log.error(f"unknown error in {e}")
                     exit(1)
                 else:
-                    cli.log.info(sub('deleting', 'deleted', spinner.text))
+                    cli.log.info(sub('Deleting', 'Deleted', spinner.text))
             else:
-                cli.echo("not deleting {type} '{name}'".format(type=cli.args.resource_type, name=match['name']))
+                cli.log.info(f"Not deleting {cli.args.resource_type} '{match['name']}'")
         except KeyboardInterrupt as e:
             cli.log.info("Cancelled")
             exit(1)
@@ -711,26 +707,34 @@ def delete(cli):
 @cli.subcommand('create a functioning demo network')
 def demo(cli):
     """Create a functioning demo network."""
-    use_organization()
+    spinner = get_spinner("Checking credentials")
+    with spinner:
+        use_organization()
     if cli.config.general.network:
         network_name = cli.config.general.network
     else:
-        network_name = f'BibbidiBobbidiBoo{non_secure_generate("1234567890abcdef", 5)}'
+        resources_dir = path.join(path.dirname(__file__), 'resources')
+        friendly_words_filename = path.join(resources_dir, "friendly-words/generated/words.json")
+        with open(friendly_words_filename, 'r') as friendly_words_path:
+            friendly_words = json_load(friendly_words_path)
+        network_name = f"{choice(friendly_words['predicates'])}-{choice(friendly_words['objects'])}"
     demo_params = ['--network', network_name]
     if cli.config.general.proxy:
         demo_params.extend(['--proxy', cli.config.general.proxy])
-    nfdemo(demo_params)
-
+    if questions.yesno(f"Create demo resources in network {network_name} now?"):
+        nfdemo(demo_params)
+    else:
+        cli.log.info("Demo cancelled")
 
 def use_organization(prompt: bool=True):
     """Assume an identity in an organization."""
     if cli.config.general.credentials:
         cli.log.debug(f"will use credentials file {cli.config.general.credentials} from config or args to renew token")
-    elif 'NETFOUNDRY_API_TOKEN' in os.environ:
+    elif 'NETFOUNDRY_API_TOKEN' in environ:
         cli.log.debug("using bearer token from environment NETFOUNDRY_API_TOKEN")
-    elif 'NETFOUNDRY_API_ACCOUNT' in os.environ:
+    elif 'NETFOUNDRY_API_ACCOUNT' in environ:
         cli.log.debug("will use file path to credentials file from environment NETFOUNDRY_API_ACCOUNT to renew token")
-    elif 'NETFOUNDRY_CLIENT_ID' in os.environ and 'NETFOUNDRY_PASSWORD' in os.environ and 'NETFOUNDRY_OAUTH_URL' in os.environ:
+    elif 'NETFOUNDRY_CLIENT_ID' in environ and 'NETFOUNDRY_PASSWORD' in environ and 'NETFOUNDRY_OAUTH_URL' in environ:
         cli.log.debug("will use API account credentials from environment NETFOUNDRY_CLIENT_ID, NETFOUNDRY_PASSWORD, NETFOUNDRY_OAUTH_URL to renew token")
     else:
         cli.log.debug("no token or credentials file provided, trying token cache")
@@ -793,21 +797,31 @@ def use_network_group(organization: object, group: str=None):
     cli.log.debug(f"network group is {network_group.name}")
     return network_group
 
-def use_network(organization: object, network_name: str=None, group: str=None, operation: str='read'):
-    """Use a network."""
+def use_network(organization: object, network_name: str=None, group: str=None):
+    """
+    Use a network.
+    
+    :param organization: instance of netfoundry.Organization representing the current session
+    :param network_name: name of the network to use, optional if there's only one
+    :param group: a network group name or UUID, optional if network name is unique across all available groups
+    """
     if not network_name:
         if group:
             network_group = use_network_group(organization=organization, group=group)
             existing_networks = network_group.networks_by_name()
         else:
             existing_networks = organization.get_networks_by_organization()
-        cli.log.error("need 'nfctl --network NETWORK' or 'nfctl config.general.network=NETWORK' to configure a network")
-        exit(1)
-    if group:
+        if len(existing_networks) == 1:
+            network_name = existing_networks[0]['name']
+            cli.log.debug(f"using the only available network: '{network_name}'")
+        else:
+            cli.log.error("You have multiple networks, which one would you like to use? Need 'nfctl --network=NETWORK' or 'nfctl config.general.network=NETWORK'.")
+            exit(1)
+    elif group:
         network_group = use_network_group(organization=organization, group=group)
         existing_networks = network_group.network_ids_by_normal_name
         if not existing_networks.get(normalize_caseless(network_name)):
-            cli.log.error("failed to find a network named '{name}'.".format(name=network_name))
+            cli.log.error(f"failed to find a network named '{network_name}' in network group '{network_group['name']}'.")
             exit(1)
     else:
         existing_count = organization.count_networks_with_name(network_name)
@@ -816,37 +830,29 @@ def use_network(organization: object, network_name: str=None, group: str=None, o
             existing_network = existing_networks[0]
             network_group = use_network_group(organization, group=existing_network['networkGroupId'])
         elif existing_count > 1:
-            cli.log.error("there were {count} networks named '{name}' visible to your identity. Try filtering with '--network-group'.".format(count=existing_count, name=network_name))
+            cli.log.error(f"there were {existing_count} networks named '{network_name}' visible to your identity. Try narrowing the search with '--network-group=NETWORK_GROUP'.")
             exit(1)
         else:
             cli.log.error(f"failed to find a network named '{network_name}'.")
             exit(1)
 
     # use the Network
-    network = Network(network_group, network=network_name)
-    if operation == delete:
-        spinner = get_spinner(f"waiting for {network_name} to have status DELETING or DELETED")
+    network = Network(network_group, network_name=network_name)
+    if network.status == 'ERROR':
+        cli.log.debug(f"\n\nnetwork {network.name} has status ERROR")
+    elif not cli.config.delete.wait:
+        cli.log.debug("delete command is configured to not wait for a healthy status")
+    elif not network.status == 'PROVISIONED':
         try:
-            with spinner:
-                network.wait_for_statuses(["DELETING","DELETED"],wait=999,progress=False)
+            cli.log.info(f"Waiting for network {network.name} to progress from status {network.status} to PROVISIONED")
+            network.wait_for_status("PROVISIONED",wait=999,progress=False)
         except KeyboardInterrupt as e:
             cli.log.info("Cancelled")
             exit(1)
         except Exception as e:
             raise RuntimeError(f"unknown error in {e}")
         else:
-            cli.log.info(f"network '{network_name}' deleted")
-    elif operation in ['create','read','update']:
-        if not network.status == 'PROVISIONED':
-            try:
-                network.wait_for_status("PROVISIONED",wait=999,progress=False)
-            except KeyboardInterrupt as e:
-                cli.log.info("Cancelled")
-                exit(1)
-            except Exception as e:
-                raise RuntimeError(f"unknown error in {e}")
-            else:
-                cli.log.info(f"network '{network_name}' ready")
+            cli.log.info(f"Network '{network_name}' is ready")
 
     return network, network_group
 
@@ -860,7 +866,7 @@ def edit_object_as_yaml(edit: object):
     if not sys.stdout.isatty() or cli.args.yes:
         return edit
     save_error = False
-    editor = os.environ.get('NETFOUNDRY_EDITOR',os.environ.get('EDITOR','vim'))
+    editor = environ.get('NETFOUNDRY_EDITOR',environ.get('EDITOR','vim'))
     instructions_bytes = "# save and exit this editor to confirm, or\n#  abort by saving an empty file, comments ignored\n".encode()
     edit_bytes = yaml_dumps(edit, default_flow_style=False).encode()
     with tempfile.NamedTemporaryFile(suffix=".yml", delete=False) as tf:

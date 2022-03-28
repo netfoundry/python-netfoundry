@@ -618,6 +618,8 @@ class Network:
                 "authorization": "Bearer " + self.token 
             }
             post['networkId'] = self.id
+            if post.get('name'):
+                post['name'] = post['name'].strip('"')
             response = http.post(
                 self.audience+'core/v2/'+plural(type),
                 proxies=self.proxies,
@@ -681,7 +683,7 @@ class Network:
                     raise Exception("ERROR: hashtag role attributes on an endpoint must begin with #")
             body = {
                 "networkId": self.id,
-                "name": name,
+                "name": name.strip('"'),
                 "attributes": attributes,
                 "enrollmentMethod": { "ott": True }
             }
@@ -766,7 +768,7 @@ class Network:
                     raise Exception("ERROR: hashtag role attributes on an endpoint must begin with #")
             body = {
                 "networkId": self.id,
-                "name": name,
+                "name": name.strip('"'),
                 "attributes": attributes,
                 "linkListener": link_listener,
                 "tunnelerEnabled": tunneler_enabled
@@ -858,7 +860,7 @@ class Network:
                     raise Exception("ERROR: role attributes on a policy must begin with # or @")
             body = {
                 "networkId": self.id,
-                "name": name,
+                "name": name.strip('"'),
                 "endpointAttributes": endpoint_attributes,
                 "edgeRouterAttributes": edge_router_attributes
             }
@@ -926,7 +928,7 @@ class Network:
                     raise Exception(f'invalid role "{role}". Must begin with "#"')
             body = {
                 "networkId": self.id,
-                "name": name,
+                "name": name.strip('"'),
                 "encryptionRequired": encryption_required,
                 "model": {
                     "clientIngress" : {
@@ -1081,7 +1083,7 @@ class Network:
             }
             body = {
                 "networkId": self.id,
-                "name":  name,
+                "name":  name.strip('"'),
                 "type": type,
                 "semantic": semantic,
                 "postureCheckAttributes": valid_postures,
@@ -1165,7 +1167,7 @@ class Network:
             }
             body = {
                 "networkId": self.id,
-                "name":  name,
+                "name":  name.strip('"'),
                 "semantic": semantic,
                 "serviceAttributes": valid_services,
                 "edgeRouterAttributes": valid_routers
@@ -1249,7 +1251,7 @@ class Network:
             }
             body = {
                 "networkId": self.id,
-                "name": name,
+                "name": name.strip('"'),
                 "encryptionRequired": encryption_required,
                 "configs": [
                     {
@@ -1342,7 +1344,7 @@ class Network:
         """
         try:
 
-
+            name = name.strip('"')
             # validate client protocols
             valid_client_protocols = list()
             for proto in client_protocols:
@@ -1473,6 +1475,7 @@ class Network:
         :param: encryption_required is optional Boolean. Default is to enable edge-to-edge encryption.
         :param: dry_run is optional Boolean where True returns only the entity model without sending a request.
         """
+        name = name.strip('"')
         try:
             # validate roles
             for role in attributes:
@@ -1654,7 +1657,7 @@ class Network:
                     raise Exception("ERROR: role attributes on an AppWAN must begin with # or @")
             body = {
                 "networkId": self.id,
-                "name": name,
+                "name": name.strip('"'),
                 "endpointAttributes": endpoint_attributes,
                 "serviceAttributes": service_attributes,
                 "postureCheckAttributes": posture_check_attributes

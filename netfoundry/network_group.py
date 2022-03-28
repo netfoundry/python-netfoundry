@@ -192,7 +192,7 @@ class NetworkGroup:
                 logging.warn(f"ignoring unexpected keyword argument '{param}'")
 
         request = {
-            "name": name,
+            "name": name.strip('"'),
             "locationCode": location,
             "size": size,
         }

@@ -251,7 +251,7 @@ def find_generic_resources(url: str, headers: dict, embedded: str=None, proxies:
     if params.get('size'):
         get_all_pages = False
     else:
-        if '/data-centers/' in url:
+        if '/data-centers' in url:
             params['size'] = 3000 # workaround last page bug in MOP-17993
         else:
             params['size'] = DEFAULT_PAGE_SIZE
@@ -404,7 +404,6 @@ RESOURCES = {
         create_template={
             "name": "Name",
             "locationCode": "us-east-1",
-            "size": "small",
             "networkGroupId": None
         }
     ),
