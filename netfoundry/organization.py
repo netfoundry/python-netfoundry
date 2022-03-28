@@ -60,7 +60,7 @@ class Organization:
             else:
                 self.verify = False
         
-        epoch = time.time()
+        epoch = round(time.time())
         self.expiry_seconds = 0 # initialize a placeholder for remaining seconds until expiry
         client_id = None
         password = None
@@ -127,7 +127,7 @@ class Organization:
             else:
                 self.token = token_cache['token']
                 self.expiry = token_cache['expiry']
-                self.expiry_seconds = self.expiry - epoch
+                self.expiry_seconds = round(self.expiry - epoch)
                 self.audience = token_cache['audience']
 
         # if the token was found but not the expiry then try to parse to extract the expiry so we can enforce minimum lifespan seconds
@@ -135,11 +135,11 @@ class Organization:
             try:
                 self.expiry = jwt_expiry(self.token)
             except Exception as e:
-                self.expiry = epoch + DEFAULT_TOKEN_EXPIRY
+                self.expiry = round(epoch + DEFAULT_TOKEN_EXPIRY)
                 self.expiry_seconds = DEFAULT_TOKEN_EXPIRY
                 logging.debug(f"failed to parse token as JWT, estimating expiry in {DEFAULT_TOKEN_EXPIRY}s")
             else:
-                self.expiry_seconds = self.expiry - epoch
+                self.expiry_seconds = round(self.expiry - epoch)
                 logging.debug(f"bearer token expiry in {self.expiry_seconds}s")
         elif not self.token:
             logging.debug("no bearer token found")
@@ -253,7 +253,7 @@ class Organization:
             except Exception as e:
                 raise RuntimeError("unexpected error getting expiry from token, got {e}")
             else:
-                self.expiry_seconds = self.expiry - epoch
+                self.expiry_seconds = round(self.expiry - epoch)
                 logging.debug(f"bearer token expiry in {self.expiry_seconds}s")
 
         # renew token if not existing or imminent expiry, else continue
@@ -302,16 +302,17 @@ class Organization:
                 try:
                     token_text = json.loads(response.text)
                     self.token = token_text['access_token']
-                    self.expiry = token_text['expires_in'] + epoch
+                    self.expiry = round(token_text['expires_in'] + epoch)
+                    logging.debug(f"computed expiry epoch {self.expiry} from 'expires_in={token_text['expires_in']}'")
                 except Exception as e:
                     raise RuntimeError(f"failed to find an access_token in the response and instead got: {response.text}")
                 else:
-                    self.expiry_seconds = self.expiry - epoch
+                    self.expiry_seconds = round(self.expiry - epoch)
                     logging.debug(f"bearer token expiry in {self.expiry_seconds}s")
             else:
                 raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
-        else:
-            logging.debug(f"found token with {self.expiry_seconds}s until expiry")
+        elif credentials_configured:
+            logging.warn(f"ignoring configured credentials, found token with {self.expiry_seconds}s until expiry")
 
         # write to the token cache if we have all three things: the token,
         # expiry, and audience URL, unless it matches the token cache, which
