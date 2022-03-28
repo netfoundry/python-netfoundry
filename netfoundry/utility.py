@@ -261,7 +261,7 @@ def find_generic_resources(url: str, headers: dict, embedded: str=None, proxies:
         params['page'] = 0
     if accept:
         if accept in ["create", "update"]:
-            headers['accept'] = "application/json;as="+params['accept']
+            headers['accept'] = "application/json;as="+accept
         else:
             logging.warn("ignoring invalid value for header 'accept': '{:s}'".format(accept))
 

@@ -549,7 +549,7 @@ class Organization:
 
     network_groups = get_network_groups_by_organization
 
-    def get_networks_by_organization(self, name: str=None, deleted: bool=False, **kwargs):
+    def get_networks_by_organization(self, name: str=None, deleted: bool=False, accept: str=None, **kwargs):
         """
         Find networks by organization as a collection.
 
@@ -568,7 +568,7 @@ class Organization:
             params['status'] = 'DELETED'
         try:
             networks = list()
-            for i in find_generic_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, proxies=self.proxies, verify=self.verify, **params):
+            for i in find_generic_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, accept=accept, proxies=self.proxies, verify=self.verify, **params):
                 networks.extend(i)
         except Exception as e:
             raise RuntimeError(f"failed to get networks from url: '{url}', got {e}")
@@ -605,7 +605,7 @@ class Organization:
 
         return normal_names.count(normalize_caseless(name))
 
-    def get_networks_by_group(self, network_group_id: str, deleted: bool=False, **kwargs):
+    def get_networks_by_group(self, network_group_id: str, deleted: bool=False, accept: str=None, **kwargs):
         """Find networks by network group as a collection.
 
         :param network_group_id: required network group UUIDv4
@@ -623,7 +623,7 @@ class Organization:
         headers = { "authorization": "Bearer " + self.token }
         try:
             networks = list()
-            for i in find_generic_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, proxies=self.proxies, verify=self.verify, **params):
+            for i in find_generic_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, accept=accept, proxies=self.proxies, verify=self.verify, **params):
                 networks.extend(i)
         except Exception as e:
             raise RuntimeError(f"failed to get networks from url: '{url}', got {e}")

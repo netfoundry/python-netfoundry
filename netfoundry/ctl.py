@@ -8,9 +8,7 @@ PYTHON_ARGCOMPLETE_OK
 """
 import argparse
 import logging
-from os import environ, path
 import platform
-from random import sample, shuffle, choice
 import re
 import sys
 import tempfile
@@ -18,9 +16,11 @@ import time
 from json import dumps as json_dumps
 from json import load as json_load
 from json import loads as json_loads
-from posixpath import split
+from os import environ, path
+from posixpath import split as psplit
+from random import choice, sample, shuffle
 from re import sub
-from shlex import split
+from shlex import split as shplit
 from shutil import which
 from subprocess import CalledProcessError
 
@@ -28,6 +28,10 @@ from subprocess import CalledProcessError
 from jwt.exceptions import PyJWTError
 from milc import set_metadata
 from packaging import version
+from pygments import highlight
+from pygments.formatters import Terminal256Formatter
+from pygments.lexers import get_lexer_by_name
+from pygments.styles import get_all_styles
 from tabulate import tabulate
 from yaml import dump as yaml_dumps
 from yaml import full_load as yaml_loads
@@ -43,8 +47,8 @@ from .utility import (MUTABLE_NETWORK_RESOURCES, NETWORK_RESOURCES, RESOURCES,
                       is_jwt, normalize_caseless, plural, singular)
 
 set_metadata(version="v"+get_versions()['version'], author="NetFoundry", name="nfctl") # must precend import milc.cli
-from milc import cli, questions
 import milc.subcommand.config
+from milc import cli, questions
 
 
 class StoreDictKeyPair(argparse.Action):
@@ -72,6 +76,7 @@ class StoreListKeys(argparse.Action):
 @cli.argument('-N', '--network', help='caseless name of the network to manage')
 @cli.argument('-G', '--network-group', help="shortname or ID of a network group to search for network_name")
 @cli.argument('-O','--output', arg_only=True, help="format the output", default="text", choices=['text', 'yaml','json'])
+@cli.argument('-S', '--style', help="Style name from https://pygments.org/styles", metavar='STYLE', default='monokai', choices=list(get_all_styles()))
 @cli.argument('-b','--borders', default=True, action='store_boolean', help='print cell borders in text tables')
 @cli.argument('-H','--headers', default=True, action='store_boolean', help='print column headers in text tables')
 @cli.argument('-Y', '--yes', action='store_true', arg_only=True, help='answer yes to potentially-destructive operations')
@@ -86,7 +91,6 @@ def main(cli):
 
 @cli.argument('-F','--full', dest='full_summary', help="describe the configured organization, network-group, and network", arg_only=True, action="store_true", default=False)
 @cli.argument('-s','--shell', help="only print a shell source script for configuring the parent shell with a token", arg_only=True, action="store_true", default=False)
-@cli.argument('-O','--output', arg_only=True, help="format the output", default="text", choices=['text', 'yaml','json'])
 @cli.argument('-v','--ziti-version', help=argparse.SUPPRESS, default='0.22.0') # minium ziti CLI version supports --cli-identity and --read-only
 @cli.argument('-c','--ziti-cli', help=argparse.SUPPRESS)
 @cli.argument('login_target', help=argparse.SUPPRESS, arg_only=True, nargs='?', default="organization", choices=['organization', 'ziti'])
@@ -166,15 +170,11 @@ def login(cli):
                     )
 
                 elif cli.args.full_summary and not cli.args.shell and cli.args.output == "yaml":
-                    cli.echo(
-                        '{fg_lightgreen_ex}'
-                        +yaml_dumps(summary_object, indent=4)
-                    )
+                    highlighted = highlight(yaml_dumps(summary_object, indent=4), yaml_lexer, Terminal256Formatter(style=cli.config.general.style))
+                    cli.echo(highlighted)
                 elif cli.args.full_summary and not cli.args.shell and cli.args.output == "json":
-                    cli.echo(
-                        '{fg_lightgreen_ex}'
-                        +json_dumps(summary_object, indent=4)
-                    )
+                    highlighted = highlight(json_dumps(summary_object, indent=4), json_lexer, Terminal256Formatter(style=cli.config.general.style))
+                    cli.echo(highlighted)
 
             elif cli.args.shell:
                 cli.echo(
@@ -260,7 +260,7 @@ export MOPENV={organization.environment}
                 ziti_mgmt_port = "443"
                 exec = cli.run([ziti_cli, 'edge', 'login', '--read-only', '--cli-identity', ziti_cli_identity, ziti_ctrl_ip+':'+ziti_mgmt_port, '--token', ziti_token], capture_output=False)
                 if exec.returncode == 0: # if succeeded
-                    exec = cli.run(f"{ziti_cli} edge use {ziti_cli_identity}".shutil.split(), capture_output=False)
+                    exec = cli.run(shplit(f"{ziti_cli} edge use {ziti_cli_identity}"), capture_output=False)
                     if not exec.returncode == 0: # if error
                         cli.log.error(f"failed to switch default ziti login identity to '{ziti_cli_identity}'")
                         exit(exec.returncode)
@@ -403,9 +403,8 @@ def edit(cli):
         cli.log.info(sub("Updating", "Updated", spinner.text))
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
-@cli.argument('-O','--output', arg_only=True, help="format the output", default="yaml", choices=['text', 'yaml','json'])
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
-@cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create','update'], help="request the as=create or as=update form of the resource")
+@cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create','update'], help="request the as=create or as=update alternative form of the resource")
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[singular(type) for type in RESOURCES.keys()])
 @cli.subcommand('get a single resource by query')
 def get(cli, echo: bool=True, embed='all'):
@@ -534,9 +533,10 @@ def get(cli, echo: bool=True, embed='all'):
                 cli.log.debug("not filtering output keys")
                 filtered_match = match
             if cli.args.output in ["yaml","text"]:
-                cli.echo('{fg_lightgreen_ex}'+yaml_dumps(filtered_match, indent=4, default_flow_style=False))
+                highlighted = highlight(yaml_dumps(filtered_match, indent=4), yaml_lexer, Terminal256Formatter(style=cli.config.general.style))
             elif cli.args.output == "json":
-                cli.echo('{fg_lightgreen_ex}'+json_dumps(filtered_match, indent=4))
+                highlighted = highlight(json_dumps(filtered_match, indent=4), json_lexer, Terminal256Formatter(style=cli.config.general.style))
+            cli.echo(highlighted)
     elif len(matches) == 0:
         cli.log.warning(f"found no {cli.args.resource_type} by '{','.join(query_keys)}'")
         exit(1)
@@ -550,11 +550,13 @@ def get(cli, echo: bool=True, embed='all'):
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
-@cli.argument('-O','--output', arg_only=True, help="format the output", default="text", choices=['text', 'yaml','json'])
+@cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create','update'], help="request the as=create or as=update alternative form of the resources")
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[type for type in RESOURCES.keys()])
 @cli.subcommand('find resources as lists')
 def list(cli):
     """Find resources as lists."""
+    if cli.args.accept and not MUTABLE_NETWORK_RESOURCES.get(cli.args.resource_type):
+        cli.log.warn("the --as=ACCEPT param is not applicable to resources outside the network domain")
     if cli.args.output == "text":
         if not sys.stdout.isatty():
             cli.log.warning("{fg_yello}nfctl does not have a stable CLI interface. Use with caution in scripts. Please raise a GitHub issue if that's something you would value.")
@@ -577,9 +579,9 @@ def list(cli):
         elif cli.args.resource_type == "networks":
             if cli.config.general.network_group:
                 network_group = use_network_group(organization, group=cli.config.general.network_group)
-                matches = organization.get_networks_by_group(network_group.id, **cli.args.query)
+                matches = organization.get_networks_by_group(network_group.id, accept=cli.args.accept, **cli.args.query)
             else:
-                matches = organization.get_networks_by_organization(**cli.args.query)
+                matches = organization.get_networks_by_organization(accept=cli.args.accept, **cli.args.query)
         else:
             if cli.config.general.network:
                 network, network_group = use_network(
@@ -593,7 +595,7 @@ def list(cli):
             if cli.args.resource_type == "data-centers":
                 matches = network.get_edge_router_data_centers(**cli.args.query)
             else:
-                matches = network.get_resources(type=cli.args.resource_type, **cli.args.query)
+                matches = network.get_resources(type=cli.args.resource_type, accept=cli.args.accept, **cli.args.query)
 
     if len(matches) == 0:
         cli.log.info(f"found no {cli.args.resource_type} by '{','.join(query_keys)}'")
@@ -633,9 +635,11 @@ def list(cli):
             +tabulate(tabular_data=[match.values() for match in filtered_matches], headers=table_headers, tablefmt=table_borders)
         )
     elif cli.args.output == "yaml":
-        cli.echo('{fg_lightgreen_ex}'+yaml_dumps(filtered_matches, indent=4, default_flow_style=False))
+        highlighted = highlight(yaml_dumps(filtered_matches, indent=4), yaml_lexer, Terminal256Formatter(style=cli.config.general.style))
+        cli.echo(highlighted)
     elif cli.args.output == "json":
-        cli.echo('{fg_lightgreen_ex}'+json_dumps(filtered_matches, indent=4))
+        highlighted = highlight(json_dumps(filtered_matches, indent=4), json_lexer, Terminal256Formatter(style=cli.config.general.style))
+        cli.echo(highlighted)
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[singular(type) for type in MUTABLE_NETWORK_RESOURCES.keys()])
@@ -923,6 +927,9 @@ def get_spinner(text):
         spinner.enabled = True
         cli.log.debug("spinner enabled because stdout is a tty and DEBUG is not enabled")
     return spinner
+
+yaml_lexer = get_lexer_by_name("yaml", stripall=True)
+json_lexer = get_lexer_by_name("json", stripall=True)
 
 if __name__ == '__main__':
     cli()

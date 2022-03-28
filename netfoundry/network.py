@@ -412,7 +412,7 @@ class Network:
         headers = { "authorization": "Bearer " + self.token }
         try:
             resources = list()
-            for i in find_generic_resources(url=url, headers=headers, accept=accept, embedded=NETWORK_RESOURCES[type]._embedded, proxies=self.proxies, verify=self.verify, **params):
+            for i in find_generic_resources(url=url, headers=headers, embedded=NETWORK_RESOURCES[type]._embedded, accept=accept, proxies=self.proxies, verify=self.verify, **params):
                 resources.extend(i)
         except Exception as e:
             raise RuntimeError(f"failed to get {plural(type)} from url: '{url}', got {e}")
