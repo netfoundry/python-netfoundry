@@ -39,8 +39,10 @@ def singular(plural):
     """Singularize a plural form."""
     return(p.singular_noun(plural))
 
-def kebab2camel(kebab, case: str="lower"):          # "lower" dromedary or "upper" Pascal
+def kebab2camel(kebab: str, case: str="lower"):          # "lower" dromedary or "upper" Pascal
     """Convert kebab case to camel case."""
+    if not isinstance(kebab, str):
+        raise RuntimeError(f"bad arg to kebab2camel {str(kebab)}")
     kebab_words = kebab.split('-')
     camel_words = list()
     if case in ["lower","dromedary"]:
@@ -386,6 +388,8 @@ class ResourceType(ResourceTypeParent):
         """Compute and assign _embedded if not supplied and then check types in parent class."""
         if self._embedded == 'default':
             singular_name = singular(self.name)
+            if not singular_name:
+                raise RuntimeError(f"params to singular() must be plural, got {singular_name} from singular({self.name})")
             camel_name = kebab2camel(singular_name)+'List'       # edgeRouterList
             setattr(self, '_embedded', camel_name)
         if self.abbreviation == 'default':
@@ -409,20 +413,20 @@ RESOURCES = {
         domain='network',
         _embedded='dataCenters',      # TODO: raise a bug report because this inconcistency forces consumers to make an exception for this type
         mutable=False,
-        embeddable=False
+        embeddable=False,
     ),
     'organizations': ResourceType(
         name='organizations',
         domain='organization',
         mutable=False,
-        embeddable=False
+        embeddable=False,
     ),
     'network-groups': ResourceType(
         name='network-groups',
         domain='network-group',
         _embedded='organizations',    # TODO: prune this exception when groups migrate to the Core network domain
         mutable=False,
-        embeddable=False
+        embeddable=False,
     ),
     'networks': ResourceType(
         name='networks',
@@ -434,7 +438,7 @@ RESOURCES = {
             "name": "Name",
             "locationCode": "us-east-1",
             "networkGroupId": None
-        }
+        },
     ),
     'network-controllers': ResourceType(
         name='network-controllers',
@@ -446,13 +450,13 @@ RESOURCES = {
         name='identities',
         domain='organization',
         mutable=False,              # TODO: C_UD not yet implemented here in client for org domain
-        embeddable=False            # TODO: embedding not yet implemented in API for org domain
+        embeddable=False,           # TODO: embedding not yet implemented in API for org domain
     ),
     'hosts': ResourceType(
         name='hosts',
         domain='network',
         mutable=False,
-        embeddable=True
+        embeddable=True,
     ),
     'endpoints': ResourceType(
         name='endpoints',
@@ -478,49 +482,49 @@ RESOURCES = {
         domain='network',
         mutable=True,
         embeddable=True,
-        create_responses=["OK", "ACCEPTED"]
+        create_responses=["OK", "ACCEPTED"],
     ),
     'app-wans': ResourceType(
         name='app-wans',
         domain='network',
         mutable=True,
         embeddable=True,
-        create_responses=["OK", "ACCEPTED"]
+        create_responses=["OK", "ACCEPTED"],
     ),
     'services': ResourceType(
         name='services',
         domain='network',
         mutable=True,
         embeddable=True,
-        create_responses=["ACCEPTED"]
+        create_responses=["ACCEPTED"],
     ),
     'service-policies': ResourceType(
         name='service-policies',
         domain='network',
         mutable=True,
         embeddable=True,
-        create_responses=["ACCEPTED"]
+        create_responses=["ACCEPTED"],
     ),
     'service-edge-router-policies': ResourceType(
         name='service-edge-router-policies',
         domain='network',
         mutable=True,
         embeddable=True,
-        create_responses=["ACCEPTED"]
+        create_responses=["ACCEPTED"],
     ),
     'posture-checks': ResourceType(
         name='posture-checks',
         domain='network',
         mutable=True,
         embeddable=True,
-        create_responses=["ACCEPTED"]
+        create_responses=["ACCEPTED"],
     ),
     'certificate-authorities': ResourceType(
         name='certificate-authorities',
         domain='network',
         mutable=True,
         embeddable=True,
-        create_responses=["ACCEPTED"]
+        create_responses=["ACCEPTED"],
     )
 }
 

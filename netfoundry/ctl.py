@@ -287,7 +287,7 @@ def logout(cli):
         cli.log.info(sub('Logging', 'Logged', spinner.text))
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
-@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[singular(type) for type in MUTABLE_NETWORK_RESOURCES.keys()])
+@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type),RESOURCES[type].abbreviation] for type in MUTABLE_NETWORK_RESOURCES.keys()] for choice in group])
 # this allows us to pass the edit subcommand's cli object to function get without further modifying that functions params
 @cli.subcommand('edit a single resource selected by query with editor defined in NETFOUNDRY_EDITOR or EDITOR')
 def copy(cli):
@@ -297,6 +297,8 @@ def copy(cli):
     accepts a file to edit as first positional parameter and waits for exit to
     return e.g. "code --wait".
     """
+    if MUTABLE_RESOURCE_ABBREVIATIONS.get(cli.args.resource_type):
+        cli.args.resource_type = singular(MUTABLE_RESOURCE_ABBREVIATIONS[cli.args.resource_type].name)
     spinner = get_spinner(f"Getting {cli.args.resource_type} for copying")
     cli.args['accept'] = 'create'
     cli.args['output'] = 'text' # implies tty which allows INFO messages
@@ -314,7 +316,7 @@ def copy(cli):
 
 @cli.argument('-f', '--file', help='JSON or YAML file', type=argparse.FileType('r', encoding='UTF-8'))
 @cli.argument('-w','--wait', help='seconds to wait for process execution to finish', default=0)
-@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[singular(type) for type in MUTABLE_NETWORK_RESOURCES.keys()])
+@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type),RESOURCES[type].abbreviation] for type in MUTABLE_NETWORK_RESOURCES.keys()] for choice in group])
 @cli.subcommand('create a resource from a file')
 def create(cli):
     """Create a resource.
@@ -323,6 +325,8 @@ def create(cli):
     send create request upon EDITOR exit. If not interactive then send input
     object as create request immediately.
     """
+    if MUTABLE_RESOURCE_ABBREVIATIONS.get(cli.args.resource_type):
+        cli.args.resource_type = singular(MUTABLE_RESOURCE_ABBREVIATIONS[cli.args.resource_type].name)
     # get the input object if available, else get the lines (serialized YAML or JSON) and try to deserialize
     create_input_object, create_input_lines, create_object = None, str(), None
     if sys.stdin.isatty() and not cli.args.file:
@@ -379,7 +383,7 @@ def create(cli):
     cli.log.info(f"Created {cli.args.resource_type} '{resource['name']}'")
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
-@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[singular(type) for type in MUTABLE_NETWORK_RESOURCES.keys()])
+@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type),RESOURCES[type].abbreviation] for type in MUTABLE_NETWORK_RESOURCES.keys()] for choice in group])
 # this allows us to pass the edit subcommand's cli object to function get without further modifying that functions params
 @cli.subcommand('edit a single resource selected by query with editor defined in NETFOUNDRY_EDITOR or EDITOR')
 def edit(cli):
@@ -389,6 +393,8 @@ def edit(cli):
     accepts a file to edit as first positional parameter and waits for exit to
     return e.g. "code --wait".
     """
+    if MUTABLE_RESOURCE_ABBREVIATIONS.get(cli.args.resource_type):
+        cli.args.resource_type = singular(MUTABLE_RESOURCE_ABBREVIATIONS[cli.args.resource_type].name)
     cli.args['accept'] = 'update'
     spinner = get_spinner(f"Getting {cli.args.resource_type} for editing")
     cli.log.debug(f"opening {cli.args.resource_type} '{edit_resource_object['name']}' for editing")
@@ -406,7 +412,7 @@ def edit(cli):
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
 @cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create','update'], help="request the as=create or as=update alternative form of the resource")
-@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[singular(type) for type in RESOURCES.keys()])
+@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type),RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
 @cli.subcommand('get a single resource by query')
 def get(cli, echo: bool=True, embed='all'):
     """
@@ -415,6 +421,8 @@ def get(cli, echo: bool=True, embed='all'):
     :param echo: output to stdout, False for CLI internal use
     :param embed: allow expensive server operations, False for quick get internal use
     """
+    if RESOURCE_ABBREVIATIONS.get(cli.args.resource_type):
+        cli.args.resource_type = singular(RESOURCE_ABBREVIATIONS[cli.args.resource_type].name)
     if not cli.config.general.verbose and cli.args.output in ["yaml","json"]: # don't change level if output=text
         cli.log.setLevel(logging.WARN) # don't emit INFO messages to stdout because they will break deserialization
     match = {}
@@ -645,11 +653,13 @@ def list(cli):
         cli.echo(highlighted)
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
-@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[choice for group in [[type,RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
+@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[choice for group in [[singular(type),RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
 @cli.argument('-w','--wait', help='seconds to wait', default=0)
 @cli.subcommand('delete a resource in the network domain')
 def delete(cli):
     """Delete a resource in the network domain."""
+    if MUTABLE_RESOURCE_ABBREVIATIONS.get(cli.args.resource_type):
+        cli.args.resource_type = singular(MUTABLE_RESOURCE_ABBREVIATIONS[cli.args.resource_type].name)
     cli.args['accept'] = None
     spinner = get_spinner(f"Finding {cli.args.resource_type} by {','.join(cli.args.query)}")
     with spinner:
