@@ -32,6 +32,7 @@ from pygments import highlight
 from pygments.formatters import Terminal256Formatter
 from pygments.lexers import get_lexer_by_name
 from pygments.styles import get_all_styles
+from pygments.lexers import get_all_lexers
 from tabulate import tabulate
 from yaml import dump as yaml_dumps
 from yaml import full_load as yaml_loads
@@ -87,11 +88,11 @@ class StoreListKeys(argparse.Action):
 def main(cli):
     """Configure the CLI to manage a network."""
     cli.args['login_target'] = 'organization'
-    cli.args['full_summary'] = False
+    cli.args['report'] = False
     cli.args['shell'] = False
     login(cli)
 
-@cli.argument('-F','--full', dest='full_summary', help="describe the configured organization, network-group, and network", arg_only=True, action="store_true", default=False)
+@cli.argument('-r','--report', help="describe the configured organization, network-group, and network", arg_only=True, action="store_true", default=False)
 @cli.argument('-s','--shell', help="only print a shell source script for configuring the parent shell with a token", arg_only=True, action="store_true", default=False)
 @cli.argument('-v','--ziti-version', help=argparse.SUPPRESS, default='0.22.0') # minium ziti CLI version supports --cli-identity and --read-only
 @cli.argument('-c','--ziti-cli', help=argparse.SUPPRESS)
@@ -102,7 +103,7 @@ def login(cli):
     # if logging in to a NF org (default)
     spinner = get_spinner("working")
     if cli.args.login_target == "organization":
-        spinner.text = f"Logging in profile {cli.config.general.profile}"
+        spinner.text = f"Logging in profile '{cli.config.general.profile}'"
         with spinner:
             organization =  use_organization()
             if cli.config.general.network_group and cli.config.general.network:
@@ -134,25 +135,17 @@ def login(cli):
             summary_object['organization'] = organization.describe
             if network_group:
                 summary_object['network_group'] = network_group.describe
-                summary_object['network_group']['networks_count'] = len(network_group.networks_by_normal_name().keys())
+                summary_object['network_group']['networks_count'] = len(network_group.network_ids_by_normal_name.keys())
             if network:
                 summary_object['network'] = network.describe
 
             # compose a summary table from selected details if text, not yaml or
             # json (unless shell which means to suppress normal output and only
             # configure the current shell)
-            if cli.args.full_summary and not cli.args.shell:
-                if cli.args.output == "text":
+            if not cli.args.shell:
+                if cli.args.output == "text" and cli.args.report:
                     summary_table = []
-                    summary_table.append(['organization', 'logged in to "{org_name}" ({org_label}@{env}) \nas {fullname} ({email}) \nuntil {expiry_timestamp} (T-{expiry_seconds}s)'.format(
-                            fullname=summary_object['caller']['name'],
-                            email=summary_object['caller']['email'],
-                            org_label=organization.label,
-                            org_name=organization.name,
-                            env=organization.environment,
-                            expiry_timestamp=time.strftime('%H:%M GMT%z', time.localtime(organization.expiry)),
-                            expiry_seconds=int(organization.expiry_seconds)
-                        )])
+                    summary_table.append(['identity', f"{summary_object['caller']['name']} ({summary_object['caller']['email']}) in {organization.label} ({organization.name})"])
                     if network_group:
                             summary_table.append(['network group', '"{fullname}" ({shortname}) \n with {count} networks'.format(
                                 fullname=summary_object['network_group']['name'],
@@ -175,13 +168,13 @@ def login(cli):
                         +tabulate(tabular_data=summary_table, headers=['domain', 'summary'], tablefmt=table_borders)
                     )
 
-                elif cli.args.full_summary and not cli.args.shell and cli.args.output == "yaml":
+                elif cli.args.output == "yaml":
                     if cli.config.general.color:
                         highlighted = highlight(yaml_dumps(summary_object, indent=4), yaml_lexer, Terminal256Formatter(style=cli.config.general.style))
                         cli.echo(highlighted)
                     else:
                         cli.echo(yaml_dumps(summary_object, indent=4))
-                elif cli.args.full_summary and not cli.args.shell and cli.args.output == "json":
+                elif cli.args.output == "json":
                     if cli.config.general.color:
                         highlighted = highlight(json_dumps(summary_object, indent=4), json_lexer, Terminal256Formatter(style=cli.config.general.style))
                         cli.echo(highlighted)
@@ -189,22 +182,18 @@ def login(cli):
                         cli.echo(json_dumps(summary_object, indent=4))
 
             elif cli.args.shell:
-                cli.echo(
-                    f"""
+                token_env = f"""
 # $ source <(nfctl --credentials credentials.json login organization)
 export NETFOUNDRY_API_TOKEN="{organization.token}"
 export MOPENV={organization.environment}
-""")
+"""
+                if cli.config.general.color:
+                    highlighted = highlight(token_env, bash_lexer, Terminal256Formatter(style=cli.config.general.style))
+                    cli.echo(highlighted)
+                else:
+                    cli.echo(token_env)
             else:
-                spinner.succeed('logged in to "{org_name}" ({org_label}@{env}) as {fullname} ({email}) until {expiry_timestamp} (T-{expiry_seconds}s)'.format(
-                            fullname=summary_object['caller']['name'],
-                            email=summary_object['caller']['email'],
-                            org_label=organization.label,
-                            org_name=organization.name,
-                            env=organization.environment,
-                            expiry_timestamp=time.strftime('%H:%M GMT%z', time.localtime(organization.expiry)),
-                            expiry_seconds=int(organization.expiry_seconds)
-                ))
+                spinner.succeed(f"you are {summary_object['caller']['name']} ({summary_object['caller']['email']}) in {organization.label}")
 
     elif cli.args.login_target == "ziti":
         if cli.config.login.ziti_cli:
@@ -835,6 +824,7 @@ def use_organization(prompt: bool=True):
         else:
             spinner.fail("Not logged in")
             raise NFAPINoCredentials()
+    spinner.succeed(f"Logged in profile '{cli.config.general.profile}'")
     cli.log.debug(f"logged-in organization label is {organization.label}.")
     return organization
 
@@ -853,7 +843,7 @@ def use_network_group(organization: object, group: str=None):
         organization,
         group=group if group else None,
     )
-    spinner.succeed(sub('Configuring', 'Configured', spinner.text))
+    spinner.succeed(f"Configured network group {network_group.name}")
     cli.log.debug(f"network group is {network_group.name}")
     return network_group
 
@@ -982,7 +972,7 @@ def get_spinner(text):
     corrupt structured output.
     """
     inner_spinner = cli.spinner(text=text, spinner='dots12', placement='left', color='green', stream=sys.stderr)
-    if not sys.stdout.isatty():
+    if not sys.stdout.isatty() or cli.args.shell:
         inner_spinner.enabled = False
         cli.log.debug("spinner disabled because stdout is not a tty")
     elif cli.config.general.verbose:
@@ -995,6 +985,8 @@ def get_spinner(text):
 
 yaml_lexer = get_lexer_by_name("yaml", stripall=True)
 json_lexer = get_lexer_by_name("json", stripall=True)
+bash_lexer = get_lexer_by_name("bash", stripall=True)
+
 
 if __name__ == '__main__':
     cli()
