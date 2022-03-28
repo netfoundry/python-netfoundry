@@ -312,7 +312,7 @@ class Organization:
             else:
                 raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
         elif credentials_configured:
-            logging.warn(f"ignoring configured credentials, found token with {self.expiry_seconds}s until expiry")
+            logging.debug(f"ignoring configured credentials, already logged in with {self.expiry_seconds}s until token expiry")
 
         # write to the token cache if we have all three things: the token,
         # expiry, and audience URL, unless it matches the token cache, which

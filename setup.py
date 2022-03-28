@@ -33,6 +33,7 @@ setuptools.setup(
         'tabulate >= 0.8',
         'packaging >= 20.9',
         'nanoid >= 2.0',
+        'pygments >= 2.11'
     ]
 )
 
