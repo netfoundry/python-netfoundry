@@ -222,7 +222,7 @@ class Organization:
         # The purpose of this flow is to compose the audience URL. The mode of
         # the try-except block is to soft-fail all attempts to parse the JWT,
         # which is intended for the API, not this application
-        if not self.audience and self.token and not self.environment:
+        if self.token and not self.environment:
             try:
                 self.environment = jwt_environment(self.token)
             except Exception as e:

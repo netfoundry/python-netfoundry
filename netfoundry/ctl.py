@@ -32,7 +32,6 @@ from pygments import highlight
 from pygments.formatters import Terminal256Formatter
 from pygments.lexers import get_lexer_by_name
 from pygments.styles import get_all_styles
-from pygments.lexers import get_all_lexers
 from tabulate import tabulate
 from yaml import dump as yaml_dumps
 from yaml import full_load as yaml_loads
@@ -79,7 +78,7 @@ class StoreListKeys(argparse.Action):
 @cli.argument('-N', '--network', help='caseless name of the network to manage')
 @cli.argument('-G', '--network-group', help="shortname or ID of a network group to search for network_name")
 @cli.argument('-O','--output', arg_only=True, help="format the output", default="text", choices=['text', 'yaml','json'])
-@cli.argument('-S', '--style', help="Style name from https://pygments.org/styles", metavar='STYLE', default='monokai', choices=list(get_all_styles()))
+@cli.argument('-S', '--style', help="highlighting style", metavar='STYLE', default='monokai', choices=["rrt", "arduino", "monokai", "material", "one-dark", "emacs", "vim", "one-dark"])
 @cli.argument('-b','--borders', default=True, action='store_boolean', help='print cell borders in text tables')
 @cli.argument('-H','--headers', default=True, action='store_boolean', help='print column headers in text tables')
 @cli.argument('-Y', '--yes', action='store_true', arg_only=True, help='answer yes to potentially-destructive operations')
@@ -89,11 +88,11 @@ def main(cli):
     """Configure the CLI to manage a network."""
     cli.args['login_target'] = 'organization'
     cli.args['report'] = False
-    cli.args['shell'] = False
+    cli.args['eval'] = False
     login(cli)
 
 @cli.argument('-r','--report', help="describe the configured organization, network-group, and network", arg_only=True, action="store_true", default=False)
-@cli.argument('-s','--shell', help="only print a shell source script for configuring the parent shell with a token", arg_only=True, action="store_true", default=False)
+@cli.argument('-e','--eval', help="source or eval output to configure shell environment with a login token", arg_only=True, action="store_true", default=False)
 @cli.argument('-v','--ziti-version', help=argparse.SUPPRESS, default='0.22.0') # minium ziti CLI version supports --cli-identity and --read-only
 @cli.argument('-c','--ziti-cli', help=argparse.SUPPRESS)
 @cli.argument('login_target', help=argparse.SUPPRESS, arg_only=True, nargs='?', default="organization", choices=['organization', 'ziti'])
@@ -142,7 +141,7 @@ def login(cli):
             # compose a summary table from selected details if text, not yaml or
             # json (unless shell which means to suppress normal output and only
             # configure the current shell)
-            if not cli.args.shell:
+            if not cli.args.eval:
                 if cli.args.output == "text" and cli.args.report:
                     summary_table = []
                     summary_table.append(['identity', f"{summary_object['caller']['name']} ({summary_object['caller']['email']}) in {organization.label} ({organization.name})"])
@@ -181,11 +180,11 @@ def login(cli):
                     else:
                         cli.echo(json_dumps(summary_object, indent=4))
 
-            elif cli.args.shell:
+            elif cli.args.eval:
                 token_env = f"""
-# $ source <(nfctl --credentials credentials.json login organization)
+# $ source <(nfctl --credentials=credentials.json login --eval)
 export NETFOUNDRY_API_TOKEN="{organization.token}"
-export MOPENV={organization.environment}
+{'export MOPENV='+organization.environment if organization.environment else ''}
 """
                 if cli.config.general.color:
                     highlighted = highlight(token_env, bash_lexer, Terminal256Formatter(style=cli.config.general.style))
@@ -662,10 +661,12 @@ def list(cli):
             table_borders = "presto"
         else:
             table_borders = "plain"
-        cli.echo(
-            '{fg_lightgreen_ex}'
-            +tabulate(tabular_data=[match.values() for match in filtered_matches], headers=table_headers, tablefmt=table_borders)
-        )
+        table = tabulate(tabular_data=[match.values() for match in filtered_matches], headers=table_headers, tablefmt=table_borders)
+        if cli.config.general.color:
+            highlighted = highlight(table, text_lexer, Terminal256Formatter(style=cli.config.general.style))
+            cli.echo(highlighted)
+        else:
+            cli.echo(table)
     elif cli.args.output == "yaml":
         if cli.config.general.color:
             highlighted = highlight(yaml_dumps(filtered_matches, indent=4), yaml_lexer, Terminal256Formatter(style=cli.config.general.style))
@@ -972,7 +973,7 @@ def get_spinner(text):
     corrupt structured output.
     """
     inner_spinner = cli.spinner(text=text, spinner='dots12', placement='left', color='green', stream=sys.stderr)
-    if not sys.stdout.isatty() or cli.args.shell:
+    if not sys.stdout.isatty() or ('eval' in dir(cli.args) and cli.args.eval):
         inner_spinner.enabled = False
         cli.log.debug("spinner disabled because stdout is not a tty")
     elif cli.config.general.verbose:
@@ -986,6 +987,7 @@ def get_spinner(text):
 yaml_lexer = get_lexer_by_name("yaml", stripall=True)
 json_lexer = get_lexer_by_name("json", stripall=True)
 bash_lexer = get_lexer_by_name("bash", stripall=True)
+text_lexer = get_lexer_by_name("Mscgen", stripall=True)
 
 
 if __name__ == '__main__':
