@@ -265,8 +265,7 @@ class Organization:
             if self.token and self.expiry_seconds < expiry_minimum:
                 logging.debug(f"token expiry {self.expiry_seconds}s is less than configured minimum {expiry_minimum}s")
             if not credentials_configured:
-                logging.debug("credentials needed to renew token")
-                raise NFAPINoCredentials("credentials needed to renew token")
+                raise NFAPINoCredentials("unable to renew because credentials are not configured")
             else:
                 logging.debug("renewing token with credentials")
 

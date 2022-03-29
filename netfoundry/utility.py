@@ -609,4 +609,4 @@ class LookupDict(dict):
 
 ENVIRONMENTS = ['production','staging','sandbox']
 
-DEFAULT_PAGE_SIZE = 10
+DEFAULT_PAGE_SIZE = 1000

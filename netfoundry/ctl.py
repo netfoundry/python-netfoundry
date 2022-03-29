@@ -104,7 +104,7 @@ def login(cli):
     if cli.args.login_target == "organization":
         spinner.text = f"Logging in profile '{cli.config.general.profile}'"
         with spinner:
-            organization =  use_organization()
+            organization =  use_organization(spinner)
             if cli.config.general.network_group and cli.config.general.network:
                 cli.log.debug(f"configuring network {cli.config.general.network} in group {cli.config.general.network_group}")
                 network, network_group = use_network(
@@ -225,7 +225,7 @@ export NETFOUNDRY_API_TOKEN="{organization.token}"
 
         spinner.text = f"Logging in to Ziti controller management API"
         with spinner:
-            organization =  use_organization()
+            organization =  use_organization(spinner)
             network, network_group = use_network(
                 organization=organization,
                 group=cli.config.general.network_group,
@@ -366,7 +366,7 @@ def create(cli):
 
     spinner.text = f"Creating {cli.args.resource_type}"
     with spinner:
-        organization =  use_organization()
+        organization =  use_organization(spinner)
         if cli.args.resource_type == "network":
             if cli.config.general.network_group:
                 network_group = use_network_group(organization=organization, )
@@ -426,10 +426,9 @@ def get(cli, echo: bool=True, embed='all'):
     """
     Get a single resource as YAML or JSON.
     
-    :param echo: output to stdout, False for CLI internal use
-    :param embed: allow expensive server operations, False for quick get internal use
+    :param echo: False allows capture instead of print the match
+    :param embed: False avoids expensive operations when we just need a shallow view
     """
-    spinner = get_spinner("working")
     if RESOURCE_ABBREVIATIONS.get(cli.args.resource_type):
         cli.args.resource_type = singular(RESOURCE_ABBREVIATIONS[cli.args.resource_type].name)
     if not cli.config.general.verbose and cli.args.output in ["yaml","json"]: # don't change level if output=text
@@ -437,11 +436,12 @@ def get(cli, echo: bool=True, embed='all'):
     match = {}
     matches = []
     query_keys = [*cli.args.query]
+    spinner = get_spinner("working")
     spinner.text = f"Getting {cli.args.resource_type}"
     if not echo:
         spinner.enabled = False
     with spinner:
-        organization =  use_organization()
+        organization =  use_organization(spinner)
         if cli.args.resource_type == "organization":
             if 'id' in query_keys:
                 if len(query_keys) > 1:
@@ -600,7 +600,7 @@ def list(cli):
     else:
         spinner.text = f"Finding all {cli.args.resource_type}"
     with spinner:
-        organization =  use_organization()
+        organization =  use_organization(spinner)
         if cli.args.resource_type == "organizations":
             matches = organization.get_organizations(**cli.args.query)
         elif cli.args.resource_type == "network-groups":
@@ -708,6 +708,7 @@ def delete(cli):
                     scrambled.extend([''.join(sample(network.name, len(match['name'])))])
                 scrambled.extend([match['name']])
                 shuffle(scrambled)
+                spinner.stop()
                 descrambled = questions.choice("{style_bright}Enter the number of the unscrambled {fg_yellow}network{fg_reset} name to {fg_red}IRREVERSIBLY DELETE", scrambled, default=None, confirm=True, prompt='{style_bright}{fg_red}DELETE{fg_reset} which {fg_yellow}network? ')
                 if match['name'] == descrambled:
                     delete_confirmed = True
@@ -732,6 +733,7 @@ def delete(cli):
             exit(1)
     else: # network child resource, not the network itself
         try:
+            spinner.stop()
             if cli.args.yes or questions.yesno("{style_bright}{fg_red}IRREVERSIBLY DELETE{fg_yellow} "+cli.args.resource_type+" {fg_cyan}"+match['name']+" {fg_reset}", default=False):
                 spinner.text = f"Deleting {cli.args.resource_type} '{match['name'] or match['id']}'"
                 try:
@@ -760,7 +762,7 @@ def demo(cli):
     spinner = get_spinner("working")
     spinner.text = "Checking credentials"
     with spinner:
-        organization =  use_organization()
+        organization =  use_organization(spinner)
     if cli.config.general.network:
         network_name = cli.config.general.network
     else:
@@ -772,6 +774,7 @@ def demo(cli):
     demo_params = ['--network', network_name]
     if cli.config.general.proxy:
         demo_params.extend(['--proxy', cli.config.general.proxy])
+    spinner.stop()
     if cli.args.yes or questions.yesno(f"Create demo resources in network {network_name} ({organization.label}) now?"):
         try:
             nfdemo(demo_params)
@@ -784,9 +787,12 @@ def demo(cli):
         cli.log.info(f"You may access the full demo with more flexible options by running it directly: \n\n$ nfdemo --help")
         cli.run(command=["nfdemo", "--help"], capture_output=False)
 
-def use_organization(prompt: bool=True):
+def use_organization(spinner: object, prompt: bool=True):
     """Cache an expiring token for your identity in organization."""
-    spinner = get_spinner("working")
+    if not spinner:
+        spinner = get_spinner("working")
+    else:
+        cli.log.debug("got spinner as function param")
     spinner.text = f"Loading profile '{cli.config.general.profile}'"
     # use the session with some organization, default is to use the first and there's typically only one
     try:
@@ -802,6 +808,7 @@ def use_organization(prompt: bool=True):
         if prompt:
             cli.log.debug("caught no credentials exception from organization, prompting for token")
             try:
+                spinner.stop()
                 token_from_prompt = questions.password(prompt='Enter Bearer Token:', confirm=False, validate=is_jwt)
             except KeyboardInterrupt as e:
                 spinner.fail("Cancelled")
@@ -843,10 +850,11 @@ def use_network_group(organization: object, group: str=None):
     spinner = get_spinner("working")
     # module will use first available group if not specified, and typically there is only one
     spinner.text = f"Configuring network group {group}"
-    network_group = NetworkGroup(
-        organization,
-        group=group if group else None,
-    )
+    with spinner:
+        network_group = NetworkGroup(
+            organization,
+            group=group if group else None,
+        )
     spinner.succeed(f"Configured network group {network_group.name}")
     cli.log.debug(f"network group is {network_group.name}")
     return network_group
@@ -975,22 +983,27 @@ def get_spinner(text):
     Enabled if stdout is a tty and log level is >= INFO, else disabled to not
     corrupt structured output.
     """
-    inner_spinner = cli.spinner(text=text, spinner='dots12', placement='left', color='green', stream=sys.stderr)
-    if not sys.stdout.isatty() or ('eval' in dir(cli.args) and cli.args.eval):
+    inner_spinner = cli.spinner(text=text, spinner='dots12', placement='left', color='green', stream=sys.stdout)
+    if not sys.stdout.isatty():
         inner_spinner.enabled = False
         cli.log.debug("spinner disabled because stdout is not a tty")
+    elif ('eval' in dir(cli.args) and cli.args.eval):
+        inner_spinner.enabled = False
+        cli.log.debug("spinner disabled because output evaluation mode is enabled")
     elif cli.config.general.verbose:
         inner_spinner.enabled = False
         cli.log.debug("spinner disabled because DEBUG is enabled")
+    elif cli.log.getEffectiveLevel() > logging.INFO:
+        inner_spinner.enabled = False
+        cli.log.debug("spinner disabled because logging level is higher than INFO")
     else:
         inner_spinner.enabled = True
-        cli.log.debug("spinner enabled because stdout is a tty and DEBUG is not enabled")
     return inner_spinner
 
 yaml_lexer = get_lexer_by_name("yaml", stripall=True)
 json_lexer = get_lexer_by_name("json", stripall=True)
 bash_lexer = get_lexer_by_name("bash", stripall=True)
-text_lexer = get_lexer_by_name("Mscgen", stripall=True)
+text_lexer = get_lexer_by_name("Mscgen", stripall=False)
 
 
 if __name__ == '__main__':
