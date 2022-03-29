@@ -167,7 +167,7 @@ def jwt_decode(token):
     try:
         claim = jwt.decode(jwt=token, algorithms=["RS256"], options={"verify_signature": False})
     except jwt.exceptions.PyJWTError as e:
-        raise e("failed to parse bearer token as JWT")
+        raise jwt.exceptions.PyJWTError("failed to parse bearer token as JWT")
     except Exception as e:
         raise RuntimeError(f"unexpect error parsing JWT, got {e}")
     return claim
