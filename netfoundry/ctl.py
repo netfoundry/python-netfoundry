@@ -162,10 +162,13 @@ def login(cli):
                         table_borders = "presto"
                     else:
                         table_borders = "plain"
-                    cli.echo(
-                        '{fg_lightgreen_ex}'
-                        +tabulate(tabular_data=summary_table, headers=['domain', 'summary'], tablefmt=table_borders)
-                    )
+                    table = tabulate(tabular_data=summary_table, headers=['domain', 'summary'], tablefmt=table_borders)
+                    if cli.config.general.color:
+                        highlighted = highlight(table, text_lexer, Terminal256Formatter(style=cli.config.general.style))
+                        cli.echo(highlighted)
+                    else:
+                        cli.echo(table)
+                        
 
                 elif cli.args.output == "yaml":
                     if cli.config.general.color:
@@ -290,7 +293,7 @@ def logout(cli):
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type),RESOURCES[type].abbreviation] for type in MUTABLE_NETWORK_RESOURCES.keys()] for choice in group])
 # this allows us to pass the edit subcommand's cli object to function get without further modifying that functions params
-@cli.subcommand('edit a single resource selected by query with editor defined in NETFOUNDRY_EDITOR or EDITOR')
+@cli.subcommand('duplicate a resource')
 def copy(cli):
     """Duplicate a single resource.
     
@@ -389,7 +392,7 @@ def create(cli):
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type),RESOURCES[type].abbreviation] for type in MUTABLE_NETWORK_RESOURCES.keys()] for choice in group])
 # this allows us to pass the edit subcommand's cli object to function get without further modifying that functions params
-@cli.subcommand('edit a single resource selected by query with editor defined in NETFOUNDRY_EDITOR or EDITOR')
+@cli.subcommand('edit a resource with EDITOR')
 def edit(cli):
     """Edit a single resource as YAML.
     
