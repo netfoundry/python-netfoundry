@@ -74,9 +74,6 @@ class StoreListKeys(argparse.Action):
         """Split comma-separated list elements."""
         setattr(namespace, self.dest, values.split(','))
 
-def main(raw_args=None):
-    cli()
-
 @cli.argument('-P','--profile', default='default', help='login profile for storing and retrieving concurrent, discrete sessions')
 @cli.argument('-C', '--credentials', help='API account JSON file from web console')
 @cli.argument('-O', '--organization', help="label or ID of an alternative organization (default is caller's org)" )
@@ -90,7 +87,7 @@ def main(raw_args=None):
 @cli.argument('-W','--wait', help='seconds to wait for long-running processes to finish', default=900)
 @cli.argument('--proxy', help=argparse.SUPPRESS)
 @cli.entrypoint('configure the CLI to manage a network')
-def nfctl(cli):
+def main(cli):
     """Configure the CLI to manage a network."""
     cli.args['login_target'] = 'organization'
     cli.args['report'] = False
@@ -787,29 +784,24 @@ def demo(cli):
             friendly_words = json_load(friendly_words_path)
         network_name = f"nfctl-demo-{choice(friendly_words['predicates'])}-{choice(friendly_words['objects'])}"
     spinner.stop() # always stop for questions
-    if cli.args.yes or questions.yesno(f"Create demo resources in network {network_name} ({organization.label}) now?"):
-        # create network unless exists
-        if cli.config.general.network_group:
+    if cli.args.yes or questions.yesno(f"Run demo in network {network_name} ({organization.label}) now?"):
+        with spinner:
+            # create network unless exists
+            cli.log.setLevel(logging.WARN) # FIXME: hack to silence redundant spinners
             network_group = use_network_group(
                 organization, 
-                cli.config.general.network_group, 
-                spinner=spinner)
-        elif organization.network_exists(network_name):
-            # use the Network
-            network, network_group = use_network(
-                organization=organization,
-                group=cli.config.general.network_group, 
-                network_name=network_name,
-                spinner=spinner)
-            spinner.succeed(f"Found network '{network_name}'")
-        else:
-            cli.log.debug(f"demo creating network named {network_name}")
-            network_group = use_network_group(
-                organization, 
-                cli.config.general.network_group, 
-                spinner=spinner)
-            spinner.text = f"Creating network '{network_name}'"
-            with spinner:
+                cli.config.general.network_group)
+            cli.log.setLevel(logging.INFO) # FIXME: hack to silence redundant spinners
+            if network_group.network_exists(network_name):
+                network, network_group = use_network(
+                    organization=organization,
+                    group=network_group.id,
+                    network_name=network_name,
+                    spinner=spinner)
+                spinner.succeed(f"Found network '{network_name}'")
+            else:
+                cli.log.debug(f"creating network named '{network_name}'")
+                spinner.text = f"Creating network '{network_name}'"
                 network_created = network_group.create_network(
                     name=network_name,
                     size=cli.config.demo.size,
@@ -1134,7 +1126,7 @@ def use_network(organization: object, network_name: str=None, group: str=None, s
         cli.log.debug("wait seconds is 0, not waiting for network to be ready")
     elif not network.status == 'PROVISIONED':
         try:
-            spinner.text = f"Waiting for network {network.name} to progress from status {network.status} to PROVISIONED"
+            spinner.text = f"Waiting for network {network.name} to be ready"
             network.wait_for_status("PROVISIONED",wait=999,progress=False)
         except KeyboardInterrupt as e:
             spinner.fail("Cancelled")
@@ -1222,7 +1214,6 @@ yaml_lexer = get_lexer_by_name("yaml", stripall=True)
 json_lexer = get_lexer_by_name("json", stripall=True)
 bash_lexer = get_lexer_by_name("bash", stripall=True)
 text_lexer = get_lexer_by_name("Mscgen", stripall=False)
-
 
 if __name__ == '__main__':
     main()
