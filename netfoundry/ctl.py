@@ -8,8 +8,10 @@ PYTHON_ARGCOMPLETE_OK
 """
 import argparse
 import logging
+from multiprocessing.sharedctypes import Value
 import platform
 import re
+import signal
 import sys
 import tempfile
 import time
@@ -38,19 +40,19 @@ from yaml import full_load as yaml_loads
 from yaml import parser
 
 from ._version import get_versions
-from .demo import main as nfdemo
 from .exceptions import NFAPINoCredentials
 from .network import Network
 from .network_group import NetworkGroup
 from .organization import Organization
-from .utility import (MUTABLE_NETWORK_RESOURCES,
+from .utility import (DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES,
                       MUTABLE_RESOURCE_ABBREVIATIONS, RESOURCE_ABBREVIATIONS,
                       RESOURCES, is_jwt, normalize_caseless, plural, singular)
 
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+
 set_metadata(version="v"+get_versions()['version'], author="NetFoundry", name="nfctl") # must precend import milc.cli
-import milc.subcommand.config
-from milc import cli
-from milc import questions
+import milc.subcommand.config  # importing this causes the 'config' subcommand to be available
+from milc import cli, questions
 
 
 class StoreDictKeyPair(argparse.Action):
@@ -72,19 +74,23 @@ class StoreListKeys(argparse.Action):
         """Split comma-separated list elements."""
         setattr(namespace, self.dest, values.split(','))
 
-@cli.argument('-p','--profile', default='default', help='login profile for storing and retrieving concurrent, discrete sessions')
+def main(raw_args=None):
+    cli()
+
+@cli.argument('-P','--profile', default='default', help='login profile for storing and retrieving concurrent, discrete sessions')
 @cli.argument('-C', '--credentials', help='API account JSON file from web console')
 @cli.argument('-O', '--organization', help="label or ID of an alternative organization (default is caller's org)" )
 @cli.argument('-N', '--network', help='caseless name of the network to manage')
 @cli.argument('-G', '--network-group', help="shortname or ID of a network group to search for network_name")
 @cli.argument('-O','--output', arg_only=True, help="format the output", default="text", choices=['text', 'yaml','json'])
 @cli.argument('-S', '--style', help="highlighting style", metavar='STYLE', default='monokai', choices=["rrt", "arduino", "monokai", "material", "one-dark", "emacs", "vim", "one-dark"])
-@cli.argument('-b','--borders', default=True, action='store_boolean', help='print cell borders in text tables')
+@cli.argument('-B','--borders', default=True, action='store_boolean', help='print cell borders in text tables')
 @cli.argument('-H','--headers', default=True, action='store_boolean', help='print column headers in text tables')
 @cli.argument('-Y', '--yes', action='store_true', arg_only=True, help='answer yes to potentially-destructive operations')
-@cli.argument('-P', '--proxy', help="like http://localhost:8080 or socks5://localhost:9046")
+@cli.argument('-W','--wait', help='seconds to wait for long-running processes to finish', default=900)
+@cli.argument('--proxy', help=argparse.SUPPRESS)
 @cli.entrypoint('configure the CLI to manage a network')
-def main(cli):
+def nfctl(cli):
     """Configure the CLI to manage a network."""
     cli.args['login_target'] = 'organization'
     cli.args['report'] = False
@@ -104,7 +110,7 @@ def login(cli):
     if cli.args.login_target == "organization":
         spinner.text = f"Logging in profile '{cli.config.general.profile}'"
         with spinner:
-            organization =  use_organization(spinner)
+            organization =  use_organization(spinner=spinner)
             if cli.config.general.network_group and cli.config.general.network:
                 cli.log.debug(f"configuring network {cli.config.general.network} in group {cli.config.general.network_group}")
                 network, network_group = use_network(
@@ -225,7 +231,7 @@ export NETFOUNDRY_API_TOKEN="{organization.token}"
 
         spinner.text = f"Logging in to Ziti controller management API"
         with spinner:
-            organization =  use_organization(spinner)
+            organization =  use_organization(spinner=spinner)
             network, network_group = use_network(
                 organization=organization,
                 group=cli.config.general.network_group,
@@ -320,7 +326,6 @@ def copy(cli):
         spinner.succeed(sub('Copying', 'Copied', spinner.text))
 
 @cli.argument('-f', '--file', help='JSON or YAML file', type=argparse.FileType('r', encoding='UTF-8'))
-@cli.argument('-w','--wait', help='seconds to wait for process execution to finish', default=0)
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type),RESOURCES[type].abbreviation] for type in MUTABLE_NETWORK_RESOURCES.keys()] for choice in group])
 @cli.subcommand('create a resource from a file')
 def create(cli):
@@ -366,7 +371,7 @@ def create(cli):
 
     spinner.text = f"Creating {cli.args.resource_type}"
     with spinner:
-        organization =  use_organization(spinner)
+        organization =  use_organization(spinner=spinner)
         if cli.args.resource_type == "network":
             if cli.config.general.network_group:
                 network_group = use_network_group(organization=organization, )
@@ -386,7 +391,7 @@ def create(cli):
                 organization=organization,
                 group=cli.config.general.network_group,
                 network_name=cli.config.general.network)
-            resource = network.create_resource(type=cli.args.resource_type, post=create_object, wait=cli.config.create.wait)
+            resource = network.create_resource(type=cli.args.resource_type, post=create_object, wait=cli.config.general.wait)
     spinner.succeed(f"Created {cli.args.resource_type} '{resource['name']}'")
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
@@ -441,7 +446,7 @@ def get(cli, echo: bool=True, embed='all'):
     if not echo:
         spinner.enabled = False
     with spinner:
-        organization =  use_organization(spinner)
+        organization =  use_organization(spinner=spinner)
         if cli.args.resource_type == "organization":
             if 'id' in query_keys:
                 if len(query_keys) > 1:
@@ -590,7 +595,7 @@ def list(cli):
         cli.log.warn("the --as=ACCEPT param is not applicable to resources outside the network domain")
     if cli.args.output == "text":
         if not sys.stdout.isatty():
-            cli.log.warning("{fg_yello}nfctl does not have a stable CLI interface. Use with caution in scripts. Please raise a GitHub issue if that's something you would value.")
+            cli.echo("{fg_yellow}nfctl does not have a stable CLI interface. Use with caution in scripts. Please raise a GitHub issue if that's something you would value.")
     else: # output is YAML or JSON
         # don't emit INFO messages to stdout because they will break deserialization
         cli.log.setLevel(logging.WARN)
@@ -600,7 +605,7 @@ def list(cli):
     else:
         spinner.text = f"Finding all {cli.args.resource_type}"
     with spinner:
-        organization =  use_organization(spinner)
+        organization =  use_organization(spinner=spinner)
         if cli.args.resource_type == "organizations":
             matches = organization.get_organizations(**cli.args.query)
         elif cli.args.resource_type == "network-groups":
@@ -664,12 +669,18 @@ def list(cli):
             table_borders = "presto"
         else:
             table_borders = "plain"
-        table = tabulate(tabular_data=[match.values() for match in filtered_matches], headers=table_headers, tablefmt=table_borders)
+        table = tabulate(tabular_data=[match.values() for match in filtered_matches], headers=table_headers, tablefmt=table_borders, showindex=True)
         if cli.config.general.color:
             highlighted = highlight(table, text_lexer, Terminal256Formatter(style=cli.config.general.style))
-            cli.echo(highlighted)
+            try:
+                cli.echo(highlighted)
+            except ValueError:
+                print(highlighted)
         else:
-            cli.echo(table)
+            try:
+                cli.echo(table)
+            except ValueError:
+                print(table)
     elif cli.args.output == "yaml":
         if cli.config.general.color:
             highlighted = highlight(yaml_dumps(filtered_matches, indent=4), yaml_lexer, Terminal256Formatter(style=cli.config.general.style))
@@ -685,7 +696,6 @@ def list(cli):
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[choice for group in [[singular(type),RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
-@cli.argument('-w','--wait', help='seconds to wait', default=0)
 @cli.subcommand('delete a resource in the network domain')
 def delete(cli):
     """Delete a resource in the network domain."""
@@ -694,6 +704,7 @@ def delete(cli):
     if MUTABLE_RESOURCE_ABBREVIATIONS.get(cli.args.resource_type):
         cli.args.resource_type = singular(MUTABLE_RESOURCE_ABBREVIATIONS[cli.args.resource_type].name)
     cli.args['accept'] = None
+    cli.config.general['wait'] = 0
     spinner.text = f"Finding {cli.args.resource_type} {'by' if query_keys else '...'} {','.join(query_keys)}"
     with spinner:
         match, network, network_group, organization = get(cli, echo=False, embed=None)
@@ -717,7 +728,7 @@ def delete(cli):
                 spinner.text = f"Deleting network '{match['name']}'"
                 try:
                     with spinner:
-                        network.delete_network(progress=False, wait=cli.config.delete.wait)
+                        network.delete_network(progress=False, wait=cli.config.general.wait)
                 except Exception as e:
                     cli.log.error(f"unknown error deleting network, got {e}")
                     exit(1)
@@ -756,13 +767,17 @@ def delete(cli):
             cli.log.error(f"unknown error in {e}")
             exit(1)
 
+@cli.argument("-s", "--size", default="small", help=argparse.SUPPRESS) # troubleshoot scale-up instance size factor
+@cli.argument("-v", "--product-version", default="default", help="network product version: 'default', 'latest', or any active semver")
+@cli.argument("--provider", default="AWS", required=False, help="cloud provider to host edge routers", choices=DC_PROVIDERS)
+@cli.argument("--regions", dest="regions", default=["us-west-1"], nargs="+", help="cloud location codes in which to host edge routers")
 @cli.subcommand('create a functioning demo network')
 def demo(cli):
-    """Create a functioning demo network."""
+    """Create a demo network or add demo resources to existing network."""
     spinner = get_spinner("working")
-    spinner.text = "Checking credentials"
+    spinner.text = "working"
     with spinner:
-        organization =  use_organization(spinner)
+        organization =  use_organization(spinner=spinner)
     if cli.config.general.network:
         network_name = cli.config.general.network
     else:
@@ -770,24 +785,221 @@ def demo(cli):
         friendly_words_filename = path.join(resources_dir, "friendly-words/generated/words.json")
         with open(friendly_words_filename, 'r') as friendly_words_path:
             friendly_words = json_load(friendly_words_path)
-        network_name = f"{choice(friendly_words['predicates'])}-{choice(friendly_words['objects'])}"
-    demo_params = ['--network', network_name]
-    if cli.config.general.proxy:
-        demo_params.extend(['--proxy', cli.config.general.proxy])
-    spinner.stop()
+        network_name = f"nfctl-demo-{choice(friendly_words['predicates'])}-{choice(friendly_words['objects'])}"
+    spinner.stop() # always stop for questions
     if cli.args.yes or questions.yesno(f"Create demo resources in network {network_name} ({organization.label}) now?"):
-        try:
-            nfdemo(demo_params)
-        except Exception as e:
-            raise RuntimeError(f"unknown problem while running the demo")
+        # create network unless exists
+        if cli.config.general.network_group:
+            network_group = use_network_group(
+                organization, 
+                cli.config.general.network_group, 
+                spinner=spinner)
+        elif organization.network_exists(network_name):
+            # use the Network
+            network, network_group = use_network(
+                organization=organization,
+                group=cli.config.general.network_group, 
+                network_name=network_name,
+                spinner=spinner)
+            spinner.succeed(f"Found network '{network_name}'")
         else:
-            spinner.succeed("Demo network is ready")
+            cli.log.debug(f"demo creating network named {network_name}")
+            network_group = use_network_group(
+                organization, 
+                cli.config.general.network_group, 
+                spinner=spinner)
+            spinner.text = f"Creating network '{network_name}'"
+            with spinner:
+                network_created = network_group.create_network(
+                    name=network_name,
+                    size=cli.config.demo.size,
+                    version=cli.config.demo.product_version)
+                network, network_group = use_network(
+                    organization=organization,
+                    group=cli.config.general.network_group, 
+                    network_name=network_created['name'],
+                    spinner=spinner)
+                spinner.succeed(sub('Creating', 'Created', spinner.text))
+        # existing hosted routers
+        spinner.text = "Finding hosted routers"
+        with spinner:
+            hosted_edge_routers = network.edge_routers(only_hosted=True)
+        # a list of locations to place a hosted router
+        fabric_placements = []
+        for region in cli.config.demo.regions:
+            existing_count = len([er for er in hosted_edge_routers if er['provider'] == cli.config.demo.provider and er['region'] == region])
+            if existing_count < 1:
+                fabric_placements += [region]
+            else:
+                spinner.succeed(f"Found a hosted router in {region}")
+
+        spinner.text = f"Creating {len(fabric_placements)} hosted router(s)"
+        with spinner:
+            for region in fabric_placements:
+                er = network.create_edge_router(
+                    name=f"Hosted Router {region} [{cli.config.demo.provider}]",
+                    attributes=[
+                        "#default_edge_routers",
+                        "#demo_exits",
+                        f"#{region}",
+                        f"#{cli.config.demo.provider}",
+                    ],
+                    provider=cli.config.demo.provider,
+                    location_code=region,
+                    tunneler_enabled=True,
+                )
+                hosted_edge_routers.extend([er])
+                spinner.succeed(f"placed {cli.config.demo.provider} router in {region}")
+
+        try:
+            assert(len(hosted_edge_routers) > 0)
+        except Exception as e:
+            raise RuntimeError("unexpected error with router placements, found zero hosted routers")
+
+        spinner.text = f"Waiting for {len(hosted_edge_routers)} hosted routers to come online"
+        with spinner:
+            for router_id in [r['id'] for r in hosted_edge_routers]:
+                try:
+                    network.wait_for_status("PROVISIONED",id=router_id,type="edge-router",wait=999,progress=False)
+                except Exception as e:
+                    raise RuntimeError(f"error while waiting for router status, got {e}")
+        spinner.succeed("All hosted routers online")
+
+        # create a simple global router policy unless one exists with the same name
+        blanket_policy_name = "Default Edge Router Policy"
+        spinner.text = "Finding router policy"
+        with spinner:
+            if not network.edge_router_policy_exists(name=blanket_policy_name):
+                try:
+                    spinner.text = f"Creating router policy '{blanket_policy_name}'"
+                    with spinner:
+                        network.create_edge_router_policy(
+                            name=blanket_policy_name,
+                            edge_router_attributes=["#default_edge_routers"],
+                            endpoint_attributes=["#all"])
+                except Exception as e: 
+                    raise RuntimeError(f"error creating edge router policy, got {e}")
+                else:
+                    spinner.succeed(sub('Creating', 'Created', spinner.text))
+            else:
+                spinner.succeed(f"Found router policy '{blanket_policy_name}'")
+
+        endpoints = dict()
+        clients = ['DesktopEndpoint', 'MobileEndpoint', 'LaptopEndpoint']
+        for client in clients:
+            endpoints[client] = {
+                "attributes": ["#work_from_anywhere"]
+            }
+        exits = ['ExitEndpoint']
+        for exit in exits:
+            endpoints[exit] = {
+                "attributes": ["#exits"]
+            }
+        for end in endpoints.keys():
+            spinner.text = "Finding endpoint '{end}'"
+            with spinner:
+                if not network.endpoint_exists(name=end):
+                    # create an endpoint for the dialing device that will access services
+                    spinner.text = f"Creating endpoint {end}"
+                    endpoints[end]['properties'] = network.create_endpoint(name=end,attributes=endpoints[end]['attributes'])
+                    spinner.succeed(sub('Creating', 'Created', spinner.text))
+                else:
+                    endpoints[end]['properties'] = network.endpoints(name=end)[0]
+                    spinner.succeed(sub('Finding', 'Found', spinner.text))
+
+        services = {
+            "Fireworks Service": {
+                "client_attributes": ["#welcome_wagon"],
+                "tcp_port": "80",
+                "client_domain": "fireworks.netfoundry",
+                "exit_attributes": ["#demo_exits"],
+                "exit_domain": "fireworks-load-balancer-1246256380.us-east-1.elb.amazonaws.com",
+            },
+            # "Weather Service": {
+            #     "client_attributes": ["#welcome_wagon"],
+            #     "tcp_port": "80",
+            #     "client_domain": "weather.netfoundry",
+            #     "exit_attributes": ["#demo_exits"],
+            #     "exit_domain": "wttr.in",
+            # },
+            "Echo Service": {
+                "client_attributes": ["#welcome_wagon"],
+                "tcp_port": "80",
+                "client_domain": "echo.netfoundry",
+                "exit_attributes": ["#demo_exits"],
+                "exit_domain": "eth0.me",
+            },
+        }
+        for svc in services.keys():
+            spinner.text = f"Finding services"
+            with spinner:
+                if not network.service_exists(name=svc):
+                    spinner.text = f"Creating service '{svc}'"
+                    services[svc]['properties'] = network.create_service(
+                        name=svc,
+                        attributes=services[svc]['attributes'],
+                        endpoints=services[svc]['exit_attributes'],
+                        client_host_name=services[svc]['client_domain'],
+                        server_host_name=services[svc]['exit_domain'],
+                        client_port=services[svc]['tcp_port'],
+                        server_port=services[svc]['tcp_port'],
+                    )
+                    spinner.succeed(sub('Creating', 'Created', spinner.text))
+                else:
+                    services[svc]['properties'] = network.services(name=svc)[0]
+                    spinner.succeed(sub("Creating", "Created", spinner.text))
+        
+        # create a customer-hosted ER unless exists
+        customer_router_name="Branch Exit Router"
+        spinner.text = f"Finding customer router '{customer_router_name}'"
+        with spinner:
+            if not network.edge_router_exists(name=customer_router_name):
+                spinner.text = sub("Finding", "Creating", spinner.text)
+                customer_router = network.create_edge_router(
+                    name=customer_router_name,
+                    attributes=["#branch_exit_routers"],
+                    tunneler_enabled=True)
+            else:
+                customer_router = network.edge_routers(name=customer_router_name)[0]
+                spinner.succeed(sub("Finding", "Found", spinner.text))
+
+        spinner.text = f"Waiting for customer router {customer_router_name} to come online"
+        # wait for customer router to be PROVISIONED so that registration will be available 
+        with spinner:
+            try:
+                network.wait_for_status("PROVISIONED",id=customer_router['id'],type="edge-router",wait=999,progress=False)
+                customer_router_registration = network.rotate_edge_router_registration(id=customer_router['id'])
+            except Exception as e:
+                raise RuntimeError(f"error getting router registration, got {e}")
+            else:
+                spinner.succeed(f"Customer router ready to register with key '{customer_router_registration['registrationKey']}'")
+
+        # create unless exists
+        app_wan_name = "Default Service Policy"
+        spinner.text = f"Finding service policy"
+        with spinner:
+            if not network.app_wan_exists(name=app_wan_name):
+                # work_from_anywhere may connect to welcome_wagon
+                spinner.text = sub("Finding", "Creating", spinner.text)
+                app_wan = network.create_app_wan(
+                    name=app_wan_name,
+                    endpoint_attributes=["#work_from_anywhere"],
+                    service_attributes=["#welcome_wagon"])
+                spinner.succeed(sub("Creating", "Created", spinner.text))
+            else:
+                app_wan = network.app_wans(name=app_wan_name)[0]
+                spinner.text = sub("Finding", "Found", spinner.text)
+
+        spinner.succeed("Demo network is ready")
+
+        for svc in services:
+            cli.log.info(f"{svc}:\thttp://{services[svc]['properties']['model']['clientIngress']['host']}/")
+        cli.log.notice("Demo Guide: https://developer.netfoundry.io/guides/demo/")
     else:
         spinner.fail("Demo cancelled")
-        cli.log.info(f"You may access the full demo with more flexible options by running it directly: \n\n$ nfdemo --help")
-        cli.run(command=["nfdemo", "--help"], capture_output=False)
+        cli.run(command=["nfctl", "demo", "--help"], capture_output=False)
 
-def use_organization(spinner: object, prompt: bool=True):
+def use_organization(prompt: bool=True, spinner: object=None):
     """Cache an expiring token for your identity in organization."""
     if not spinner:
         spinner = get_spinner("working")
@@ -839,7 +1051,7 @@ def use_organization(spinner: object, prompt: bool=True):
     cli.log.debug(f"logged-in organization label is {organization.label}.")
     return organization
 
-def use_network_group(organization: object, group: str=None):
+def use_network_group(organization: object, group: str=None, spinner: object=None):
     """
     Use a network group.
 
@@ -847,7 +1059,10 @@ def use_network_group(organization: object, group: str=None):
     :param organization: the netfoundry.Organization object representing the current session
     :param str group: name or UUIDv4 of group to use
     """
-    spinner = get_spinner("working")
+    if not spinner:
+        spinner = get_spinner("working")
+    else:
+        cli.log.debug("got spinner as function param")
     # module will use first available group if not specified, and typically there is only one
     spinner.text = f"Configuring network group {group}"
     with spinner:
@@ -859,7 +1074,7 @@ def use_network_group(organization: object, group: str=None):
     cli.log.debug(f"network group is {network_group.name}")
     return network_group
 
-def use_network(organization: object, network_name: str=None, group: str=None):
+def use_network(organization: object, network_name: str=None, group: str=None, spinner: object=None):
     """
     Use a network.
     
@@ -868,7 +1083,10 @@ def use_network(organization: object, network_name: str=None, group: str=None):
     :param network_name: name of the network to use, optional if there's only one
     :param group: a network group name or UUID, optional if network name is unique across all available groups
     """
-    spinner = get_spinner("working")
+    if not spinner:
+        spinner = get_spinner("working")
+    else:
+        cli.log.debug("got spinner as function param")
     if not network_name:
         spinner.text = f"Finding networks"
         if group:
@@ -908,12 +1126,12 @@ def use_network(organization: object, network_name: str=None, group: str=None):
             cli.log.error(f"failed to find a network named '{network_name}'.")
             exit(1)
 
-    # use the Network
+    # use the network
     network = Network(network_group, network_name=network_name)
     if network.status == 'ERROR':
         cli.log.error(f"network {network.name} has status ERROR")
-    elif not cli.config.delete.wait:
-        cli.log.debug("delete command is configured to not wait for a healthy status")
+    elif not cli.config.general.wait:
+        cli.log.debug("wait seconds is 0, not waiting for network to be ready")
     elif not network.status == 'PROVISIONED':
         try:
             spinner.text = f"Waiting for network {network.name} to progress from status {network.status} to PROVISIONED"
@@ -1007,4 +1225,4 @@ text_lexer = get_lexer_by_name("Mscgen", stripall=False)
 
 
 if __name__ == '__main__':
-    cli()
+    main()
