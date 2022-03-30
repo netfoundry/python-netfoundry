@@ -586,7 +586,7 @@ def list(cli):
         cli.log.warn("the --as=ACCEPT param is not applicable to resources outside the network domain")
     if cli.args.output == "text":
         if not sys.stdout.isatty():
-            cli.echo("{fg_yellow}nfctl does not have a stable CLI interface. Use with caution in scripts. Please raise a GitHub issue if that's something you would value.")
+            cli.log.warning("use --output=yaml or json for scripting nfctl")
     else: # output is YAML or JSON
         # don't emit INFO messages to stdout because they will break deserialization
         cli.log.setLevel(logging.WARN)
@@ -1067,13 +1067,13 @@ def use_network_group(organization: object, group: str=None, spinner: object=Non
     else:
         cli.log.debug("got spinner as function param")
     # module will use first available group if not specified, and typically there is only one
-    spinner.text = f"Configuring network group {group}"
+    spinner.text = f"Configuring network group '{group}'"
     with spinner:
         network_group = NetworkGroup(
             organization,
             group=group if group else None,
         )
-    spinner.succeed(f"Configured network group {network_group.name}")
+    spinner.succeed(f"Configured network group '{network_group.name}'")
     cli.log.debug(f"network group is {network_group.name}")
     return network_group
 
@@ -1095,7 +1095,8 @@ def use_network(organization: object, network_name: str=None, group: str=None, s
         if group:
             network_group = use_network_group(
                 organization=organization, 
-                group=group)
+                group=group,
+                spinner=spinner)
             existing_networks = network_group.networks_by_name()
         else:
             existing_networks = organization.get_networks_by_organization()
@@ -1109,7 +1110,8 @@ def use_network(organization: object, network_name: str=None, group: str=None, s
     elif group:
         network_group = use_network_group(
             organization=organization, 
-            group=group)
+            group=group,
+            spinner=spinner)
         existing_networks = network_group.network_ids_by_normal_name
         if not existing_networks.get(normalize_caseless(network_name)):
             cli.log.error(f"failed to find a network named '{network_name}' in network group '{network_group['name']}'.")
@@ -1121,7 +1123,8 @@ def use_network(organization: object, network_name: str=None, group: str=None, s
             existing_network = existing_networks[0]
             network_group = use_network_group(
                 organization, 
-                group=existing_network['networkGroupId'])
+                group=existing_network['networkGroupId'],
+                spinner=spinner)
         elif existing_count > 1:
             cli.log.error(f"there were {existing_count} networks named '{network_name}' visible to your identity. Try narrowing the search with '--network-group=NETWORK_GROUP'.")
             exit(1)
@@ -1130,6 +1133,7 @@ def use_network(organization: object, network_name: str=None, group: str=None, s
             exit(1)
 
     # use the network
+    spinner.text = f"Configuring network '{network_name}'"
     network = Network(network_group, network_name=network_name)
     if network.status == 'ERROR':
         cli.log.error(f"network {network.name} has status ERROR")
@@ -1144,9 +1148,7 @@ def use_network(organization: object, network_name: str=None, group: str=None, s
             exit(1)
         except Exception as e:
             raise RuntimeError(f"unknown error in {e}")
-        else:
-            spinner.succeed(f"Network '{network_name}' is ready")
-
+    spinner.succeed(sub("Configuring", "Configured", spinner.text))
     return network, network_group
 
 def edit_object_as_yaml(edit: object):
