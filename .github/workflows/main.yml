@@ -75,7 +75,7 @@ jobs:
         set -x
         nfctl config \
           general.network=${NETWORK_NAME} \
-          general.verbose=yes
+          general.verbose=yes || true # workaround https://github.com/netfoundry/python-netfoundry/issues/29
         nfctl demo \
           --yes \
           --regions us-west-2 us-east-2 \
