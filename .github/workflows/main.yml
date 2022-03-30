@@ -75,9 +75,9 @@ jobs:
         set -x
         nfctl config \
           general.network=${NETWORK_NAME} \
+          general.yes=True \
           general.verbose=yes || true # workaround https://github.com/netfoundry/python-netfoundry/issues/29
         nfctl demo \
-          --yes \
           --regions us-west-2 us-east-2 \
           --provider AWS
         nfctl \
@@ -85,13 +85,10 @@ jobs:
         nfctl \
           get service name=echo% > /tmp/echo.yml
         nfctl \
-          --yes \
           delete service name=echo%
         nfctl \
-          --yes \
           create service --file /tmp/echo.yml
         nfctl \
-          --yes \
           delete network
 
     - name: Publish Test Package
