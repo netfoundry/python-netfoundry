@@ -74,7 +74,7 @@ jobs:
       run: |
         set -x
         nfctl config \
-          general.network=${NETWORK_NAME}
+          general.network=${NETWORK_NAME} \
           general.verbose=yes
         nfctl demo \
           --yes \
