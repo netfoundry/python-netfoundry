@@ -73,26 +73,24 @@ jobs:
         NETFOUNDRY_OAUTH_URL: ${{ secrets.NETFOUNDRY_OAUTH_URL }}
       run: |
         set -x
-        nfdemo \
-          --verbose \
-          --network ${NETWORK_NAME} \
-          --create-client \
-          --create-private \
+        nfctl config \
+          general.network=${NETWORK_NAME}
+          general.verbose=yes
+        nfctl demo \
+          --yes \
           --regions us-west-2 us-east-2 \
           --provider AWS
         nfctl \
-          --verbose \
-          --profile default \
-          --network ${NETWORK_NAME}
-        nfctl \
-          --verbose \
-          --profile default \
-          --network ${NETWORK_NAME} \
           list services
         nfctl \
-          --verbose \
-          --profile default \
-          --network ${NETWORK_NAME} \
+          get service name=echo% > /tmp/echo.yml
+        nfctl \
+          --yes \
+          delete service name=echo%
+        nfctl \
+          --yes \
+          create service --file /tmp/echo.yml
+        nfctl \
           --yes \
           delete network
 

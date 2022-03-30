@@ -645,7 +645,7 @@ def list(cli):
         # and the set of configured, desired keys
         valid_keys = set(matches[0].keys()) & set(cli.args.keys)
     elif cli.args.output == "text":
-        valid_keys = set(matches[0].keys()) & set(['name','label','organizationShortName','id','edgeRouterAttributes','serviceAttributes','endpointAttributes','status','zitiId','provider','locationCode','ipAddress','region','size','attributes','email','productVersion'])
+        valid_keys = set(matches[0].keys()) & set(['name','label','organizationShortName','edgeRouterAttributes','serviceAttributes','endpointAttributes','status','zitiId','provider','locationCode','ipAddress','region','size','attributes','email','productVersion'])
 
     if valid_keys:
         cli.log.debug(f"valid keys: {str(valid_keys)}")
@@ -831,9 +831,8 @@ def demo(cli):
                 er = network.create_edge_router(
                     name=f"Hosted Router {region} [{cli.config.demo.provider}]",
                     attributes=[
-                        "#default_edge_routers",
+                        "#hosted_routers",
                         "#demo_exits",
-                        f"#{region}",
                         f"#{cli.config.demo.provider}",
                     ],
                     provider=cli.config.demo.provider,
@@ -848,7 +847,7 @@ def demo(cli):
         except Exception as e:
             raise RuntimeError("unexpected error with router placements, found zero hosted routers")
 
-        spinner.text = f"Waiting for {len(hosted_edge_routers)} hosted routers to come online"
+        spinner.text = f"Waiting for {len(hosted_edge_routers)} hosted routers to be online"
         with spinner:
             for router_id in [r['id'] for r in hosted_edge_routers]:
                 try:
@@ -867,7 +866,7 @@ def demo(cli):
                     with spinner:
                         network.create_edge_router_policy(
                             name=blanket_policy_name,
-                            edge_router_attributes=["#default_edge_routers"],
+                            edge_router_attributes=["#hosted_routers"],
                             endpoint_attributes=["#all"])
                 except Exception as e: 
                     raise RuntimeError(f"error creating edge router policy, got {e}")
@@ -888,7 +887,7 @@ def demo(cli):
                 "attributes": ["#exits"]
             }
         for end in endpoints.keys():
-            spinner.text = "Finding endpoint '{end}'"
+            spinner.text = f"Finding endpoint '{end}'"
             with spinner:
                 if not network.endpoint_exists(name=end):
                     # create an endpoint for the dialing device that will access services
@@ -929,7 +928,7 @@ def demo(cli):
                     spinner.text = f"Creating service '{svc}'"
                     services[svc]['properties'] = network.create_service(
                         name=svc,
-                        attributes=services[svc]['attributes'],
+                        attributes=services[svc]['client_attributes'],
                         endpoints=services[svc]['exit_attributes'],
                         client_host_name=services[svc]['client_domain'],
                         server_host_name=services[svc]['exit_domain'],
@@ -955,7 +954,7 @@ def demo(cli):
                 customer_router = network.edge_routers(name=customer_router_name)[0]
                 spinner.succeed(sub("Finding", "Found", spinner.text))
 
-        spinner.text = f"Waiting for customer router {customer_router_name} to come online"
+        spinner.text = f"Waiting for customer router {customer_router_name} to be online"
         # wait for customer router to be PROVISIONED so that registration will be available 
         with spinner:
             try:
@@ -986,7 +985,7 @@ def demo(cli):
 
         for svc in services:
             cli.log.info(f"{svc}:\thttp://{services[svc]['properties']['model']['clientIngress']['host']}/")
-        cli.log.notice("Demo Guide: https://developer.netfoundry.io/guides/demo/")
+        cli.log.info("Demo Guide: https://developer.netfoundry.io/guides/demo/")
     else:
         spinner.fail("Demo cancelled")
         cli.run(command=["nfctl", "demo", "--help"], capture_output=False)
