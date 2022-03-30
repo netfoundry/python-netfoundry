@@ -293,6 +293,8 @@ class Network:
         params["hostType"] = "ER"
         if location_code:
             params["locationCode"] = location_code # not yet implemented in API
+        elif params.get('locationCode'):
+            location_code = params['locationCode']
         if provider is not None:
             if provider in DC_PROVIDERS:
                 params['provider'] = provider

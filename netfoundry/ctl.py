@@ -34,7 +34,7 @@ from milc import set_metadata
 from packaging import version
 from pygments import highlight
 from pygments.formatters import Terminal256Formatter
-from pygments.lexers import get_lexer_by_name
+from pygments.lexers import get_lexer_by_name, load_lexer_from_file
 from pygments.styles import get_all_styles
 from tabulate import tabulate
 from yaml import dump as yaml_dumps
@@ -1224,7 +1224,10 @@ def get_spinner(text):
 yaml_lexer = get_lexer_by_name("yaml", stripall=True)
 json_lexer = get_lexer_by_name("json", stripall=True)
 bash_lexer = get_lexer_by_name("bash", stripall=True)
-text_lexer = get_lexer_by_name("Mscgen", stripall=False)
+
+cwd = path.dirname(__file__)
+text_lexer_filename = path.join(cwd, "table_lexer.py")
+text_lexer = load_lexer_from_file(text_lexer_filename, "NetFoundryTableLexer")
 
 if __name__ == '__main__':
     main()
