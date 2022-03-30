@@ -25,6 +25,8 @@ from re import sub
 from shlex import split as shplit
 from shutil import which
 from subprocess import CalledProcessError
+from tkinter.tix import InputOnly
+from xml.sax.xmlreader import InputSource
 
 #from cryptography.hazmat.primitives.serialization import Encoding, pkcs7
 from jwt.exceptions import PyJWTError
@@ -40,7 +42,7 @@ from yaml import full_load as yaml_loads
 from yaml import parser
 
 from ._version import get_versions
-from .exceptions import NFAPINoCredentials
+from .exceptions import NFAPINoCredentials,  NeedUserInput
 from .network import Network
 from .network_group import NetworkGroup
 from .organization import Organization
@@ -717,6 +719,8 @@ def delete(cli):
                 scrambled.extend([match['name']])
                 shuffle(scrambled)
                 spinner.stop()
+                if not sys.stdin.isatty():
+                    raise InputSource
                 descrambled = questions.choice("{style_bright}Enter the number of the unscrambled {fg_yellow}network{fg_reset} name to {fg_red}IRREVERSIBLY DELETE", scrambled, default=None, confirm=True, prompt='{style_bright}{fg_red}DELETE{fg_reset} which {fg_yellow}network? ')
                 if match['name'] == descrambled:
                     delete_confirmed = True
@@ -742,7 +746,15 @@ def delete(cli):
     else: # network child resource, not the network itself
         try:
             spinner.stop()
-            if cli.args.yes or questions.yesno("{style_bright}{fg_red}IRREVERSIBLY DELETE{fg_yellow} "+cli.args.resource_type+" {fg_cyan}"+match['name']+" {fg_reset}", default=False):
+            delete_confirmed = False
+            if cli.args.yes:
+                    delete_confirmed = True
+            elif sys.stdin.isatty():
+                delete_confirmed = questions.yesno("{style_bright}{fg_red}IRREVERSIBLY DELETE{fg_yellow} "+cli.args.resource_type+" {fg_cyan}"+match['name']+" {fg_reset}", default=False)
+            else:
+                raise NeedUserInput("Need --yes or user input to confirm delete")
+
+            if delete_confirmed:
                 spinner.text = f"Deleting {cli.args.resource_type} '{match['name'] or match['id']}'"
                 try:
                     with spinner:
@@ -784,7 +796,15 @@ def demo(cli):
             friendly_words = json_load(friendly_words_path)
         network_name = f"nfctl-demo-{choice(friendly_words['predicates'])}-{choice(friendly_words['objects'])}"
     spinner.stop() # always stop for questions
-    if cli.args.yes or questions.yesno(f"Run demo in network {network_name} ({organization.label}) now?"):
+    demo_confirmed = False
+    if cli.args.yes:
+        demo_confirmed = True
+    elif sys.stdin.isatty():
+        demo_confirmed = questions.yesno(f"Run demo in network {network_name} ({organization.label}) now?")
+    else:
+        raise NeedUserInput("Need --yes or user input to confirm delete")
+
+    if demo_confirmed:
         with spinner:
             # create network unless exists
             cli.log.setLevel(logging.WARN) # FIXME: hack to silence redundant spinners

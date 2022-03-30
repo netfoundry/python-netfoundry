@@ -54,3 +54,6 @@ class UnknownResourceType(NFAPIError):
             return f"Not a valid resource type: '{self.resource_type}'. Try one of: {','.join(RESOURCES.keys())}"
         else:
             return f"Not a valid resource type. Try one of: {','.join(RESOURCES.keys())}"
+
+class NeedUserInput(NFAPIError):
+    """Need user input to confirm action."""
