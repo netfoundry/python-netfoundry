@@ -958,7 +958,7 @@ def demo(cli):
                     spinner.succeed(sub('Creating', 'Created', spinner.text))
                 else:
                     services[svc]['properties'] = network.services(name=svc)[0]
-                    spinner.succeed(sub("Creating", "Created", spinner.text))
+                    spinner.succeed(sub("Finding", "Found", spinner.text))
         
         # create a customer-hosted ER unless exists
         customer_router_name="Branch Exit Router"
