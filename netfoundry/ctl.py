@@ -81,7 +81,7 @@ class StoreListKeys(argparse.Action):
 @cli.argument('-O', '--organization', help="label or ID of an alternative organization (default is caller's org)" )
 @cli.argument('-N', '--network', help='caseless name of the network to manage')
 @cli.argument('-G', '--network-group', help="shortname or ID of a network group to search for network_name")
-@cli.argument('-O','--output', arg_only=True, help="format the output", default="text", choices=['text', 'yaml','json'])
+@cli.argument('-o','--output', arg_only=True, help="format the output", default="text", choices=['text', 'yaml','json'])
 @cli.argument('-S', '--style', help="highlighting style", metavar='STYLE', default='monokai', choices=["rrt", "arduino", "monokai", "material", "one-dark", "emacs", "vim", "one-dark"])
 @cli.argument('-B','--borders', default=True, action='store_boolean', help='print cell borders in text tables')
 @cli.argument('-H','--headers', default=True, action='store_boolean', help='print column headers in text tables')
@@ -96,7 +96,6 @@ def main(cli):
     cli.args['eval'] = False
     login(cli)
 
-@cli.argument('-r','--report', help="describe the configured organization, network-group, and network", arg_only=True, action="store_true", default=False)
 @cli.argument('-e','--eval', help="source or eval output to configure shell environment with a login token", arg_only=True, action="store_true", default=False)
 @cli.argument('-v','--ziti-version', help=argparse.SUPPRESS, default='0.22.0') # minium ziti CLI version supports --cli-identity and --read-only
 @cli.argument('-c','--ziti-cli', help=argparse.SUPPRESS)
@@ -147,27 +146,18 @@ def login(cli):
             # json (unless shell which means to suppress normal output and only
             # configure the current shell)
             if not cli.args.eval:
-                if cli.args.output == "text" and cli.args.report:
+                if cli.args.output == "text":
                     summary_table = []
-                    summary_table.append(['identity', f"{summary_object['caller']['name']} ({summary_object['caller']['email']}) in {organization.label} ({organization.name})"])
+                    summary_table.append(['Caller ID', f"{summary_object['caller']['name']} ({summary_object['caller']['email']}) in {organization.label} ({organization.name})"])
                     if network_group:
-                            summary_table.append(['network group', '"{fullname}" ({shortname}) \n with {count} networks'.format(
-                                fullname=summary_object['network_group']['name'],
-                                shortname=summary_object['network_group']['organizationShortName'],
-                                count=summary_object['network_group']['networks_count']
-                        )])
+                            summary_table.append(['Network Resource Group', f"{summary_object['network_group']['name']} ({summary_object['network_group']['organizationShortName']}) with {summary_object['network_group']['networks_count']} networks"])
                     if network:
-                            summary_table.append(['network', '"{fullname}" ({data_center}) \n is {version} and status {status}'.format(
-                                fullname=summary_object['network']['name'],
-                                data_center=summary_object['network']['region'],
-                                version=summary_object['network']['productVersion'],
-                                status=summary_object['network']['status']
-                        )])
+                            summary_table.append(['Configured Network', f"{summary_object['network']['name']} ({summary_object['network']['region']}) is {summary_object['network']['productVersion']} and status {summary_object['network']['status']}"])
                     if cli.config.general.borders:
                         table_borders = "presto"
                     else:
                         table_borders = "plain"
-                    table = tabulate(tabular_data=summary_table, headers=['domain', 'summary'], tablefmt=table_borders)
+                    table = tabulate(tabular_data=summary_table, headers=['Domain', 'Summary'], tablefmt=table_borders)
                     if cli.config.general.color:
                         highlighted = highlight(table, text_lexer, Terminal256Formatter(style=cli.config.general.style))
                         cli.echo(highlighted)
@@ -188,19 +178,21 @@ def login(cli):
                     else:
                         cli.echo(json_dumps(summary_object, indent=4))
 
-            elif cli.args.eval:
+            else: # if eval
                 token_env = f"""
 # $ source <(nfctl --credentials=credentials.json login --eval)
 export NETFOUNDRY_API_TOKEN="{organization.token}"
-{'export MOPENV='+organization.environment if organization.environment else ''}
+export NETFOUNDRY_API_ACCOUNT="{organization.credentials if hasattr(organization, 'credentials') else ''}"
+export NETFOUNDRY_ORGANIZATION="{organization.id}"
+{'export NETFOUNDRY_NETWORK="'+network.id+'"' if network else ''}
+{'export NETFOUNDRY_NETWORK_GROUP="'+network_group.id+'"' if network_group else ''}
+{'export MOPENV="'+organization.environment+'"' if organization.environment else ''}
 """
                 if cli.config.general.color:
                     highlighted = highlight(token_env, bash_lexer, Terminal256Formatter(style=cli.config.general.style))
                     cli.echo(highlighted)
                 else:
                     cli.echo(token_env)
-            else:
-                spinner.succeed(f"you are {summary_object['caller']['name']} ({summary_object['caller']['email']}) in {organization.label}")
 
     elif cli.args.login_target == "ziti":
         if cli.config.login.ziti_cli:
