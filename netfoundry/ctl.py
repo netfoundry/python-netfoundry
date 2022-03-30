@@ -710,7 +710,7 @@ def delete(cli):
     if cli.args.resource_type == 'network':
         try:
             delete_confirmed = False
-            if cli.args.yes:
+            if cli.config.general.yes:
                 delete_confirmed = True
             else:
                 scrambled = []
@@ -747,7 +747,7 @@ def delete(cli):
         try:
             spinner.stop()
             delete_confirmed = False
-            if cli.args.yes:
+            if cli.config.general.yes:
                     delete_confirmed = True
             elif sys.stdin.isatty():
                 delete_confirmed = questions.yesno("{style_bright}{fg_red}IRREVERSIBLY DELETE{fg_yellow} "+cli.args.resource_type+" {fg_cyan}"+match['name']+" {fg_reset}", default=False)
@@ -797,7 +797,7 @@ def demo(cli):
         network_name = f"nfctl-demo-{choice(friendly_words['predicates'])}-{choice(friendly_words['objects'])}"
     spinner.stop() # always stop for questions
     demo_confirmed = False
-    if cli.args.yes:
+    if cli.config.general.yes:
         demo_confirmed = True
     elif sys.stdin.isatty():
         demo_confirmed = questions.yesno(f"Run demo in network {network_name} ({organization.label}) now?")
@@ -942,7 +942,7 @@ def demo(cli):
             },
         }
         for svc in services.keys():
-            spinner.text = f"Finding services"
+            spinner.text = f"Finding service '{svc}'"
             with spinner:
                 if not network.service_exists(name=svc):
                     spinner.text = f"Creating service '{svc}'"
@@ -1164,7 +1164,7 @@ def edit_object_as_yaml(edit: object):
     """
     # unless --yes (config general.yes), if stdout is connected to a terminal
     # then open input for editing and send on exit
-    if cli.args.yes or not sys.stdout.isatty():
+    if cli.config.general.yes or not sys.stdout.isatty():
         return edit
     save_error = False
     editor = environ.get('NETFOUNDRY_EDITOR',environ.get('EDITOR','vim'))
