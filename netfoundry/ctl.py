@@ -250,19 +250,9 @@ export NETFOUNDRY_ORGANIZATION="{organization.id}"
                 else:
                     proxies = dict()
                 ziti_edge_port = "443"
-                ziti_mgmt_port = "443"
-                # well_known_response = http_get(f'https://{ziti_ctrl_ip}:{ziti_edge_port}/.well-known/est/cacerts', proxies=proxies, verify=False)
-                # well_known_decoding = b64decode(well_known_response.text,)
-                # well_known_certs = pkcs7.load_der_pkcs7_certificates(well_known_decoding)
-                # well_known_pem = tempdir+'/well-known-certs.pem'
-                # with open(well_known_pem, 'wb') as pem:
-                #     for cert in well_known_certs:
-                #         pem.write(cert.public_bytes(Encoding.PEM))
-                # cli.log.debug(f"wrote well known certs to {well_known_pem}")
                 network_name_safe = '_'.join(network.name.casefold().split())
                 ziti_cli_identity = '-'.join([organization.environment.casefold(), organization.label.casefold(), network_group.name.casefold(), network_name_safe])
-                #exec = cli.run([ziti_cli, 'edge', 'login', '--read-only', '--cli-identity', ziti_cli_identity, f'{ziti_ctrl_ip}:{ziti_mgmt_port}', '--token', ziti_token, '--cert', well_known_pem], capture_output=False)
-                exec = cli.run([ziti_cli, 'edge', 'login', '--read-only', '--cli-identity', ziti_cli_identity, f'{ziti_ctrl_ip}:{ziti_mgmt_port}', '--token', ziti_token], capture_output=False)
+                exec = cli.run([ziti_cli, 'edge', 'login', '--read-only', '--cli-identity', ziti_cli_identity, f'{ziti_ctrl_ip}:{ziti_edge_port}', '--token', ziti_token], capture_output=False)
                 if exec.returncode == 0: # if succeeded
                     exec = cli.run(shplit(f"{ziti_cli} edge use {ziti_cli_identity}"), capture_output=False)
                     if not exec.returncode == 0: # if error
