@@ -8,54 +8,47 @@ PYTHON_ARGCOMPLETE_OK
 """
 import argparse
 import logging
-from multiprocessing.sharedctypes import Value
 import platform
 import re
 import signal
 import sys
 import tempfile
-import time
 from json import dumps as json_dumps
 from json import load as json_load
 from json import loads as json_loads
 from os import environ, path
-from posixpath import split as psplit
 from random import choice, sample, shuffle
 from re import sub
 from shlex import split as shplit
 from shutil import which
 from subprocess import CalledProcessError
-from tkinter.tix import InputOnly
 from xml.sax.xmlreader import InputSource
 
-# from cryptography.hazmat.primitives.serialization import Encoding, pkcs7
-# from base64 import b64decode
-# from requests import get as http_get
 from jwt.exceptions import PyJWTError
 from milc import set_metadata
 from packaging import version
 from pygments import highlight
 from pygments.formatters import Terminal256Formatter
 from pygments.lexers import get_lexer_by_name, load_lexer_from_file
-from pygments.styles import get_all_styles
 from tabulate import tabulate
 from yaml import dump as yaml_dumps
 from yaml import full_load as yaml_loads
 from yaml import parser
 
 from ._version import get_versions
-from .exceptions import NFAPINoCredentials,  NeedUserInput
+from .exceptions import NeedUserInput, NFAPINoCredentials
 from .network import Network
 from .network_group import NetworkGroup
 from .organization import Organization
-from .utility import (DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES,
-                      MUTABLE_RESOURCE_ABBREVIATIONS, RESOURCE_ABBREVIATIONS,
-                      RESOURCES, is_jwt, normalize_caseless, plural, singular)
+from .utility import DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES, MUTABLE_RESOURCE_ABBREVIATIONS, RESOURCE_ABBREVIATIONS, RESOURCES, is_jwt, normalize_caseless, plural, singular
 
+# this allows the app the terminate gracefully when piped to a truncating consumer like `head`
 signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
-set_metadata(version="v"+get_versions()['version'], author="NetFoundry", name="nfctl") # must precend import milc.cli
-import milc.subcommand.config  # importing this causes the 'config' subcommand to be available
+# must precend import milc.cli
+set_metadata(version="v"+get_versions()['version'], author="NetFoundry", name="nfctl")
+# importing this causes the 'config' subcommand to be available
+import milc.subcommand.config
 from milc import cli, questions
 
 
@@ -65,11 +58,12 @@ class StoreDictKeyPair(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         """Split comma-separated key=value pairs."""
         my_dict = {}
-        if values is not None: # and len(values.split(',')) > 0:
+        if values is not None:                 # and len(values.split(',')) > 0:
             for kv in values.split(','):
-                k,v = kv.split('=')
+                k, v = kv.split('=')
                 my_dict[k] = v
         setattr(namespace, self.dest, my_dict)
+
 
 class StoreListKeys(argparse.Action):
     """Parse comma-separated strings into a list."""
@@ -78,17 +72,18 @@ class StoreListKeys(argparse.Action):
         """Split comma-separated list elements."""
         setattr(namespace, self.dest, values.split(','))
 
-@cli.argument('-P','--profile', default='default', help='login profile for storing and retrieving concurrent, discrete sessions')
+
+@cli.argument('-P', '--profile', default='default', help='login profile for storing and retrieving concurrent, discrete sessions')
 @cli.argument('-C', '--credentials', help='API account JSON file from web console')
-@cli.argument('-O', '--organization', help="label or ID of an alternative organization (default is caller's org)" )
+@cli.argument('-O', '--organization', help="label or ID of an alternative organization (default is caller's org)")
 @cli.argument('-N', '--network', help='caseless name of the network to manage')
 @cli.argument('-G', '--network-group', help="shortname or ID of a network group to search for network_name")
-@cli.argument('-o','--output', arg_only=True, help="format the output", default="text", choices=['text', 'yaml','json'])
+@cli.argument('-o', '--output', arg_only=True, help="format the output", default="text", choices=['text', 'yaml', 'json'])
 @cli.argument('-S', '--style', help="highlighting style", metavar='STYLE', default='material', choices=["rrt", "arduino", "monokai", "material", "one-dark", "emacs", "vim", "one-dark"])
-@cli.argument('-B','--borders', default=True, action='store_boolean', help='print cell borders in text tables')
-@cli.argument('-H','--headers', default=True, action='store_boolean', help='print column headers in text tables')
+@cli.argument('-B', '--borders', default=True, action='store_boolean', help='print cell borders in text tables')
+@cli.argument('-H', '--headers', default=True, action='store_boolean', help='print column headers in text tables')
 @cli.argument('-Y', '--yes', action='store_true', arg_only=True, help='answer yes to potentially-destructive operations')
-@cli.argument('-W','--wait', help='seconds to wait for long-running processes to finish', default=900)
+@cli.argument('-W', '--wait', help='seconds to wait for long-running processes to finish', default=900)
 @cli.argument('--proxy', help=argparse.SUPPRESS)
 @cli.entrypoint('configure the CLI to manage a network')
 def main(cli):
@@ -98,9 +93,10 @@ def main(cli):
     cli.args['eval'] = False
     login(cli)
 
-@cli.argument('-e','--eval', help="source or eval output to configure shell environment with a login token", arg_only=True, action="store_true", default=False)
-@cli.argument('-v','--ziti-version', help=argparse.SUPPRESS, default='0.22.0') # minium ziti CLI version supports --cli-identity and --read-only
-@cli.argument('-c','--ziti-cli', help=argparse.SUPPRESS)
+
+@cli.argument('-e', '--eval', help="source or eval output to configure shell environment with a login token", arg_only=True, action="store_true", default=False)
+@cli.argument('-v', '--ziti-version', help=argparse.SUPPRESS, default='0.22.0')                    # minium ziti CLI version supports --cli-identity and --read-only
+@cli.argument('-c', '--ziti-cli', help=argparse.SUPPRESS)
 @cli.argument('login_target', help=argparse.SUPPRESS, arg_only=True, nargs='?', default="organization", choices=['organization', 'ziti'])
 @cli.subcommand('login to a management API')
 def login(cli):
@@ -110,26 +106,23 @@ def login(cli):
     if cli.args.login_target == "organization":
         spinner.text = f"Logging in profile '{cli.config.general.profile}'"
         with spinner:
-            organization =  use_organization(spinner=spinner)
+            organization = use_organization(spinner=spinner)
             if cli.config.general.network_group and cli.config.general.network:
                 cli.log.debug(f"configuring network {cli.config.general.network} in group {cli.config.general.network_group}")
                 network, network_group = use_network(
                     organization=organization,
                     group=cli.config.general.network_group,
-                    network_name=cli.config.general.network, 
-                    )
+                    network_name=cli.config.general.network)
             elif cli.config.general.network:
                 cli.log.debug(f"configuring network {cli.config.general.network} and local group if unique name for this organization")
                 network, network_group = use_network(
                     organization=organization,
-                    network_name=cli.config.general.network, 
-                    )
+                    network_name=cli.config.general.network)
             elif cli.config.general.network_group:
                 cli.log.debug(f"configuring network group {cli.config.general.network_group}")
                 network_group = use_network_group(
                     organization,
-                    group=cli.config.general.network_group, 
-                    )
+                    group=cli.config.general.network_group)
                 network = None
             else:
                 cli.log.debug("not configuring network or network group")
@@ -152,9 +145,9 @@ def login(cli):
                     summary_table = []
                     summary_table.append(['Caller ID', f"{summary_object['caller']['name']} ({summary_object['caller']['email']}) in {organization.label} ({organization.name})"])
                     if network_group:
-                            summary_table.append(['Network Resource Group', f"{summary_object['network_group']['name']} ({summary_object['network_group']['organizationShortName']}) with {summary_object['network_group']['networks_count']} networks"])
+                        summary_table.append(['Network Resource Group', f"{summary_object['network_group']['name']} ({summary_object['network_group']['organizationShortName']}) with {summary_object['network_group']['networks_count']} networks"])
                     if network:
-                            summary_table.append(['Configured Network', f"{summary_object['network']['name']} ({summary_object['network']['region']}) is {summary_object['network']['productVersion']} and status {summary_object['network']['status']}"])
+                        summary_table.append(['Configured Network', f"{summary_object['network']['name']} ({summary_object['network']['region']}) is {summary_object['network']['productVersion']} and status {summary_object['network']['status']}"])
                     if cli.config.general.borders:
                         table_borders = "presto"
                     else:
@@ -165,8 +158,6 @@ def login(cli):
                         cli.echo(highlighted)
                     else:
                         cli.echo(table)
-                        
-
                 elif cli.args.output == "yaml":
                     if cli.config.general.color:
                         highlighted = highlight(yaml_dumps(summary_object, indent=4), yaml_lexer, Terminal256Formatter(style=cli.config.general.style))
@@ -179,8 +170,7 @@ def login(cli):
                         cli.echo(highlighted)
                     else:
                         cli.echo(json_dumps(summary_object, indent=4))
-
-            else: # if eval
+            else:             # if eval
                 token_env = f"""
 # $ source <(nfctl --credentials=credentials.json login --eval)
 export NETFOUNDRY_API_TOKEN="{organization.token}"
@@ -222,15 +212,14 @@ export NETFOUNDRY_ORGANIZATION="{organization.id}"
             cli.log.error(f"found ziti CLI '{which_ziti}' but version is not at least {cli.config.login.ziti_version}: {e}")
             exit(1)
 
-        spinner.text = f"Logging in to Ziti controller management API"
+        spinner.text = "Logging in to Ziti controller management API"
         with spinner:
-            organization =  use_organization(spinner=spinner)
+            organization = use_organization(spinner=spinner)
             network, network_group = use_network(
                 organization=organization,
                 group=cli.config.general.network_group,
-                network_name=cli.config.general.network, 
-                )
-            tempdir = tempfile.mkdtemp()
+                network_name=cli.config.general.network)
+            tempfile.mkdtemp()
             network_controller = network.get_resource_by_id(type="network-controller", id=network.network_controller['id'])
             if 'domainName' in network_controller.keys() and network_controller['domainName']:
                 ziti_ctrl_ip = network_controller['domainName']
@@ -242,25 +231,26 @@ export NETFOUNDRY_ORGANIZATION="{organization.id}"
             except Exception as e:
                 raise RuntimeError(f"failed to get the ziti token from session '{session or None}', got {e}")
             else:
-                if cli.config.general.proxy:
-                    proxies = {
-                        'http': cli.config.general.proxy,
-                        'https': cli.config.general.proxy
-                    }
-                else:
-                    proxies = dict()
+                # if cli.config.general.proxy:
+                #     proxies = {
+                #         'http': cli.config.general.proxy,
+                #         'https': cli.config.general.proxy
+                #     }
+                # else:
+                #     proxies = dict()
                 ziti_edge_port = "443"
                 network_name_safe = '_'.join(network.name.casefold().split())
                 ziti_cli_identity = '-'.join([organization.environment.casefold(), organization.label.casefold(), network_group.name.casefold(), network_name_safe])
                 exec = cli.run([ziti_cli, 'edge', 'login', '--read-only', '--cli-identity', ziti_cli_identity, f'{ziti_ctrl_ip}:{ziti_edge_port}', '--token', ziti_token], capture_output=False)
-                if exec.returncode == 0: # if succeeded
+                if exec.returncode == 0:            # if succeeded
                     exec = cli.run(shplit(f"{ziti_cli} edge use {ziti_cli_identity}"), capture_output=False)
-                    if not exec.returncode == 0: # if error
+                    if not exec.returncode == 0:    # if error
                         cli.log.error(f"failed to switch default ziti login identity to '{ziti_cli_identity}'")
                         exit(exec.returncode)
                 else:
                     cli.log.error("failed to login")
                     exit(exec.returncode)
+
 
 @cli.subcommand('logout current profile from an organization')
 def logout(cli):
@@ -270,7 +260,7 @@ def logout(cli):
     # use the session with some organization, default is to use the first and there's typically only one
     try:
         with spinner:
-            organization = Organization(
+            Organization(
                 profile=cli.config.general.profile,
                 logout=True,
                 proxy=cli.config.general.proxy
@@ -281,13 +271,14 @@ def logout(cli):
     else:
         spinner.succeed(sub('Logging', 'Logged', spinner.text))
 
+
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
-@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type),RESOURCES[type].abbreviation] for type in MUTABLE_NETWORK_RESOURCES.keys()] for choice in group])
+@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in MUTABLE_NETWORK_RESOURCES.keys()] for choice in group])
 # this allows us to pass the edit subcommand's cli object to function get without further modifying that functions params
 @cli.subcommand('duplicate a resource')
 def copy(cli):
     """Duplicate a single resource.
-    
+
     Configure env var NETFOUNDRY_EDITOR or EDITOR as path to executable that
     accepts a file to edit as first positional parameter and waits for exit to
     return e.g. "code --wait".
@@ -297,12 +288,12 @@ def copy(cli):
         cli.args.resource_type = singular(MUTABLE_RESOURCE_ABBREVIATIONS[cli.args.resource_type].name)
     spinner.text = f"Getting {cli.args.resource_type} for copying"
     cli.args['accept'] = 'create'
-    cli.args['output'] = 'text' # implies tty which allows INFO messages
+    cli.args['output'] = 'text'       # implies tty which allows INFO messages
     with spinner:
         edit_resource_object, network, network_group, organization = get(cli, echo=False)
     cli.log.debug(f"opening {cli.args.resource_type} '{edit_resource_object['name']}' for copying")
     copy_request_object = edit_object_as_yaml(edit_resource_object)
-    if not copy_request_object: # is False if editing cancelled by empty buffer
+    if not copy_request_object:       # is False if editing cancelled by empty buffer
         return True
     else:
         spinner.text = f"Copying {edit_resource_object['name']} to {copy_request_object['name']}"
@@ -310,12 +301,13 @@ def copy(cli):
             network.create_resource(post=copy_request_object, type=cli.args.resource_type)
         spinner.succeed(sub('Copying', 'Copied', spinner.text))
 
+
 @cli.argument('-f', '--file', help='JSON or YAML file', type=argparse.FileType('r', encoding='UTF-8'))
-@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type),RESOURCES[type].abbreviation] for type in MUTABLE_NETWORK_RESOURCES.keys()] for choice in group])
+@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in MUTABLE_NETWORK_RESOURCES.keys()] for choice in group])
 @cli.subcommand('create a resource from a file')
 def create(cli):
     """Create a resource.
-    
+
     If interactive then open template or --file in EDITOR. Then
     send create request upon EDITOR exit. If not interactive then send input
     object as create request immediately.
@@ -351,13 +343,13 @@ def create(cli):
 
     create_object = edit_object_as_yaml(create_input_object)
 
-    if not create_object: # is False if editing cancelled by empty buffer
+    if not create_object:              # is False if editing cancelled by empty buffer
         spinner.text = f"Creating {cli.args.resource_type} cancelled"
         return True
     else:
         spinner.text = f"Creating {cli.args.resource_type}"
     with spinner:
-        organization =  use_organization(spinner=spinner)
+        organization = use_organization(spinner=spinner)
         if cli.args.resource_type == "network":
             if cli.config.general.network_group:
                 network_group = use_network_group(organization=organization, )
@@ -366,10 +358,10 @@ def create(cli):
                 if org_count > 1:
                     cli.log.error("specify --network-group because there is more than one available to caller's identity")
                     exit(org_count)
-                else: # use the only available group
+                else:                   # use the only available group
                     network_group_id = organization.get_network_groups_by_organization()[0]['id']
                     network_group = use_network_group(
-                        organization=organization, 
+                        organization=organization,
                         group=network_group_id)
             resource = network_group.create_network(**create_object)
         else:
@@ -380,13 +372,14 @@ def create(cli):
             resource = network.create_resource(type=cli.args.resource_type, post=create_object, wait=cli.config.general.wait)
     spinner.succeed(f"Created {cli.args.resource_type} '{resource['name']}'")
 
+
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
-@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type),RESOURCES[type].abbreviation] for type in MUTABLE_NETWORK_RESOURCES.keys()] for choice in group])
+@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in MUTABLE_NETWORK_RESOURCES.keys()] for choice in group])
 # this allows us to pass the edit subcommand's cli object to function get without further modifying that functions params
 @cli.subcommand('edit a resource with EDITOR')
 def edit(cli):
     """Edit a single resource as YAML.
-    
+
     Configure env var NETFOUNDRY_EDITOR or EDITOR as path to executable that
     accepts a file to edit as first positional parameter and waits for exit to
     return e.g. "code --wait".
@@ -401,7 +394,7 @@ def edit(cli):
         edit_resource_object, network, network_group, organization = get(cli, echo=False)
     update_request_object = edit_object_as_yaml(edit_resource_object)
     with spinner:
-        if not update_request_object: # is False if editing cancelled by empty buffer
+        if not update_request_object:          # is False if editing cancelled by empty buffer
             spinner.text = f"Editing {cli.args.resource_type} cancelled"
             return True
         else:
@@ -410,22 +403,23 @@ def edit(cli):
                 network.put_resource(put=update_request_object, type=cli.args.resource_type)
             spinner.succeed(sub("Updating", "Updated", spinner.text))
 
+
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
-@cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create','update'], help="request the as=create or as=update alternative form of the resource")
-@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type),RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
+@cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create', 'update'], help="request the as=create or as=update alternative form of the resource")
+@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
 @cli.subcommand('get a single resource by query')
-def get(cli, echo: bool=True, embed='all'):
+def get(cli, echo: bool = True, embed='all'):
     """
     Get a single resource as YAML or JSON.
-    
+
     :param echo: False allows capture instead of print the match
     :param embed: False avoids expensive operations when we just need a shallow view
     """
     if RESOURCE_ABBREVIATIONS.get(cli.args.resource_type):
         cli.args.resource_type = singular(RESOURCE_ABBREVIATIONS[cli.args.resource_type].name)
-    if not cli.config.general.verbose and cli.args.output in ["yaml","json"]: # don't change level if output=text
-        cli.log.setLevel(logging.WARN) # don't emit INFO messages to stdout because they will break deserialization
+    if not cli.config.general.verbose and cli.args.output in ["yaml", "json"]:    # don't change level if output=text
+        cli.log.setLevel(logging.WARN)                                            # don't emit INFO messages to stdout because they will break deserialization
     match = {}
     matches = []
     query_keys = [*cli.args.query]
@@ -434,7 +428,7 @@ def get(cli, echo: bool=True, embed='all'):
     if not echo:
         spinner.enabled = False
     with spinner:
-        organization =  use_organization(spinner=spinner)
+        organization = use_organization(spinner=spinner)
         if cli.args.resource_type == "organization":
             if 'id' in query_keys:
                 if len(query_keys) > 1:
@@ -476,8 +470,8 @@ def get(cli, echo: bool=True, embed='all'):
             else:
                 if cli.config.general.network_group and not cli.config.general.network:
                     network_group = use_network_group(
-                        organization, 
-                        group=cli.config.general.network_group, 
+                        organization,
+                        group=cli.config.general.network_group,
                         )
                     matches = organization.get_networks_by_group(network_group.id, **cli.args.query)
                 elif cli.config.general.network:
@@ -491,15 +485,15 @@ def get(cli, echo: bool=True, embed='all'):
                 if len(matches) == 1:
                     network, network_group = use_network(
                         organization=organization,
-                        network_name=matches[0]['name'], 
+                        network_name=matches[0]['name'],
                         )
                     match = organization.get_network(network_id=network.id, embed=embed, accept=cli.args.accept)
-        else: # is a resource in the network domain
+        else:                                                 # is a resource in the network domain
             if cli.config.general.network:
                 network, network_group = use_network(
                     organization=organization,
-                    group=cli.config.general.network_group, # None unless configured
-                    network_name=cli.config.general.network, 
+                    group=cli.config.general.network_group,   # None unless configured
+                    network_name=cli.config.general.network,
                     )
             else:
                 cli.log.error("first configure a network to get resources in a network e.g. --network ACMENet")
@@ -530,23 +524,23 @@ def get(cli, echo: bool=True, embed='all'):
 
     if match:
         cli.log.debug(f"found exactly one {cli.args.resource_type} by '{','.join(query_keys)}'")
-        if not echo: # edit() uses echo=False to get a match for updating
+        if not echo:                           # edit() uses echo=False to get a match for updating
             return match, network, network_group, organization
         else:
             if cli.args.keys:
                 # intersection of the set of observed, present keys in the
                 # match and the set of desired keys
                 valid_keys = set(match.keys()) & set(cli.args.keys)
-                if valid_keys: # if at least one element in intersection set
+                if valid_keys:                 # if at least one element in intersection set
                     cli.log.debug(f"valid keys: {str(valid_keys)}")
-                    filtered_match = { key: match[key] for key in match.keys() if key in valid_keys}
+                    filtered_match = {key: match[key] for key in match.keys() if key in valid_keys}
                 else:
                     cli.log.error(f"no valid keys requested in list: {','.join(cli.args.keys)}, need at least one of {','.join(match.keys())}")
                     exit(1)
             else:
                 cli.log.debug("not filtering output keys")
                 filtered_match = match
-            if cli.args.output in ["yaml","text"]:
+            if cli.args.output in ["yaml", "text"]:
                 if cli.config.general.color:
                     highlighted = highlight(yaml_dumps(filtered_match, indent=4), yaml_lexer, Terminal256Formatter(style=cli.config.general.style))
                     cli.echo(highlighted)
@@ -561,7 +555,7 @@ def get(cli, echo: bool=True, embed='all'):
     elif len(matches) == 0:
         cli.log.warning(f"found no {cli.args.resource_type} by '{','.join(query_keys)}'")
         exit(1)
-    else: # len(matches) > 1:
+    else:                   # len(matches) > 1:
         if cli.args.query:
             cli.log.error(f"found more than one {cli.args.resource_type} by param(s): '{','.join(query_keys)}', try a more specific query")
         else:
@@ -571,22 +565,22 @@ def get(cli, echo: bool=True, embed='all'):
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
-@cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create','update'], help="request the as=create or as=update alternative form of the resources")
-@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[type,RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
+@cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create', 'update'], help="request the as=create or as=update alternative form of the resources")
+@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[type, RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
 @cli.subcommand('find resources as lists')
 def list(cli):
     """Find resources as lists."""
     spinner = get_spinner("working")
     if RESOURCE_ABBREVIATIONS.get(cli.args.resource_type):
         cli.args.resource_type = RESOURCE_ABBREVIATIONS[cli.args.resource_type].name
-    if cli.args.accept and not MUTABLE_NETWORK_RESOURCES.get(cli.args.resource_type): # mutable excludes data-centers
+    if cli.args.accept and not MUTABLE_NETWORK_RESOURCES.get(cli.args.resource_type):  # mutable excludes data-centers
         cli.log.warn("the --as=ACCEPT param is not applicable to resources outside the network domain")
     if cli.args.query and cli.args.query.get('id'):
         cli.log.warn("try 'get' command to get by id")
     if cli.args.output == "text":
         if not sys.stdout.isatty():
             cli.log.warning("use --output=yaml or json for scripting nfctl")
-    else: # output is YAML or JSON
+    else:             # output is YAML or JSON
         # don't emit INFO messages to stdout because they will break deserialization
         cli.log.setLevel(logging.WARN)
     query_keys = [*cli.args.query]
@@ -595,7 +589,7 @@ def list(cli):
     else:
         spinner.text = f"Finding all {cli.args.resource_type}"
     with spinner:
-        organization =  use_organization(spinner=spinner)
+        organization = use_organization(spinner=spinner)
         if cli.args.resource_type == "organizations":
             matches = organization.get_organizations(**cli.args.query)
         elif cli.args.resource_type == "network-groups":
@@ -615,7 +609,7 @@ def list(cli):
             if cli.config.general.network:
                 network, network_group = use_network(
                     organization=organization,
-                    group=cli.config.general.network_group, # None unless configured
+                    group=cli.config.general.network_group,       # None unless configured
                     network_name=cli.config.general.network,
                     spinner=spinner)
             else:
@@ -638,13 +632,17 @@ def list(cli):
         # and the set of configured, desired keys
         valid_keys = set(matches[0].keys()) & set(cli.args.keys)
     elif cli.args.output == "text":
-        valid_keys = set(matches[0].keys()) & set(['name','label','organizationShortName','edgeRouterAttributes','serviceAttributes','endpointAttributes','status','zitiId','provider','locationCode','ipAddress','region','size','attributes','email','productVersion'])
+        default_columns = ['name', 'label', 'organizationShortName',
+                           'edgeRouterAttributes', 'serviceAttributes', 'endpointAttributes',
+                           'status', 'zitiId', 'provider', 'locationCode', 'ipAddress',
+                           'region', 'size', 'attributes', 'email', 'productVersion']
+        valid_keys = set(matches[0].keys()) & set(default_columns)
 
     if valid_keys:
         cli.log.debug(f"valid keys: {str(valid_keys)}")
         filtered_matches = []
         for match in matches:
-            filtered_match = { key: match[key] for key in match.keys() if key in valid_keys}
+            filtered_match = {key: match[key] for key in match.keys() if key in valid_keys}
             filtered_matches.append(filtered_match)
     else:
         cli.log.debug("not filtering output keys")
@@ -684,8 +682,9 @@ def list(cli):
         else:
             cli.echo(json_dumps(filtered_matches, indent=4))
 
+
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
-@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[choice for group in [[singular(type),RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
+@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
 @cli.subcommand('delete a resource in the network domain')
 def delete(cli):
     """Delete a resource in the network domain."""
@@ -712,7 +711,9 @@ def delete(cli):
                 spinner.stop()
                 if not sys.stdin.isatty():
                     raise InputSource
-                descrambled = questions.choice("{style_bright}Enter the number of the unscrambled {fg_yellow}network{fg_reset} name to {fg_red}IRREVERSIBLY DELETE", scrambled, default=None, confirm=True, prompt='{style_bright}{fg_red}DELETE{fg_reset} which {fg_yellow}network? ')
+                descrambled = questions.choice(
+                    "{style_bright}Enter the number of the unscrambled {fg_yellow}network{fg_reset} name to {fg_red}IRREVERSIBLY DELETE",
+                    scrambled, default=None, confirm=True, prompt='{style_bright}{fg_red}DELETE{fg_reset} which {fg_yellow}network? ')
                 if match['name'] == descrambled:
                     delete_confirmed = True
 
@@ -728,18 +729,18 @@ def delete(cli):
                     spinner.succeed(sub('Deleting', 'Deleted', spinner.text))
             else:
                 spinner.fail(f"Not deleting network '{match['name']}'.")
-        except KeyboardInterrupt as e:
+        except KeyboardInterrupt:
             spinner.fail("Cancelled")
             exit(1)
         except Exception as e:
             cli.log.error(f"unknown error in {e}")
             exit(1)
-    else: # network child resource, not the network itself
+    else:   # network child resource, not the network itself
         try:
             spinner.stop()
             delete_confirmed = False
             if cli.config.general.yes:
-                    delete_confirmed = True
+                delete_confirmed = True
             elif sys.stdin.isatty():
                 delete_confirmed = questions.yesno("{style_bright}{fg_red}IRREVERSIBLY DELETE{fg_yellow} "+cli.args.resource_type+" {fg_cyan}"+match['name']+" {fg_reset}", default=False)
             else:
@@ -750,7 +751,7 @@ def delete(cli):
                 try:
                     with spinner:
                         network.delete_resource(type=cli.args.resource_type, id=match['id'])
-                except KeyboardInterrupt as e:
+                except KeyboardInterrupt:
                     spinner.fail("Cancelled")
                     exit(1)
                 except Exception as e:
@@ -760,14 +761,15 @@ def delete(cli):
                     spinner.succeed(sub('Deleting', 'Deleted', spinner.text))
             else:
                 spinner.fail(f"Not deleting {cli.args.resource_type} '{match['name']}'")
-        except KeyboardInterrupt as e:
+        except KeyboardInterrupt:
             spinner.fail("Cancelled")
             exit(1)
         except Exception as e:
             cli.log.error(f"unknown error in {e}")
             exit(1)
 
-@cli.argument("-s", "--size", default="small", help=argparse.SUPPRESS) # troubleshoot scale-up instance size factor
+
+@cli.argument("-s", "--size", default="small", help=argparse.SUPPRESS)   # troubleshoot scale-up instance size factor
 @cli.argument("-v", "--product-version", default="default", help="network product version: 'default', 'latest', or any active semver")
 @cli.argument("--provider", default="AWS", required=False, help="cloud provider to host edge routers", choices=DC_PROVIDERS)
 @cli.argument("--regions", dest="regions", default=["us-west-1"], nargs="+", help="cloud location codes in which to host edge routers")
@@ -776,7 +778,7 @@ def demo(cli):
     """Create a demo network or add demo resources to existing network."""
     spinner = get_spinner("working")
     with spinner:
-        organization =  use_organization(spinner=spinner)
+        organization = use_organization(spinner=spinner)
     if cli.config.general.network:
         network_name = cli.config.general.network
     else:
@@ -789,7 +791,7 @@ def demo(cli):
     if cli.config.general.yes:
         demo_confirmed = True
     elif sys.stdin.isatty():
-        spinner.stop() # always stop for questions
+        spinner.stop()  # always stop for questions
         demo_confirmed = questions.yesno(f"Run demo in network {network_name} ({organization.label}) now?")
     else:
         raise NeedUserInput("Need --yes or user input to confirm delete")
@@ -798,11 +800,11 @@ def demo(cli):
         spinner.text = f"Finding network '{network_name}'"
         with spinner:
             # create network unless exists
-            cli.log.setLevel(logging.WARN) # FIXME: hack to silence redundant spinners
+            cli.log.setLevel(logging.WARN)   # FIXME: hack to silence redundant spinners
             network_group = use_network_group(
-                organization, 
+                organization,
                 cli.config.general.network_group)
-            cli.log.setLevel(logging.INFO) # FIXME: hack to silence redundant spinners
+            cli.log.setLevel(logging.INFO)   # FIXME: hack to silence redundant spinners
             if network_group.network_exists(network_name):
                 network, network_group = use_network(
                     organization=organization,
@@ -819,7 +821,7 @@ def demo(cli):
                     version=cli.config.demo.product_version)
                 network, network_group = use_network(
                     organization=organization,
-                    group=cli.config.general.network_group, 
+                    group=cli.config.general.network_group,
                     network_name=network_created['name'],
                     spinner=spinner)
                 spinner.succeed(sub('Creating', 'Created', spinner.text))
@@ -855,14 +857,14 @@ def demo(cli):
 
         try:
             assert(len(hosted_edge_routers) > 0)
-        except Exception as e:
+        except Exception:
             raise RuntimeError("unexpected error with router placements, found zero hosted routers")
 
         spinner.text = f"Waiting for {len(hosted_edge_routers)} hosted routers to be online"
         with spinner:
             for router_id in [r['id'] for r in hosted_edge_routers]:
                 try:
-                    network.wait_for_status("PROVISIONED",id=router_id,type="edge-router",wait=999,progress=False)
+                    network.wait_for_status("PROVISIONED", id=router_id, type="edge-router", wait=999, progress=False)
                 except Exception as e:
                     raise RuntimeError(f"error while waiting for router status, got {e}")
         spinner.succeed("All hosted routers online")
@@ -879,7 +881,7 @@ def demo(cli):
                             name=blanket_policy_name,
                             edge_router_attributes=["#hosted_routers"],
                             endpoint_attributes=["#all"])
-                except Exception as e: 
+                except Exception as e:
                     raise RuntimeError(f"error creating edge router policy, got {e}")
                 else:
                     spinner.succeed(sub('Creating', 'Created', spinner.text))
@@ -903,7 +905,7 @@ def demo(cli):
                 if not network.endpoint_exists(name=end):
                     # create an endpoint for the dialing device that will access services
                     spinner.text = f"Creating endpoint {end}"
-                    endpoints[end]['properties'] = network.create_endpoint(name=end,attributes=endpoints[end]['attributes'])
+                    endpoints[end]['properties'] = network.create_endpoint(name=end, attributes=endpoints[end]['attributes'])
                     spinner.succeed(sub('Creating', 'Created', spinner.text))
                 else:
                     endpoints[end]['properties'] = network.endpoints(name=end)[0]
@@ -950,9 +952,9 @@ def demo(cli):
                 else:
                     services[svc]['properties'] = network.services(name=svc)[0]
                     spinner.succeed(sub("Finding", "Found", spinner.text))
-        
+
         # create a customer-hosted ER unless exists
-        customer_router_name="Branch Exit Router"
+        customer_router_name = "Branch Exit Router"
         spinner.text = f"Finding customer router '{customer_router_name}'"
         with spinner:
             if not network.edge_router_exists(name=customer_router_name):
@@ -966,10 +968,10 @@ def demo(cli):
                 spinner.succeed(sub("Finding", "Found", spinner.text))
 
         spinner.text = f"Waiting for customer router {customer_router_name} to be online"
-        # wait for customer router to be PROVISIONED so that registration will be available 
+        # wait for customer router to be PROVISIONED so that registration will be available
         with spinner:
             try:
-                network.wait_for_status("PROVISIONED",id=customer_router['id'],type="edge-router",wait=999,progress=False)
+                network.wait_for_status("PROVISIONED", id=customer_router['id'], type="edge-router", wait=999, progress=False)
                 customer_router_registration = network.rotate_edge_router_registration(id=customer_router['id'])
             except Exception as e:
                 raise RuntimeError(f"error getting router registration, got {e}")
@@ -978,18 +980,18 @@ def demo(cli):
 
         # create unless exists
         app_wan_name = "Default Service Policy"
-        spinner.text = f"Finding service policy"
+        spinner.text = "Finding service policy"
         with spinner:
             if not network.app_wan_exists(name=app_wan_name):
                 # work_from_anywhere may connect to welcome_wagon
                 spinner.text = sub("Finding", "Creating", spinner.text)
-                app_wan = network.create_app_wan(
+                network.create_app_wan(
                     name=app_wan_name,
                     endpoint_attributes=["#work_from_anywhere"],
                     service_attributes=["#welcome_wagon"])
                 spinner.succeed(sub("Creating", "Created", spinner.text))
             else:
-                app_wan = network.app_wans(name=app_wan_name)[0]
+                # app_wan = network.app_wans(name=app_wan_name)[0]
                 spinner.text = sub("Finding", "Found", spinner.text)
 
         spinner.succeed("Demo network is ready")
@@ -1001,7 +1003,8 @@ def demo(cli):
         spinner.fail("Demo cancelled")
         cli.run(command=["nfctl", "demo", "--help"], capture_output=False)
 
-def use_organization(prompt: bool=True, spinner: object=None):
+
+def use_organization(prompt: bool = True, spinner: object = None):
     """Cache an expiring token for your identity in organization."""
     if not spinner:
         spinner = get_spinner("working")
@@ -1018,13 +1021,13 @@ def use_organization(prompt: bool=True, spinner: object=None):
                 expiry_minimum=0,
                 proxy=cli.config.general.proxy
             )
-    except NFAPINoCredentials as e:
+    except NFAPINoCredentials:
         if prompt:
             cli.log.debug("caught no credentials exception from organization, prompting for token")
             try:
                 spinner.stop()
                 token_from_prompt = questions.password(prompt='Enter Bearer Token:', confirm=False, validate=is_jwt)
-            except KeyboardInterrupt as e:
+            except KeyboardInterrupt:
                 spinner.fail("Cancelled")
                 exit(1)
             except Exception as e:
@@ -1041,7 +1044,7 @@ def use_organization(prompt: bool=True, spinner: object=None):
                         expiry_minimum=0,
                         proxy=cli.config.general.proxy
                     )
-            except PyJWTError as e:
+            except PyJWTError:
                 spinner.fail("Not a valid token")
                 exit(1)
             except Exception as e:
@@ -1053,7 +1056,8 @@ def use_organization(prompt: bool=True, spinner: object=None):
     cli.log.debug(f"logged-in organization label is {organization.label}.")
     return organization
 
-def use_network_group(organization: object, group: str=None, spinner: object=None):
+
+def use_network_group(organization: object, group: str = None, spinner: object = None):
     """
     Use a network group.
 
@@ -1076,10 +1080,11 @@ def use_network_group(organization: object, group: str=None, spinner: object=Non
     cli.log.debug(f"network group is {network_group.name}")
     return network_group
 
-def use_network(organization: object, network_name: str=None, group: str=None, spinner: object=None):
+
+def use_network(organization: object, network_name: str = None, group: str = None, spinner: object = None):
     """
     Use a network.
-    
+
     :param spinner: the spinner object from parent flow is used and returned
     :param organization: the netfoundry.Organization object representing the current session
     :param network_name: name of the network to use, optional if there's only one
@@ -1090,10 +1095,10 @@ def use_network(organization: object, network_name: str=None, group: str=None, s
     else:
         cli.log.debug("got spinner as function param")
     if not network_name:
-        spinner.text = f"Finding networks"
+        spinner.text = "Finding networks"
         if group:
             network_group = use_network_group(
-                organization=organization, 
+                organization=organization,
                 group=group,
                 spinner=spinner)
             existing_networks = network_group.networks_by_name()
@@ -1108,7 +1113,7 @@ def use_network(organization: object, network_name: str=None, group: str=None, s
             exit(1)
     elif group:
         network_group = use_network_group(
-            organization=organization, 
+            organization=organization,
             group=group,
             spinner=spinner)
         existing_networks = network_group.network_ids_by_normal_name
@@ -1121,7 +1126,7 @@ def use_network(organization: object, network_name: str=None, group: str=None, s
             existing_networks = organization.get_networks_by_organization(name=network_name)
             existing_network = existing_networks[0]
             network_group = use_network_group(
-                organization, 
+                organization,
                 group=existing_network['networkGroupId'],
                 spinner=spinner)
         elif existing_count > 1:
@@ -1141,8 +1146,8 @@ def use_network(organization: object, network_name: str=None, group: str=None, s
     elif not network.status == 'PROVISIONED':
         try:
             spinner.text = f"Waiting for network {network.name} to be ready"
-            network.wait_for_status("PROVISIONED",wait=999,progress=False)
-        except KeyboardInterrupt as e:
+            network.wait_for_status("PROVISIONED", wait=999, progress=False)
+        except KeyboardInterrupt:
             spinner.fail("Cancelled")
             exit(1)
         except Exception as e:
@@ -1150,9 +1155,10 @@ def use_network(organization: object, network_name: str=None, group: str=None, s
     spinner.succeed(sub("Configuring", "Configured", spinner.text))
     return network, network_group
 
+
 def edit_object_as_yaml(edit: object):
     """Edit a resource object as YAML and return as object upon exit.
-    
+
     :param obj input: a deserialized (object) to edit and return as yaml
     """
     # unless --yes (config general.yes), if stdout is connected to a terminal
@@ -1160,7 +1166,7 @@ def edit_object_as_yaml(edit: object):
     if cli.config.general.yes or not sys.stdout.isatty():
         return edit
     save_error = False
-    editor = environ.get('NETFOUNDRY_EDITOR',environ.get('EDITOR','vim'))
+    editor = environ.get('NETFOUNDRY_EDITOR', environ.get('EDITOR', 'vim'))
     instructions_bytes = "# save and exit this editor to confirm, or\n#  abort by saving an empty file, comments ignored\n".encode()
     edit_bytes = yaml_dumps(edit, default_flow_style=False).encode()
     with tempfile.NamedTemporaryFile(suffix=".yml", delete=False) as tf:
@@ -1180,7 +1186,7 @@ def edit_object_as_yaml(edit: object):
         # prune comments from buffer
         edited_no_comments = str()
         for line in edited.splitlines():
-            edited_no_comments += re.sub('^(\s+)?#.*','',line)
+            edited_no_comments += re.sub(r'^(\s+)?#.*', '', line)
         if len(edited_no_comments) == 0:
             return False
         else:
@@ -1198,10 +1204,11 @@ def edit_object_as_yaml(edit: object):
         cli.log.error(f"your buffer was saved and you may continue editing it  'create TYPE --file {temp_file}'")
         exit(1)
 
+
 def get_spinner(text):
     """
     Get a spinner.
-    
+
     Enabled if stdout is a tty and log level is >= INFO, else disabled to not
     corrupt structured output.
     """
@@ -1222,10 +1229,10 @@ def get_spinner(text):
         inner_spinner.enabled = True
     return inner_spinner
 
+
 yaml_lexer = get_lexer_by_name("yaml", stripall=True)
 json_lexer = get_lexer_by_name("json", stripall=True)
 bash_lexer = get_lexer_by_name("bash", stripall=True)
-
 cwd = path.dirname(__file__)
 text_lexer_filename = path.join(cwd, "table_lexer.py")
 text_lexer = load_lexer_from_file(text_lexer_filename, "NetFoundryTableLexer")
