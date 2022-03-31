@@ -1134,20 +1134,21 @@ def use_network(organization: object, network_name: str = None, group: str = Non
 
     # use the network
     spinner.text = f"Configuring network '{network_name}'"
-    network = Network(network_group, network_name=network_name)
-    if network.status == 'ERROR':
-        cli.log.error(f"network {network.name} has status ERROR")
-    elif not cli.config.general.wait:
-        cli.log.debug("wait seconds is 0, not waiting for network to be ready")
-    elif not network.status == 'PROVISIONED':
-        try:
-            spinner.text = f"Waiting for network {network.name} to be ready"
-            network.wait_for_status("PROVISIONED", wait=999, progress=False)
-        except KeyboardInterrupt:
-            spinner.fail("Cancelled")
-            exit(1)
-        except Exception as e:
-            raise RuntimeError(f"unknown error in {e}")
+    with spinner:
+        network = Network(network_group, network_name=network_name)
+        if network.status == 'ERROR':
+            cli.log.error(f"network {network.name} has status ERROR")
+        elif not cli.config.general.wait:
+            cli.log.debug("wait seconds is 0, not waiting for network to be ready")
+        elif not network.status == 'PROVISIONED':
+            try:
+                spinner.text = f"Waiting for network {network.name} to be ready"
+                network.wait_for_status("PROVISIONED", wait=999, progress=False)
+            except KeyboardInterrupt:
+                spinner.fail("Cancelled")
+                exit(1)
+            except Exception as e:
+                raise RuntimeError(f"unknown error in {e}")
     spinner.succeed(sub("Configuring", "Configured", spinner.text))
     return network, network_group
 
