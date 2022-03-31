@@ -24,8 +24,9 @@ from shutil import which
 from subprocess import CalledProcessError
 from xml.sax.xmlreader import InputSource
 
+# importing this causes the 'config' subcommand to be available
 from jwt.exceptions import PyJWTError
-from milc import set_metadata
+from milc import cli, questions, set_metadata
 from packaging import version
 from pygments import highlight
 from pygments.formatters import Terminal256Formatter
@@ -45,12 +46,7 @@ from .utility import DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES, MUTABLE_RESOURCE_A
 # this allows the app the terminate gracefully when piped to a truncating consumer like `head`
 signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
-# must precend import milc.cli
-set_metadata(version="v"+get_versions()['version'], author="NetFoundry", name="nfctl")
-# importing this causes the 'config' subcommand to be available
 import milc.subcommand.config
-from milc import cli, questions
-
 
 class StoreDictKeyPair(argparse.Action):
     """Parse key pairs into a dictionary."""
@@ -1238,4 +1234,6 @@ text_lexer_filename = path.join(cwd, "table_lexer.py")
 text_lexer = load_lexer_from_file(text_lexer_filename, "NetFoundryTableLexer")
 
 if __name__ == '__main__':
+    # must precend import milc.cli
+    set_metadata(version="v"+get_versions()['version'], author="NetFoundry", name="nfctl")
     cli()
