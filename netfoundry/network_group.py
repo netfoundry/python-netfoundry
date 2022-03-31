@@ -62,7 +62,7 @@ class NetworkGroup:
 
         self.network_ids_by_normal_name = dict()
         for net in Organization.get_networks_by_group(network_group_id=self.network_group_id):
-            self.network_ids_by_normal_name[normalize_caseless(net['name'])] = id
+            self.network_ids_by_normal_name[normalize_caseless(net['name'])] = net['id']
 
     def nc_data_centers_by_location(self):
         """Get a controller data center by locationCode."""

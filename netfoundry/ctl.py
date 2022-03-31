@@ -28,7 +28,9 @@ from subprocess import CalledProcessError
 from tkinter.tix import InputOnly
 from xml.sax.xmlreader import InputSource
 
-#from cryptography.hazmat.primitives.serialization import Encoding, pkcs7
+# from cryptography.hazmat.primitives.serialization import Encoding, pkcs7
+# from base64 import b64decode
+# from requests import get as http_get
 from jwt.exceptions import PyJWTError
 from milc import set_metadata
 from packaging import version
@@ -247,18 +249,20 @@ export NETFOUNDRY_ORGANIZATION="{organization.id}"
                     }
                 else:
                     proxies = dict()
-                ### commented because new ziti CLI has batteries-included certs trust opt-in and caching
-                # well_known_response = http_get('https://'+ziti_ctrl_ip+'/.well-known/est/cacerts', proxies=proxies, verify=False)
-                # well_known_decoding = b64decode(well_known_response.text)
+                ziti_edge_port = "443"
+                ziti_mgmt_port = "443"
+                # well_known_response = http_get(f'https://{ziti_ctrl_ip}:{ziti_edge_port}/.well-known/est/cacerts', proxies=proxies, verify=False)
+                # well_known_decoding = b64decode(well_known_response.text,)
                 # well_known_certs = pkcs7.load_der_pkcs7_certificates(well_known_decoding)
                 # well_known_pem = tempdir+'/well-known-certs.pem'
                 # with open(well_known_pem, 'wb') as pem:
                 #     for cert in well_known_certs:
                 #         pem.write(cert.public_bytes(Encoding.PEM))
+                # cli.log.debug(f"wrote well known certs to {well_known_pem}")
                 network_name_safe = '_'.join(network.name.casefold().split())
                 ziti_cli_identity = '-'.join([organization.environment.casefold(), organization.label.casefold(), network_group.name.casefold(), network_name_safe])
-                ziti_mgmt_port = "443"
-                exec = cli.run([ziti_cli, 'edge', 'login', '--read-only', '--cli-identity', ziti_cli_identity, ziti_ctrl_ip+':'+ziti_mgmt_port, '--token', ziti_token], capture_output=False)
+                #exec = cli.run([ziti_cli, 'edge', 'login', '--read-only', '--cli-identity', ziti_cli_identity, f'{ziti_ctrl_ip}:{ziti_mgmt_port}', '--token', ziti_token, '--cert', well_known_pem], capture_output=False)
+                exec = cli.run([ziti_cli, 'edge', 'login', '--read-only', '--cli-identity', ziti_cli_identity, f'{ziti_ctrl_ip}:{ziti_mgmt_port}', '--token', ziti_token], capture_output=False)
                 if exec.returncode == 0: # if succeeded
                     exec = cli.run(shplit(f"{ziti_cli} edge use {ziti_cli_identity}"), capture_output=False)
                     if not exec.returncode == 0: # if error
@@ -358,9 +362,10 @@ def create(cli):
     create_object = edit_object_as_yaml(create_input_object)
 
     if not create_object: # is False if editing cancelled by empty buffer
+        spinner.text = f"Creating {cli.args.resource_type} cancelled"
         return True
-
-    spinner.text = f"Creating {cli.args.resource_type}"
+    else:
+        spinner.text = f"Creating {cli.args.resource_type}"
     with spinner:
         organization =  use_organization(spinner=spinner)
         if cli.args.resource_type == "network":
@@ -401,17 +406,19 @@ def edit(cli):
         cli.args.resource_type = singular(MUTABLE_RESOURCE_ABBREVIATIONS[cli.args.resource_type].name)
     cli.args['accept'] = 'update'
     spinner.text = f"Getting {cli.args.resource_type} for editing"
-    cli.log.debug(f"opening {cli.args.resource_type} '{edit_resource_object['name']}' for editing")
+    cli.log.debug(f"opening {cli.args.resource_type} for editing")
     with spinner:
         edit_resource_object, network, network_group, organization = get(cli, echo=False)
     update_request_object = edit_object_as_yaml(edit_resource_object)
-    if not update_request_object: # is False if editing cancelled by empty buffer
-        return True
-    else:
-        spinner.text = f"Updating {cli.args.resource_type}"
-        with spinner:
-            network.put_resource(put=update_request_object, type=cli.args.resource_type)
-        spinner.succeed(sub("Updating", "Updated", spinner.text))
+    with spinner:
+        if not update_request_object: # is False if editing cancelled by empty buffer
+            spinner.text = f"Editing {cli.args.resource_type} cancelled"
+            return True
+        else:
+            spinner.text = f"Updating {cli.args.resource_type}"
+            with spinner:
+                network.put_resource(put=update_request_object, type=cli.args.resource_type)
+            spinner.succeed(sub("Updating", "Updated", spinner.text))
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
@@ -582,8 +589,10 @@ def list(cli):
     spinner = get_spinner("working")
     if RESOURCE_ABBREVIATIONS.get(cli.args.resource_type):
         cli.args.resource_type = RESOURCE_ABBREVIATIONS[cli.args.resource_type].name
-    if cli.args.accept and not MUTABLE_NETWORK_RESOURCES.get(cli.args.resource_type):
+    if cli.args.accept and not MUTABLE_NETWORK_RESOURCES.get(cli.args.resource_type): # mutable excludes data-centers
         cli.log.warn("the --as=ACCEPT param is not applicable to resources outside the network domain")
+    if cli.args.query and cli.args.query.get('id'):
+        cli.log.warn("try 'get' command to get by id")
     if cli.args.output == "text":
         if not sys.stdout.isatty():
             cli.log.warning("use --output=yaml or json for scripting nfctl")
@@ -606,9 +615,9 @@ def list(cli):
         elif cli.args.resource_type == "networks":
             if cli.config.general.network_group:
                 network_group = use_network_group(
-                    organization, 
-                    group=cli.config.general.network_group, 
-                    )
+                    organization=organization,
+                    group=cli.config.general.network_group,
+                    spinner=spinner)
                 matches = organization.get_networks_by_group(network_group.id, accept=cli.args.accept, **cli.args.query)
             else:
                 matches = organization.get_networks_by_organization(accept=cli.args.accept, **cli.args.query)
@@ -617,8 +626,8 @@ def list(cli):
                 network, network_group = use_network(
                     organization=organization,
                     group=cli.config.general.network_group, # None unless configured
-                    network_name=cli.config.general.network, 
-                    )
+                    network_name=cli.config.general.network,
+                    spinner=spinner)
             else:
                 cli.log.error("first configure a network to list resources in a network e.g. --network ACMENet")
                 exit(1)
@@ -628,7 +637,7 @@ def list(cli):
                 matches = network.get_resources(type=cli.args.resource_type, accept=cli.args.accept, **cli.args.query)
 
     if len(matches) == 0:
-        spinner.fail(f"found zero {cli.args.resource_type} by '{','.join(query_keys)}'")
+        spinner.fail(f"Found no {cli.args.resource_type} by '{','.join(query_keys)}'")
         exit(0)
     else:
         cli.log.debug(f"found at least one {cli.args.resource_type} by '{','.join(query_keys)}'")
@@ -776,7 +785,6 @@ def delete(cli):
 def demo(cli):
     """Create a demo network or add demo resources to existing network."""
     spinner = get_spinner("working")
-    spinner.text = "working"
     with spinner:
         organization =  use_organization(spinner=spinner)
     if cli.config.general.network:
@@ -787,16 +795,17 @@ def demo(cli):
         with open(friendly_words_filename, 'r') as friendly_words_path:
             friendly_words = json_load(friendly_words_path)
         network_name = f"nfctl-demo-{choice(friendly_words['predicates'])}-{choice(friendly_words['objects'])}"
-    spinner.stop() # always stop for questions
     demo_confirmed = False
     if cli.config.general.yes:
         demo_confirmed = True
     elif sys.stdin.isatty():
+        spinner.stop() # always stop for questions
         demo_confirmed = questions.yesno(f"Run demo in network {network_name} ({organization.label}) now?")
     else:
         raise NeedUserInput("Need --yes or user input to confirm delete")
 
     if demo_confirmed:
+        spinner.text = f"Finding network '{network_name}'"
         with spinner:
             # create network unless exists
             cli.log.setLevel(logging.WARN) # FIXME: hack to silence redundant spinners
@@ -1232,4 +1241,4 @@ text_lexer_filename = path.join(cwd, "table_lexer.py")
 text_lexer = load_lexer_from_file(text_lexer_filename, "NetFoundryTableLexer")
 
 if __name__ == '__main__':
-    main()
+    cli()

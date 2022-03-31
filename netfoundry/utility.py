@@ -267,6 +267,10 @@ def find_generic_resources(url: str, headers: dict, embedded: str=None, proxies:
             del params['sort']
         elif '/hosts' in url:     # workaround sort param bug in MOP-17863
             del params['sort']
+        elif '/networks' in url:     # workaround sort param bug in MOP-17863
+            if params.get('name'):
+                params['findByName'] = params.get('name')
+                del params['name']
         else:
             params['size'] = DEFAULT_PAGE_SIZE
     if params.get('page'):
