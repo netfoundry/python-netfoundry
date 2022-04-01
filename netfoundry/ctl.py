@@ -26,7 +26,6 @@ from xml.sax.xmlreader import InputSource
 
 # importing this causes the 'config' subcommand to be available
 from jwt.exceptions import PyJWTError
-from milc import cli, questions, set_metadata
 from packaging import version
 from pygments import highlight
 from pygments.formatters import Terminal256Formatter
@@ -43,10 +42,14 @@ from .network_group import NetworkGroup
 from .organization import Organization
 from .utility import DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES, MUTABLE_RESOURCE_ABBREVIATIONS, RESOURCE_ABBREVIATIONS, RESOURCES, is_jwt, normalize_caseless, plural, singular
 
+from milc import set_metadata       # this function needed to set metadata immediately below
+set_metadata(version="v"+get_versions()['version'], author="NetFoundry", name="nfctl")  # must precend import milc.cli
+from milc import cli, questions     # this uses metadata set above
+from milc.subcommand import config  # this creates the config subcommand
+
 # this allows the app the terminate gracefully when piped to a truncating consumer like `head`
 signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
-import milc.subcommand.config
 
 class StoreDictKeyPair(argparse.Action):
     """Parse key pairs into a dictionary."""
@@ -75,7 +78,7 @@ class StoreListKeys(argparse.Action):
 @cli.argument('-N', '--network', help='caseless name of the network to manage')
 @cli.argument('-G', '--network-group', help="shortname or ID of a network group to search for network_name")
 @cli.argument('-o', '--output', arg_only=True, help="format the output", default="text", choices=['text', 'yaml', 'json'])
-@cli.argument('-S', '--style', help="highlighting style", metavar='STYLE', default='material', choices=["rrt", "arduino", "monokai", "material", "one-dark", "emacs", "vim", "one-dark"])
+@cli.argument('-S', '--style', help="highlighting style", metavar='STYLE', default='material', choices=["bw", "rrt", "arduino", "monokai", "material", "one-dark", "emacs", "vim", "one-dark"])
 @cli.argument('-B', '--borders', default=True, action='store_boolean', help='print cell borders in text tables')
 @cli.argument('-H', '--headers', default=True, action='store_boolean', help='print column headers in text tables')
 @cli.argument('-Y', '--yes', action='store_true', arg_only=True, help='answer yes to potentially-destructive operations')
@@ -849,14 +852,14 @@ def demo(cli):
                     tunneler_enabled=True,
                 )
                 hosted_edge_routers.extend([er])
-                spinner.succeed(f"placed {cli.config.demo.provider} router in {region}")
+                spinner.succeed(f"Created {cli.config.demo.provider} router in {region}")
 
         try:
             assert(len(hosted_edge_routers) > 0)
         except Exception:
             raise RuntimeError("unexpected error with router placements, found zero hosted routers")
 
-        spinner.text = f"Waiting for {len(hosted_edge_routers)} hosted routers to be online"
+        spinner.text = f"Waiting for {len(hosted_edge_routers)} hosted router(s) to provision"
         with spinner:
             for router_id in [r['id'] for r in hosted_edge_routers]:
                 try:
@@ -885,12 +888,12 @@ def demo(cli):
                 spinner.succeed(f"Found router policy '{blanket_policy_name}'")
 
         endpoints = dict()
-        clients = ['DesktopEndpoint', 'MobileEndpoint', 'LaptopEndpoint']
+        clients = ['Desktop', 'Mobile', 'Laptop']
         for client in clients:
             endpoints[client] = {
                 "attributes": ["#work_from_anywhere"]
             }
-        exits = ['ExitEndpoint']
+        exits = ['Exit Tunneler']
         for exit in exits:
             endpoints[exit] = {
                 "attributes": ["#exits"]
@@ -900,7 +903,7 @@ def demo(cli):
             with spinner:
                 if not network.endpoint_exists(name=end):
                     # create an endpoint for the dialing device that will access services
-                    spinner.text = f"Creating endpoint {end}"
+                    spinner.text = f"Creating endpoint '{end}'"
                     endpoints[end]['properties'] = network.create_endpoint(name=end, attributes=endpoints[end]['attributes'])
                     spinner.succeed(sub('Creating', 'Created', spinner.text))
                 else:
@@ -963,7 +966,7 @@ def demo(cli):
                 customer_router = network.edge_routers(name=customer_router_name)[0]
                 spinner.succeed(sub("Finding", "Found", spinner.text))
 
-        spinner.text = f"Waiting for customer router {customer_router_name} to be online"
+        spinner.text = f"Waiting for customer router {customer_router_name} to be ready for registration"
         # wait for customer router to be PROVISIONED so that registration will be available
         with spinner:
             try:
@@ -1139,10 +1142,10 @@ def use_network(organization: object, network_name: str = None, group: str = Non
         if network.status == 'ERROR':
             cli.log.error(f"network {network.name} has status ERROR")
         elif not cli.config.general.wait:
-            cli.log.debug("wait seconds is 0, not waiting for network to be ready")
+            cli.log.debug("wait seconds is 0, not waiting for network to provision")
         elif not network.status == 'PROVISIONED':
             try:
-                spinner.text = f"Waiting for network {network.name} to be ready"
+                spinner.text = f"Waiting for network {network.name} to provision"
                 network.wait_for_status("PROVISIONED", wait=999, progress=False)
             except KeyboardInterrupt:
                 spinner.fail("Cancelled")
@@ -1235,6 +1238,4 @@ text_lexer_filename = path.join(cwd, "table_lexer.py")
 text_lexer = load_lexer_from_file(text_lexer_filename, "NetFoundryTableLexer")
 
 if __name__ == '__main__':
-    # must precend import milc.cli
-    set_metadata(version="v"+get_versions()['version'], author="NetFoundry", name="nfctl")
     cli()
