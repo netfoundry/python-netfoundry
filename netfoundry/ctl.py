@@ -16,11 +16,13 @@ import tempfile
 from json import dumps as json_dumps
 from json import load as json_load
 from json import loads as json_loads
-from os import environ, path
+from os import environ, path, stat
+from pathlib import Path
 from random import choice, sample, shuffle
 from re import sub
 from shlex import split as shplit
 from shutil import which
+from stat import S_IRUSR, S_IWUSR, S_IXUSR, filemode
 from subprocess import CalledProcessError
 from xml.sax.xmlreader import InputSource
 
@@ -28,6 +30,7 @@ from xml.sax.xmlreader import InputSource
 from jwt.exceptions import PyJWTError
 from milc import set_metadata  # this function needed to set metadata immediately below
 from packaging import version
+from platformdirs import user_cache_path
 from pygments import highlight
 from pygments.formatters import Terminal256Formatter
 from pygments.lexers import get_lexer_by_name, load_lexer_from_file
@@ -95,84 +98,79 @@ def main(cli):
 
 
 @cli.argument('-e', '--eval', help="source or eval output to configure shell environment with a login token", arg_only=True, action="store_true", default=False)
-@cli.argument('-v', '--ziti-version', help=argparse.SUPPRESS, default='0.22.0')                    # minium ziti CLI version supports --cli-identity and --read-only
-@cli.argument('-c', '--ziti-cli', help=argparse.SUPPRESS)
-@cli.argument('ziti_args', help=argparse.SUPPRESS, arg_only=True, nargs='*')
-@cli.argument('login_target', help=argparse.SUPPRESS, arg_only=True, nargs='?', default="organization", choices=['organization', 'ziti'])
 @cli.subcommand('login to a management API')
 def login(cli):
     """Login to an API and cache the expiring token."""
     # if logging in to a NF org (default)
     spinner = get_spinner("working")
-    if cli.args.login_target == "organization":
-        spinner.text = f"Logging in profile '{cli.config.general.profile}'"
-        with spinner:
-            organization = use_organization(spinner=spinner)
-            if cli.config.general.network_group and cli.config.general.network:
-                cli.log.debug(f"configuring network {cli.config.general.network} in group {cli.config.general.network_group}")
-                network, network_group = use_network(
-                    organization=organization,
-                    group=cli.config.general.network_group,
-                    network_name=cli.config.general.network)
-            elif cli.config.general.network:
-                cli.log.debug(f"configuring network {cli.config.general.network} and local group if unique name for this organization")
-                network, network_group = use_network(
-                    organization=organization,
-                    network_name=cli.config.general.network)
-            elif cli.config.general.network_group:
-                cli.log.debug(f"configuring network group {cli.config.general.network_group}")
-                network_group = use_network_group(
-                    organization,
-                    group=cli.config.general.network_group)
-                network = None
-            else:
-                cli.log.debug("not configuring network or network group")
-                network, network_group = None, None
+    spinner.text = f"Logging in profile '{cli.config.general.profile}'"
+    with spinner:
+        organization = use_organization(spinner=spinner)
+        if cli.config.general.network_group and cli.config.general.network:
+            cli.log.debug(f"configuring network {cli.config.general.network} in group {cli.config.general.network_group}")
+            network, network_group = use_network(
+                organization=organization,
+                group=cli.config.general.network_group,
+                network_name=cli.config.general.network)
+        elif cli.config.general.network:
+            cli.log.debug(f"configuring network {cli.config.general.network} and local group if unique name for this organization")
+            network, network_group = use_network(
+                organization=organization,
+                network_name=cli.config.general.network)
+        elif cli.config.general.network_group:
+            cli.log.debug(f"configuring network group {cli.config.general.network_group}")
+            network_group = use_network_group(
+                organization,
+                group=cli.config.general.network_group)
+            network = None
+        else:
+            cli.log.debug("not configuring network or network group")
+            network, network_group = None, None
 
-            summary_object = dict()
-            summary_object['caller'] = organization.caller
-            summary_object['organization'] = organization.describe
-            if network_group:
-                summary_object['network_group'] = network_group.describe
-                summary_object['network_group']['networks_count'] = len(network_group.network_ids_by_normal_name.keys())
-            if network:
-                summary_object['network'] = network.describe
+        summary_object = dict()
+        summary_object['caller'] = organization.caller
+        summary_object['organization'] = organization.describe
+        if network_group:
+            summary_object['network_group'] = network_group.describe
+            summary_object['network_group']['networks_count'] = len(network_group.network_ids_by_normal_name.keys())
+        if network:
+            summary_object['network'] = network.describe
 
-            # compose a summary table from selected details if text, not yaml or
-            # json (unless shell which means to suppress normal output and only
-            # configure the current shell)
-            if not cli.args.eval:
-                if cli.args.output == "text":
-                    summary_table = []
-                    summary_table.append(['Caller ID', f"{summary_object['caller']['name']} ({summary_object['caller']['email']}) in {organization.label} ({organization.name})"])
-                    if network_group:
-                        summary_table.append(['Network Resource Group', f"{summary_object['network_group']['name']} ({summary_object['network_group']['organizationShortName']}) with {summary_object['network_group']['networks_count']} networks"])
-                    if network:
-                        summary_table.append(['Configured Network', f"{summary_object['network']['name']} ({summary_object['network']['region']}) is {summary_object['network']['productVersion']} and status {summary_object['network']['status']}"])
-                    if cli.config.general.borders:
-                        table_borders = "presto"
-                    else:
-                        table_borders = "plain"
-                    table = tabulate(tabular_data=summary_table, headers=['Domain', 'Summary'], tablefmt=table_borders)
-                    if cli.config.general.color:
-                        highlighted = highlight(table, text_lexer, Terminal256Formatter(style=cli.config.general.style))
-                        cli.echo(highlighted)
-                    else:
-                        cli.echo(table)
-                elif cli.args.output == "yaml":
-                    if cli.config.general.color:
-                        highlighted = highlight(yaml_dumps(summary_object, indent=4), yaml_lexer, Terminal256Formatter(style=cli.config.general.style))
-                        cli.echo(highlighted)
-                    else:
-                        cli.echo(yaml_dumps(summary_object, indent=4))
-                elif cli.args.output == "json":
-                    if cli.config.general.color:
-                        highlighted = highlight(json_dumps(summary_object, indent=4), json_lexer, Terminal256Formatter(style=cli.config.general.style))
-                        cli.echo(highlighted)
-                    else:
-                        cli.echo(json_dumps(summary_object, indent=4))
-            else:             # if eval
-                token_env = f"""
+        # compose a summary table from selected details if text, not yaml or
+        # json (unless shell which means to suppress normal output and only
+        # configure the current shell)
+        if not cli.args.eval:
+            if cli.args.output == "text":
+                summary_table = []
+                summary_table.append(['Caller ID', f"{summary_object['caller']['name']} ({summary_object['caller']['email']}) in {organization.label} ({organization.name})"])
+                if network_group:
+                    summary_table.append(['Network Resource Group', f"{summary_object['network_group']['name']} ({summary_object['network_group']['organizationShortName']}) with {summary_object['network_group']['networks_count']} networks"])
+                if network:
+                    summary_table.append(['Configured Network', f"{summary_object['network']['name']} ({summary_object['network']['region']}) is {summary_object['network']['productVersion']} and status {summary_object['network']['status']}"])
+                if cli.config.general.borders:
+                    table_borders = "presto"
+                else:
+                    table_borders = "plain"
+                table = tabulate(tabular_data=summary_table, headers=['Domain', 'Summary'], tablefmt=table_borders)
+                if cli.config.general.color:
+                    highlighted = highlight(table, text_lexer, Terminal256Formatter(style=cli.config.general.style))
+                    cli.echo(highlighted)
+                else:
+                    cli.echo(table)
+            elif cli.args.output == "yaml":
+                if cli.config.general.color:
+                    highlighted = highlight(yaml_dumps(summary_object, indent=4), yaml_lexer, Terminal256Formatter(style=cli.config.general.style))
+                    cli.echo(highlighted)
+                else:
+                    cli.echo(yaml_dumps(summary_object, indent=4))
+            elif cli.args.output == "json":
+                if cli.config.general.color:
+                    highlighted = highlight(json_dumps(summary_object, indent=4), json_lexer, Terminal256Formatter(style=cli.config.general.style))
+                    cli.echo(highlighted)
+                else:
+                    cli.echo(json_dumps(summary_object, indent=4))
+        else:             # if eval
+            token_env = f"""
 # $ source <(nfctl --credentials=credentials.json login --eval)
 export NETFOUNDRY_API_TOKEN="{organization.token}"
 export NETFOUNDRY_API_ACCOUNT="{organization.credentials if hasattr(organization, 'credentials') else ''}"
@@ -181,37 +179,98 @@ export NETFOUNDRY_ORGANIZATION="{organization.id}"
 {'export NETFOUNDRY_NETWORK_GROUP="'+network_group.id+'"' if network_group else ''}
 {'export MOPENV="'+organization.environment+'"' if organization.environment else ''}
 """
-                if cli.config.general.color:
-                    highlighted = highlight(token_env, bash_lexer, Terminal256Formatter(style=cli.config.general.style))
-                    cli.echo(highlighted)
-                else:
-                    cli.echo(token_env)
-
-    elif cli.args.login_target == "ziti":
-        if cli.config.login.ziti_cli:
-            ziti_cli = cli.config.login.ziti_cli
-        else:
-            if platform.system() == 'Windows':
-                ziti_cli = 'ziti.exe'
+            if cli.config.general.color:
+                highlighted = highlight(token_env, bash_lexer, Terminal256Formatter(style=cli.config.general.style))
+                cli.echo(highlighted)
             else:
-                ziti_cli = 'ziti'
-        which_ziti = which(ziti_cli)
-        if which_ziti:
-            cli.log.debug(f"found ziti CLI executable in {which_ziti}")
+                cli.echo(token_env)
+
+@cli.argument('-v', '--ziti-version', help=argparse.SUPPRESS, default='0.22.0')                    # minium ziti CLI version supports --cli-identity and --read-only
+@cli.argument('-c', '--ziti-cli', help=argparse.SUPPRESS)
+@cli.argument('ziti_args', help=argparse.SUPPRESS, arg_only=True, nargs='*')
+@cli.argument('ziti_subcmd', help=argparse.SUPPRESS, arg_only=True)
+@cli.subcommand('run ziti CLI', hidden=True)
+def ziti(cli):
+    """Run read-only Ziti CLI commands remotely on controller host."""
+    if not cli.config.general.network:
+        cli.log.error("need --network=ACMENet")
+        exit(1)
+
+    # verify we can run ziti CLI
+    if cli.config.login.ziti_cli:
+        ziti_cli = cli.config.login.ziti_cli
+    else:
+        if platform.system() == 'Windows':
+            ziti_cli = 'ziti.exe'
         else:
-            cli.log.error(f"missing executable '{ziti_cli}' in PATH: {environ['PATH']}")
-            exit(1)
-        exec = cli.run([ziti_cli, '--version'])
-        if exec.returncode == 0:
-            cli.log.debug(f"found ziti CLI '{which_ziti}' version '{exec.stdout}'")
-        else:
-            cli.log.error(f"failed to get ziti CLI version: {exec.stderr}")
-            exit(exec.returncode)
-        try:
-            assert(version.parse(exec.stdout) >= version.parse(cli.config.login.ziti_version))
-        except AssertionError as e:
-            cli.log.error(f"found ziti CLI '{which_ziti}' but version is not at least {cli.config.login.ziti_version}: {e}")
-            exit(1)
+            ziti_cli = 'ziti'
+    which_ziti = which(ziti_cli)
+    if which_ziti:
+        cli.log.debug(f"found ziti CLI executable in {which_ziti}")
+    else:
+        cli.log.error(f"missing executable '{ziti_cli}' in PATH: {environ['PATH']}")
+        exit(1)
+    exec = cli.run([ziti_cli, '--version'])
+    if exec.returncode == 0:
+        cli.log.debug(f"found ziti CLI '{which_ziti}' version '{exec.stdout}'")
+    else:
+        cli.log.error(f"failed to get ziti CLI version: {exec.stderr}")
+        exit(exec.returncode)
+    try:
+        assert(version.parse(exec.stdout) >= version.parse(cli.config.login.ziti_version))
+    except AssertionError as e:
+        cli.log.error(f"need newer ziti CLI '{which_ziti}' with version >= {cli.config.login.ziti_version}: {e}")
+        exit(1)
+
+    # set up the ziti config cache
+    network_name_safe = '_'.join(cli.config.general.network.casefold().split())
+    cache_dir_path = user_cache_path(appname=cli.prog_name)
+    try:
+        # create and correct mode to 0o700
+        cache_dir_path.mkdir(mode=S_IRUSR | S_IWUSR | S_IXUSR, parents=True, exist_ok=True)
+        cache_dir_path.chmod(mode=S_IRUSR | S_IWUSR | S_IXUSR)
+    except Exception as e:
+        raise RuntimeError(f"failed to create cache dir '{cache_dir_path.resolve()}', got {e}")
+    else:
+        cache_dir_stats = stat(cache_dir_path)
+        logging.debug(f"ziti config cache dir exists with mode {filemode(cache_dir_stats.st_mode)}")
+    ziti_config_file_path = Path(cache_dir_path / network_name_safe)
+    logging.debug(f"ziti config file path is computed '{ziti_config_file_path.resolve()}'")
+
+    # if edge command and verb is login then get a token and the SSH ProxyJump config and cache the ziti config file, ignoring extra args
+    if cli.args.ziti_subcmd == 'edge' and cli.args.ziti_args[0] == 'login':
+        if len(cli.args.ziti_args[1:]) > 0:
+            cli.log.warning(f"ignoring extra args: {' '.join(cli.args.ziti_args[1:])}")
+        spinner = get_spinner("working")
+        with spinner:
+            spinner.text = f"Logging in profile '{cli.config.general.profile}'"
+            organization = use_organization(spinner=spinner)
+            if cli.config.general.network_group and cli.config.general.network:
+                cli.log.debug(f"configuring network {cli.config.general.network} in group {cli.config.general.network_group}")
+                spinner.text = f"Finding network '{cli.config.general.network} by network group '{cli.config.general.network_group}'"
+                network, network_group = use_network(
+                    organization=organization,
+                    group=cli.config.general.network_group,
+                    network_name=cli.config.general.network,
+                    spinner=spinner)
+            elif cli.config.general.network:
+                cli.log.debug(f"configuring network {cli.config.general.network} and local group if unique name for this organization")
+                spinner.text = f"Finding network '{cli.config.general.network}"
+                network, network_group = use_network(
+                    organization=organization,
+                    network_name=cli.config.general.network,
+                    spinner=spinner)
+            elif cli.config.general.network_group:
+                cli.log.debug(f"configuring network group {cli.config.general.network_group}")
+                spinner.text(f"Finding network group '{cli.config.general.network_group}'")
+                network_group = use_network_group(
+                    organization,
+                    group=cli.config.general.network_group,
+                    spinner=spinner)
+                network = None
+            else:
+                cli.log.debug("not configuring network or network group")
+                network, network_group = None, None
 
         spinner.text = "Logging in to Ziti controller management API"
         with spinner:
@@ -245,7 +304,6 @@ export NETFOUNDRY_ORGANIZATION="{organization.id}"
                 ziti_login_cmd = f" edge login localhost:{controller_host['port']}/edge/management/v1/ --token {ziti_token} --cert /opt/netfoundry/ziti/ziti-controller/certs/ca.external/certs/intermediate-chain.pem --read-only "
                 cli.run(shplit(proxy_jump_cmd + ziti_cmd + ziti_login_cmd), capture_output=False)
                 cli.run(shplit(proxy_jump_cmd + ziti_cmd) + cli.args.ziti_args, capture_output=False)
-                # network_name_safe = '_'.join(network.name.casefold().split())
                 # ziti_cli_identity = '-'.join([organization.environment.casefold(), organization.label.casefold(), network_group.name.casefold(), network_name_safe])
                 # ziti_edge_port = "443"
                 # exec = cli.run([ziti_cli, 'edge', 'login', '--read-only', '--cli-identity', ziti_cli_identity, f'{ziti_ctrl_ip}:{ziti_edge_port}', '--token', ziti_token], capture_output=False)
@@ -258,6 +316,13 @@ export NETFOUNDRY_ORGANIZATION="{organization.id}"
                 # else:
                 #     cli.log.error("failed to login")
                 #     exit(exec.returncode)
+    elif ziti_config_file_path.exists():
+        # compute and check network unique signature
+        # pass-through ziti commands to remote
+        pass
+    else:
+        cli.log.error(f"need login:\n\t nfctl --network=ACMENet ziti edge login")
+        exit(1)
 
 
 @cli.subcommand('logout current profile from an organization')
@@ -504,7 +569,7 @@ def get(cli, echo: bool = True, embed='all'):
                     network_name=cli.config.general.network,
                     )
             else:
-                cli.log.error("first configure a network to get resources in a network e.g. --network ACMENet")
+                cli.log.error("need --network=ACMENet")
                 exit(1)
             if cli.args.resource_type == "data-center":
                 if cli.args.accept:
@@ -621,7 +686,7 @@ def list(cli):
                     network_name=cli.config.general.network,
                     spinner=spinner)
             else:
-                cli.log.error("first configure a network to list resources in a network e.g. --network ACMENet")
+                cli.log.error("first configure a network: '--network=ACMENet'")
                 exit(1)
             if cli.args.resource_type == "data-centers":
                 matches = network.get_edge_router_data_centers(**cli.args.query)
