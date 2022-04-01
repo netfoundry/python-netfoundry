@@ -96,6 +96,7 @@ def main(cli):
 @cli.argument('-e', '--eval', help="source or eval output to configure shell environment with a login token", arg_only=True, action="store_true", default=False)
 @cli.argument('-v', '--ziti-version', help=argparse.SUPPRESS, default='0.22.0')                    # minium ziti CLI version supports --cli-identity and --read-only
 @cli.argument('-c', '--ziti-cli', help=argparse.SUPPRESS)
+@cli.argument('ziti_args', help=argparse.SUPPRESS, arg_only=True, nargs='*')
 @cli.argument('login_target', help=argparse.SUPPRESS, arg_only=True, nargs='?', default="organization", choices=['organization', 'ziti'])
 @cli.subcommand('login to a management API')
 def login(cli):
@@ -220,10 +221,11 @@ export NETFOUNDRY_ORGANIZATION="{organization.id}"
                 network_name=cli.config.general.network)
             tempfile.mkdtemp()
             network_controller = network.get_resource_by_id(type="network-controller", id=network.network_controller['id'])
+            controller_host = network.get_resource_by_id(type="host", id=network_controller['hostId'])
             if 'domainName' in network_controller.keys() and network_controller['domainName']:
                 ziti_ctrl_ip = network_controller['domainName']
             else:
-                ziti_ctrl_ip = network_controller['_embedded']['host']['ipAddress']
+                ziti_ctrl_ip = controller_host['ipAddress']
             try:
                 session = network.get_controller_session(network.network_controller['id'])
                 ziti_token = session['sessionToken']
@@ -237,18 +239,24 @@ export NETFOUNDRY_ORGANIZATION="{organization.id}"
                 #     }
                 # else:
                 #     proxies = dict()
-                ziti_edge_port = "443"
-                network_name_safe = '_'.join(network.name.casefold().split())
-                ziti_cli_identity = '-'.join([organization.environment.casefold(), organization.label.casefold(), network_group.name.casefold(), network_name_safe])
-                exec = cli.run([ziti_cli, 'edge', 'login', '--read-only', '--cli-identity', ziti_cli_identity, f'{ziti_ctrl_ip}:{ziti_edge_port}', '--token', ziti_token], capture_output=False)
-                if exec.returncode == 0:            # if succeeded
-                    exec = cli.run(shplit(f"{ziti_cli} edge use {ziti_cli_identity}"), capture_output=False)
-                    if not exec.returncode == 0:    # if error
-                        cli.log.error(f"failed to switch default ziti login identity to '{ziti_cli_identity}'")
-                        exit(exec.returncode)
-                else:
-                    cli.log.error("failed to login")
-                    exit(exec.returncode)
+                proxy_jump_cmd = f"ssh -J bastion.{organization.environment}.netfoundry.io {controller_host['username']}@{ziti_ctrl_ip} "
+                ziti_cmd = " /opt/netfoundry/ziti/ziti "
+                ziti_login_cmd = f" edge login localhost:{controller_host['port']}/edge/management/v1/ --token {ziti_token} --cert /opt/netfoundry/ziti/ziti-controller/certs/ca.external/certs/intermediate-chain.pem --read-only "
+                cli.run(shplit(proxy_jump_cmd + ziti_cmd + ziti_login_cmd), capture_output=False)
+                cli.run(shplit(proxy_jump_cmd + ziti_cmd) + cli.args.ziti_args, capture_output=False)
+                # network_name_safe = '_'.join(network.name.casefold().split())
+                # ziti_cli_identity = '-'.join([organization.environment.casefold(), organization.label.casefold(), network_group.name.casefold(), network_name_safe])
+                # ziti_edge_port = "443"
+                # exec = cli.run([ziti_cli, 'edge', 'login', '--read-only', '--cli-identity', ziti_cli_identity, f'{ziti_ctrl_ip}:{ziti_edge_port}', '--token', ziti_token], capture_output=False)
+                # if exec.returncode == 0:            # if succeeded
+                    # exec = cli.run(shplit(f"{ziti_cli} edge use {ziti_cli_identity}"), capture_output=False)
+                    # if not exec.returncode == 0:    # if error
+                    #     cli.log.error(f"failed to switch default ziti login identity to '{ziti_cli_identity}'")
+                    #     exit(exec.returncode)
+                #     pass
+                # else:
+                #     cli.log.error("failed to login")
+                #     exit(exec.returncode)
 
 
 @cli.subcommand('logout current profile from an organization')
