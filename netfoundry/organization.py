@@ -397,12 +397,12 @@ class Organization:
             self.audience+'identity/v1/api-account-identities/self',
             self.audience+'identity/v1/user-identities/self',
         ]
-        headers = { "authorization": "Bearer " + self.token }
+        headers = {"authorization": "Bearer " + self.token}
         for url in urls:
             try:
                 caller, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
             except Exception as e:
-                logging.debug(f"failed to get caller identity from url: '{url}'")
+                logging.debug(f"failed to get caller identity from url: '{url}', trying next until last, got {e}")
             else:
                 return(caller)
         raise RuntimeError("failed to get caller identity from any url")

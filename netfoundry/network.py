@@ -369,8 +369,6 @@ class Network:
             params["networkId"] = self.id
         if not NETWORK_RESOURCES.get(plural(type)):
             raise RuntimeError(f"unknown resource type '{plural(type)}'. Choices: {','.join(NETWORK_RESOURCES.keys())}")
-        elif plural(type) in ["edge-routers", "network-controllers"]:
-            params['embed'] = "host"
 
         headers = {"authorization": "Bearer " + self.token}
         url = self.audience+'core/v2/'+plural(type)+'/'+id

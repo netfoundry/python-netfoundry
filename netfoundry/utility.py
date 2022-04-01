@@ -6,11 +6,10 @@ import logging
 import os
 from stat import filemode
 import re  # regex
-#import sys  # open stderr
+from urllib.parse import urlparse
 import time  # enforce a timeout; sleep
 import unicodedata  # case insensitive compare in Utility
 from dataclasses import dataclass, field
-from lib2to3.pgen2 import token
 from re import sub
 from uuid import UUID  # validate UUIDv4 strings
 
@@ -24,9 +23,13 @@ from urllib3 import disable_warnings
 from urllib3.exceptions import InsecureRequestWarning
 from urllib3.util.retry import Retry
 
+from .exceptions import UnknownResourceType
+
 disable_warnings(InsecureRequestWarning)
 
 p = inflect.engine()
+
+
 def plural(singular):
     """Pluralize a singular form."""
     # if already plural then return, else pluralize
@@ -35,19 +38,21 @@ def plural(singular):
     else:
         return(p.plural_noun(singular))
 
+
 def singular(plural):
     """Singularize a plural form."""
     return(p.singular_noun(plural))
 
-def kebab2camel(kebab: str, case: str="lower"):          # "lower" dromedary or "upper" Pascal
+
+def kebab2camel(kebab: str, case: str = "lower"):          # "lower" dromedary or "upper" Pascal
     """Convert kebab case to camel case."""
     if not isinstance(kebab, str):
         raise RuntimeError(f"bad arg to kebab2camel {str(kebab)}")
     kebab_words = kebab.split('-')
     camel_words = list()
-    if case in ["lower","dromedary"]:
+    if case in ["lower", "dromedary"]:
         camel_words.append(kebab_words[0].lower())  # first word is lowercase
-    elif case in ["upper","pascal"]:
+    elif case in ["upper", "pascal"]:
         camel_words.append(kebab_words[0].upper())  # first word is uppercase
     else:
         raise Exception("param 'case' wants 'lower' or 'upper'")
@@ -59,14 +64,17 @@ def kebab2camel(kebab: str, case: str="lower"):          # "lower" dromedary or 
     camel = ''.join(camel_words)
     return camel
 
+
 def snake2camel(snake_str):
     """Convert a string from snake case to camel case."""
     first, *others = snake_str.split('_')
     return ''.join([first.lower(), *map(str.title, others)])
 
+
 def camel2snake(camel_str):
     """Convert a string from camel case to snake case."""
     return sub(r'(?<!^)(?=[A-Z])', '_', camel_str).lower()
+
 
 def abbreviate(kebab):
     """Abbreviate a kebab-case string with the first letter of each word."""
@@ -76,6 +84,7 @@ def abbreviate(kebab):
         letters.extend(word[0])
     return ''.join(letters)
 
+
 def normalize_caseless(text):
     """Normalize a string as lowercase unicode KD form.
 
@@ -84,16 +93,18 @@ def normalize_caseless(text):
     """
     return unicodedata.normalize("NFKD", text.casefold())
 
+
 def caseless_equal(left, right):
     """Compare the KD normal form of left, right strings."""
     return normalize_caseless(left) == normalize_caseless(right)
+
 
 def get_token_cache(path):
     """Try to read the token cache file and return the object."""
     try:
         token_cache = json.loads(path.read_text())
     except FileNotFoundError as e:
-        raise RuntimeError(f"cache file '{path.__str__()}' not found")
+        raise RuntimeError(f"cache file '{path.__str__()}' not found, got {e}")
     except JSONDecodeError as e:
         raise RuntimeError(f"failed to parse cache file '{path.__str__()}' as JSON, got {e}")
     except Exception as e:
@@ -106,6 +117,7 @@ def get_token_cache(path):
         return token_cache
     else:
         raise Exception("not all expected token cache file keys were found: token, expiry, audience")
+
 
 def jwt_expiry(token):
     """Return an epoch timestampt when the token will be expired.
@@ -128,6 +140,7 @@ def jwt_expiry(token):
     finally:
         return expiry
 
+
 def jwt_environment(token):
     """Try to extract the environment name from a JWT.
 
@@ -147,16 +160,17 @@ def jwt_environment(token):
 
     else:
         if re.match(r'https://cognito-', iss):
-            environment = re.sub(r'https://gateway\.([^.]+)\.netfoundry\.io.*',r'\1',claim['scope'])
+            environment = re.sub(r'https://gateway\.([^.]+)\.netfoundry\.io.*', r'\1', claim['scope'])
             logging.debug(f"matched Cognito issuer URL convention, found environment '{environment}'")
         elif re.match(r'.*\.auth0\.com', iss):
-            environment = re.sub(r'https://netfoundry-([^.]+)\.auth0\.com.*',r'\1',claim['iss'])
+            environment = re.sub(r'https://netfoundry-([^.]+)\.auth0\.com.*', r'\1', claim['iss'])
             logging.debug(f"matched Auth0 issuer URL convention, found environment '{environment}'")
         else:
             environment = "production"
             logging.debug(f"failed to match Auth0 and Cognito issuer URL conventions, assuming environment is '{environment}'")
     finally:
         return environment
+
 
 def jwt_decode(token):
     # TODO: figure out how to stop doing this because the token is for the
@@ -167,10 +181,11 @@ def jwt_decode(token):
     try:
         claim = jwt.decode(jwt=token, algorithms=["RS256"], options={"verify_signature": False})
     except jwt.exceptions.PyJWTError as e:
-        raise jwt.exceptions.PyJWTError("failed to parse bearer token as JWT")
+        raise jwt.exceptions.PyJWTError(f"failed to parse bearer token as JWT, got {e}")
     except Exception as e:
         raise RuntimeError(f"unexpect error parsing JWT, got {e}")
     return claim
+
 
 def is_jwt(token):
     """If is a JWT then True."""
@@ -184,19 +199,37 @@ def is_jwt(token):
     else:
         return True
 
+
 def is_uuidv4(string: str):
     """Test if string is valid UUIDv4."""
-    try: UUID(string, version=4)
+    try:
+        UUID(string, version=4)
     except ValueError:
         return False
     else:
         return True
 
+
 def eprint(*args, **kwargs):
     """Adapt legacy function to logging."""
     logging.debug(*args, **kwargs)
 
-def get_generic_resource(url: str, headers: dict, proxies: dict=dict(), verify: bool=True, accept: str=None, **kwargs):
+
+def get_resource_type_by_url(url: str):
+    """Get the resource type definition from a resource URL."""
+    try:
+        url_parts = urlparse(url)
+        url_path = url_parts.path
+        resource_type = sub(r'/(core|rest|identity|authorization)/v\d+/([^/]+)/?.*', r'\2', url_path)
+    except Exception as e:
+        raise(f"error parsing url path, got {e}")
+    if RESOURCES.get(resource_type):
+        return RESOURCES.get(resource_type)
+    else:
+        raise UnknownResourceType(resource_type, RESOURCES.keys())
+
+
+def get_generic_resource(url: str, headers: dict, proxies: dict = dict(), verify: bool = True, accept: str = None, **kwargs):
     """
     Get, deserialize, and return a single resource.
 
@@ -214,6 +247,14 @@ def get_generic_resource(url: str, headers: dict, proxies: dict=dict(), verify: 
             headers['accept'] = f"application/json;as={accept}"
         else:
             logging.warn("ignoring invalid value for header 'accept': '{:s}'".format(accept))
+
+    try:
+        resource_type = get_resource_type_by_url(url)
+    except Exception:
+        raise
+    else:
+        if resource_type.name in ["edge-routers", "network-controllers"]:
+            params['embed'] = "host"
 
     try:
         response = http.get(
@@ -241,7 +282,8 @@ def get_generic_resource(url: str, headers: dict, proxies: dict=dict(), verify: 
         else:
             return resource, status_symbol
 
-def find_generic_resources(url: str, headers: dict, embedded: str=None, proxies: dict=dict(), verify: bool=True, accept: str=None, **kwargs):
+
+def find_generic_resources(url: str, headers: dict, embedded: str = None, proxies: dict = dict(), verify: bool = True, accept: str = None, **kwargs):
     """
     Generate each page of a type of resource.
 
@@ -252,31 +294,49 @@ def find_generic_resources(url: str, headers: dict, embedded: str=None, proxies:
     :param verify: Requests verify bool is off if proxies enabled in this lib
     :param kwargs: additional query params are typically logical AND if supported or ignored by the API if not
     """
+    # page through all pages unless a particular page or size or both are requested
     get_all_pages = True
+    # parse all kwargs as query params
     params = dict()
+    # validate and store the resource type
+    try:
+        resource_type = get_resource_type_by_url(url)
+    except Exception:
+        raise
+    else:
+        if resource_type.name in ["edge-routers", "network-controllers"]:
+            params['embed'] = "host"
     for param in kwargs.keys():
-        params[param] = kwargs[param]
+        if param == 'name' and resource_type.name == 'networks':  # workaround sort param bug in MOP-17863
+            params['findByName'] = param
+        elif param == 'networkGroupId' and resource_type.name == 'network-groups':
+            params['findByNetworkGroupId'] = param
+        else:
+            params[param] = kwargs[param]
+
+    # normalize output with a default sort param
     if not params.get('sort'):
         params["sort"] = "name,asc"
+    if resource_type.name == 'identity':     # workaround sort param bug in MOP-18018
+        del params['sort']
+    elif resource_type.name == 'hosts':      # workaround sort param bug in MOP-17863
+        del params['sort']
+
+    # only get one page of the requested size, else default page size and all pages
     if params.get('size'):
         get_all_pages = False
     else:
-        if '/data-centers' in url:
-            params['size'] = 3000 # workaround last page bug in MOP-17993
-        elif '/identity' in url:  # workaround sort param bug in MOP-18018
-            del params['sort']
-        elif '/hosts' in url:     # workaround sort param bug in MOP-17863
-            del params['sort']
-        elif '/networks' in url:     # workaround sort param bug in MOP-17863
-            if params.get('name'):
-                params['findByName'] = params.get('name')
-                del params['name']
+        if resource_type.name == 'data-centers':
+            params['size'] = 3000    # workaround last page bug in MOP-17993
         else:
             params['size'] = DEFAULT_PAGE_SIZE
+
+    # only get requested page, else first page and all pages
     if params.get('page'):
         get_all_pages = False
     else:
         params['page'] = 0
+
     if accept:
         if accept in ["create", "update"]:
             headers['accept'] = "application/json;as="+accept
@@ -314,9 +374,9 @@ def find_generic_resources(url: str, headers: dict, embedded: str=None, proxies:
                     raise RuntimeError(f"got 'page' key in HTTP response but missing expected sub-key: {e}")
                 else:
                     if total_elements == 0:
-                        yield_page = list() # delay yielding until end of flow
+                        yield_page = list()  # delay yielding until end of flow
                     else:
-                        if embedded: # function param 'embedded' specifies the reference in which the collection of resources should be found
+                        if embedded:         # function param 'embedded' specifies the reference in which the collection of resources should be found
                             try:
                                 yield_page = resource_page['_embedded'][embedded]
                             except KeyError as e:
@@ -326,8 +386,8 @@ def find_generic_resources(url: str, headers: dict, embedded: str=None, proxies:
                     yield yield_page
 
                     # then yield subsequent pages, if applicable
-                    if get_all_pages: # this is False if param 'page' or 'size' to stop recursion or get a single page
-                        for next_page in range(1,total_pages): # first page is 0
+                    if get_all_pages:         # this is False if param 'page' or 'size' to stop recursion or get a single page
+                        for next_page in range(1, total_pages):  # first page is 0
                             params['page'] = next_page
                             try:
                                 # recurse
@@ -336,6 +396,7 @@ def find_generic_resources(url: str, headers: dict, embedded: str=None, proxies:
                                 raise RuntimeError(f"failed to get page {next_page} of {total_pages}, got {e}'")
             else:
                 yield resource_page
+
 
 class Utility:
     """Legacy interface to utility functions."""
@@ -357,6 +418,8 @@ MUTABLE_NETWORK_RESOURCES = dict()
 MUTABLE_RESOURCE_ABBREVIATIONS = dict()
 EMBEDDABLE_NETWORK_RESOURCES = dict()
 RESOURCE_ABBREVIATIONS = dict()
+
+
 @dataclass
 class ResourceTypeParent:
     """Parent class for ResourceType class."""
@@ -370,6 +433,8 @@ class ResourceTypeParent:
 
 # the instance's attributes can not be frozen because we're computing the
 # _embedded key and assigning post-init
+
+
 @dataclass(frozen=False)
 class ResourceType(ResourceTypeParent):
     """Typed resource type spec.
@@ -414,6 +479,7 @@ class ResourceType(ResourceTypeParent):
                 MUTABLE_NETWORK_RESOURCES[self.name] = self
                 MUTABLE_RESOURCE_ABBREVIATIONS[self.abbreviation] = self
         return super().__post_init__()
+
 
 RESOURCES = {
     'data-centers': ResourceType(
@@ -538,17 +604,18 @@ RESOURCES = {
 
 # TODO: [MOP-13441] associate locations with a short list of major geographic regions / continents
 MAJOR_REGIONS = {
-    "AWS" : {
-        "Americas": ("Canada Central","N. California","N. Virginia","Ohio","Oregon","Sao Paulo"),
-        "EuropeMiddleEastAfrica": ("Bahrain","Cape Town South Africa","Frankfurt","Ireland","London","Milan","Paris","Stockholm"),
-        "AsiaPacific": ("Hong Kong","Mumbai","Seoul","Singapore","Sydney","Tokyo")
+    "AWS": {
+        "Americas": ("Canada Central", "N. California", "N. Virginia", "Ohio", "Oregon", "Sao Paulo"),
+        "EuropeMiddleEastAfrica": ("Bahrain", "Cape Town South Africa", "Frankfurt", "Ireland", "London", "Milan", "Paris", "Stockholm"),
+        "AsiaPacific": ("Hong Kong", "Mumbai", "Seoul", "Singapore", "Sydney", "Tokyo")
     }
 }
 
 DC_PROVIDERS = ["AWS", "AZURE", "GCP", "OCP"]
 RESOURCE_STATUSES = ["PROVISIONED", "PROVISIONING", "DELETED", "DELETING", "FINISHED", "STARTED"]
 VALID_SERVICE_PROTOCOLS = ["tcp", "udp"]
-VALID_SEPARATORS = '[:-]' # : or - will match regex pattern
+VALID_SEPARATORS = '[:-]'  # : or - will match regex pattern
+
 
 def docstring_parameters(*args, **kwargs):
     """Part a method's __doc__ string with format()."""
@@ -564,9 +631,10 @@ RETRY_STRATEGY = Retry(
     method_whitelist=["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE"],
     backoff_factor=1
 )
-
-DEFAULT_TIMEOUT = 31 # seconds, Gateway Service waits 30s before responding with an error code e.g. 503 and
+DEFAULT_TIMEOUT = 31  # seconds, Gateway Service waits 30s before responding with an error code e.g. 503 and
 # so waiting at least 31s is necessary to obtain that information
+
+
 class TimeoutHTTPAdapter(HTTPAdapter):
     """Configure Python requests library to have retry and timeout defaults."""
 
@@ -583,15 +651,15 @@ class TimeoutHTTPAdapter(HTTPAdapter):
             kwargs["timeout"] = self.timeout
         return super().send(request, **kwargs)
 
+
 http = Session()
 # Mount it for both http and https usage
 adapter = TimeoutHTTPAdapter(timeout=DEFAULT_TIMEOUT, max_retries=RETRY_STRATEGY)
 http.mount("https://", adapter)
 http.mount("http://", adapter)
-
 STATUS_CODES = status_codes
-
 DEFAULT_TOKEN_EXPIRY = 3600
+
 
 class LookupDict(dict):
     """Helper class to create a lookup dictionary from a set."""
@@ -612,6 +680,6 @@ class LookupDict(dict):
     def get(self, key, default=None):
         return self.__dict__.get(key, default)
 
-ENVIRONMENTS = ['production','staging','sandbox']
 
+ENVIRONMENTS = ['production', 'staging', 'sandbox']
 DEFAULT_PAGE_SIZE = 1000
