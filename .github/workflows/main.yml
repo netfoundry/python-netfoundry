@@ -36,18 +36,9 @@ jobs:
     - name: Build Package
       run: python3 -m build
 
-    - name: Publish Test Package
-      uses: pypa/gh-action-pypi-publish@27b31702a0e7fc50959f5ad993c78deac1bdfc29
-      with:
-        user: __token__
-        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
-        repository_url: https://test.pypi.org/legacy/
-
-    - name: Temporarily Store the Python Package in GitHub # for convenient reference, troubleshooting, investigation, etc...
-      uses: actions/upload-artifact@v2
-      with:
-        name: netfoundry-pypi-${{ github.run_id }}
-        path: dist/netfoundry-*.tar.gz
+    - name: Install NetFoundry from build tarball
+      run: |
+        pip3 install ./dist/netfoundry-*.tar.gz
 
     - name: Read version string
       id: read_version
@@ -59,15 +50,12 @@ jobs:
         }
         echo ::set-output name=pypi_version::${PYPI_VERSION}
 
-    - name: Install NetFoundry from build tarball
-      run: |
-        pip3 install ./dist/netfoundry-*.tar.gz
-
     - name: Compare installed version to PyPi version
       env:
         PYPI_VERSION: ${{ steps.read_version.outputs.pypi_version }}
       run: |
         INSTALLED_VERSION="$(python3 -m netfoundry.version)"
+        echo "PYPI_VERSION=${PYPI_VERSION}, INSTALLED_VERSION=${INSTALLED_VERSION#v}"
         if ! [[ ${PYPI_VERSION} == ${INSTALLED_VERSION#v} ]]; then
           echo "ERROR: PyPi and installed version do not match." >&2
           exit 1
@@ -85,30 +73,38 @@ jobs:
         NETFOUNDRY_OAUTH_URL: ${{ secrets.NETFOUNDRY_OAUTH_URL }}
       run: |
         set -x
-        nfdemo \
-          --verbose \
-          --network ${NETWORK_NAME} \
-          --create-client \
-          --create-private \
-          --regions Americas \
-          -- create
+        nfctl config \
+          general.network=${NETWORK_NAME} \
+          general.yes=True \
+          general.verbose=yes || true # workaround https://github.com/netfoundry/python-netfoundry/issues/29
+        nfctl demo \
+          --regions us-west-2 us-east-2 \
+          --provider AWS
         nfctl \
-          --verbose \
-          --profile default \
-          --network ${NETWORK_NAME}
-        nfctl \
-          --verbose \
-          --profile default \
-          --network ${NETWORK_NAME} \
           list services
         nfctl \
-          --verbose \
-          --profile default \
-          --network ${NETWORK_NAME} \
-          --yes \
+          get service name=echo% > /tmp/echo.yml
+        nfctl \
+          delete service name=echo%
+        nfctl \
+          create service --file /tmp/echo.yml
+        nfctl \
           delete network
 
-    - name: Append 'latest' tag if release published
+    - name: Publish Test Package
+      uses: pypa/gh-action-pypi-publish@27b31702a0e7fc50959f5ad993c78deac1bdfc29
+      with:
+        user: __token__
+        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+        repository_url: https://test.pypi.org/legacy/
+
+    - name: Temporarily Store the Python Package in GitHub # for convenient reference, troubleshooting, investigation, etc...
+      uses: actions/upload-artifact@v2
+      with:
+        name: netfoundry-pypi-${{ github.run_id }}
+        path: dist/netfoundry-*.tar.gz
+
+    - name: Append 'latest' tag if release
       env:
         GITHUB_EVENT_ACTION: ${{ github.event.action }}
         PYPI_VERSION: ${{ steps.read_version.outputs.pypi_version }}
