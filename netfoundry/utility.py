@@ -220,9 +220,12 @@ def get_resource_type_by_url(url: str):
     try:
         url_parts = urlparse(url)
         url_path = url_parts.path
-        resource_type = sub(r'/(core|rest|identity|authorization)/v\d+/([^/]+)/?.*', r'\2', url_path)
+        resource_type = sub(r'/(core|rest|identity|authorization|product-metadata)/v\d+/([^/]+)/?.*', r'\2', url_path)
     except Exception as e:
         raise(f"error parsing url path, got {e}")
+    else:
+        if resource_type == "download-urls.json":
+            resource_type = "download-urls"
     if RESOURCES.get(resource_type):
         return RESOURCES.get(resource_type)
     else:
@@ -253,6 +256,7 @@ def get_generic_resource(url: str, headers: dict, proxies: dict = dict(), verify
     except Exception:
         raise
     else:
+        logging.debug("detected resource type {resource_type.name}")
         if resource_type.name in ["edge-routers", "network-controllers"]:
             params['embed'] = "host"
 
@@ -499,6 +503,12 @@ RESOURCES = {
         name='network-groups',
         domain='network-group',
         _embedded='organizations',    # TODO: prune this exception when groups migrate to the Core network domain
+        mutable=False,
+        embeddable=False,
+    ),
+    'download-urls': ResourceType(
+        name='download-urls',
+        domain='network-group',
         mutable=False,
         embeddable=False,
     ),

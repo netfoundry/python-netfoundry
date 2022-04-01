@@ -26,6 +26,7 @@ from xml.sax.xmlreader import InputSource
 
 # importing this causes the 'config' subcommand to be available
 from jwt.exceptions import PyJWTError
+from milc import set_metadata  # this function needed to set metadata immediately below
 from packaging import version
 from pygments import highlight
 from pygments.formatters import Terminal256Formatter
@@ -35,16 +36,16 @@ from yaml import dump as yaml_dumps
 from yaml import full_load as yaml_loads
 from yaml import parser
 
-from ._version import get_versions
+from netfoundry import __version__ as netfoundry_version
+
 from .exceptions import NeedUserInput, NFAPINoCredentials
 from .network import Network
 from .network_group import NetworkGroup
 from .organization import Organization
 from .utility import DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES, MUTABLE_RESOURCE_ABBREVIATIONS, RESOURCE_ABBREVIATIONS, RESOURCES, is_jwt, normalize_caseless, plural, singular
 
-from milc import set_metadata       # this function needed to set metadata immediately below
-set_metadata(version="v"+get_versions()['version'], author="NetFoundry", name="nfctl")  # must precend import milc.cli
-from milc import cli, questions     # this uses metadata set above
+set_metadata(version=f"v{netfoundry_version}", author="NetFoundry", name="nfctl")  # must precend import milc.cli
+from milc import cli, questions  # this uses metadata set above
 from milc.subcommand import config  # this creates the config subcommand
 
 # this allows the app the terminate gracefully when piped to a truncating consumer like `head`
