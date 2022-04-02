@@ -256,7 +256,7 @@ def get_generic_resource(url: str, headers: dict, proxies: dict = dict(), verify
     except Exception:
         raise
     else:
-        logging.debug("detected resource type {resource_type.name}")
+        logging.debug(f"detected resource type {resource_type.name}")
         if resource_type.name in ["edge-routers", "network-controllers"]:
             params['embed'] = "host"
 
@@ -486,6 +486,13 @@ class ResourceType(ResourceTypeParent):
 
 
 RESOURCES = {
+    'process': ResourceType(
+        name='process',
+        domain='network',
+        _embedded='dataCenters',      # TODO: raise a bug report because this inconcistency forces consumers to make an exception for this type
+        mutable=False,
+        embeddable=False,
+    ),
     'data-centers': ResourceType(
         name='data-centers',
         domain='network',

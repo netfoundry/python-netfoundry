@@ -893,28 +893,42 @@ def demo(cli):
         # a list of locations to place a hosted router
         fabric_placements = []
         for region in cli.config.demo.regions:
-            existing_count = len([er for er in hosted_edge_routers if er['provider'] == cli.config.demo.provider and er['region'] == region])
-            if existing_count < 1:
-                fabric_placements += [region]
+            dc_matches = network.get_edge_router_data_centers(provider=cli.config.demo.provider, location_code=region)
+            if not len(dc_matches) == 1:
+                raise RuntimeError(f"invalid region '{region}'")
+            else:
+                existing_count = len([er for er in hosted_edge_routers if er['provider'] == cli.config.demo.provider and er['region'] == region])
+            if existing_count < 1:             # allow any existing hosted router matching region and provider to satisfy placement
+                fabric_placements += [region]  # otherwise queue for placement
             else:
                 spinner.succeed(f"Found a hosted router in {region}")
 
         spinner.text = f"Creating {len(fabric_placements)} hosted router(s)"
         with spinner:
             for region in fabric_placements:
-                er = network.create_edge_router(
-                    name=f"Hosted Router {region} [{cli.config.demo.provider}]",
-                    attributes=[
-                        "#hosted_routers",
-                        "#demo_exits",
-                        f"#{cli.config.demo.provider}",
-                    ],
-                    provider=cli.config.demo.provider,
-                    location_code=region,
-                    tunneler_enabled=True,
-                )
-                hosted_edge_routers.extend([er])
-                spinner.succeed(f"Created {cli.config.demo.provider} router in {region}")
+                er_name = f"Hosted Router {region} [{cli.config.demo.provider}]"
+                if not network.edge_router_exists(er_name):
+                    er = network.create_edge_router(
+                        name=er_name,
+                        attributes=[
+                            "#hosted_routers",
+                            "#demo_exits",
+                            f"#{cli.config.demo.provider}",
+                        ],
+                        provider=cli.config.demo.provider,
+                        location_code=region,
+                        tunneler_enabled=True,
+                    )
+                    hosted_edge_routers.extend([er])
+                    spinner.succeed(f"Created {cli.config.demo.provider} router in {region}")
+                else:
+                    er_matches = network.edge_routers(name=er_name, only_hosted=True)
+                    if len(er_matches) == 1:
+                        er = er_matches[0]
+                    else:
+                        raise RuntimeError(f"unexpectedly found more than one matching router for name '{er_name}'")
+                    if er['status'] in ["ERROR", "DELETED", "DELETING"]:
+                        raise RuntimeError(f"hosted router '{er_name}' has status '{er['status']}'")
 
         try:
             assert(len(hosted_edge_routers) > 0)
