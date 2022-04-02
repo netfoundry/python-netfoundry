@@ -90,12 +90,12 @@ class Organization:
             cache_dir_path.mkdir(mode=S_IRUSR | S_IWUSR | S_IXUSR, parents=True, exist_ok=True)
             cache_dir_path.chmod(mode=S_IRUSR | S_IWUSR | S_IXUSR)
         except Exception as e:
-            raise RuntimeError(f"failed to create cache dir '{cache_dir_path.resolve()}', got {e}")
+            raise RuntimeError(f"failed to create cache dir '{str(cache_dir_path.resolve())}', got {e}")
         else:
             cache_dir_stats = os.stat(cache_dir_path)
             logging.debug(f"token cache dir exists with mode {filemode(cache_dir_stats.st_mode)}")
         self.token_cache_file_path = Path(cache_dir_path / token_cache_file_name)
-        logging.debug(f"cache file path is computed '{self.token_cache_file_path.resolve()}'")
+        logging.debug(f"cache file path is computed '{str(self.token_cache_file_path.resolve())}'")
 
         # short circuit if logout only
         if logout:
@@ -197,11 +197,11 @@ class Organization:
                 for scope in default_creds_scopes:
                     candidate = scope['path'] / self.credentials
                     if candidate.exists():
-                        logging.debug(f"found credentials file {candidate.resolve()} in {scope['scope']}-default directory")
-                        self.credentials = candidate.resolve()
+                        logging.debug(f"found credentials file {str(candidate.resolve())} in {scope['scope']}-default directory")
+                        self.credentials = str(candidate.resolve())
                         break
                     else:
-                        logging.debug(f"no credentials file {candidate.resolve()} in {scope['scope']}-default directory")
+                        logging.debug(f"no credentials file {str(candidate.resolve())} in {scope['scope']}-default directory")
 
             try:
                 file = open(self.credentials, 'r')
@@ -330,9 +330,9 @@ class Organization:
                     }
                     self.token_cache_file_path.write_text(json.dumps(token_cache_out, indent=4))
                 except Exception as e:
-                    logging.warn(f"failed to cache token in '{self.token_cache_file_path.resolve()}'")
+                    logging.warn(f"failed to cache token in '{str(self.token_cache_file_path.resolve())}'")
                 else:
-                    logging.debug(f"cached token in '{self.token_cache_file_path.resolve()}'")
+                    logging.debug(f"cached token in '{str(self.token_cache_file_path.resolve())}'")
             else:
                 logging.debug("not caching token because it exactly matches the existing cache")
         else:
@@ -380,13 +380,13 @@ class Organization:
             try:
                 os.remove(self.token_cache_file_path)
             except Exception as e:
-                logging.error(f"failed to remove cached token file '{self.token_cache_file_path.resolve()}'")
+                logging.error(f"failed to remove cached token file '{str(self.token_cache_file_path.resolve())}'")
                 return False
             else:
-                logging.debug(f"removed cached token file '{self.token_cache_file_path.resolve()}'")
+                logging.debug(f"removed cached token file '{str(self.token_cache_file_path.resolve())}'")
                 return True
         else:
-            logging.debug(f"cached token file '{self.token_cache_file_path.resolve()}' does not exist")
+            logging.debug(f"cached token file '{str(self.token_cache_file_path.resolve())}' does not exist")
             return True
 
     def get_caller_identity(self):
