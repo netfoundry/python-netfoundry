@@ -925,7 +925,7 @@ def demo(cli):
         with spinner:
             for router_id in [r['id'] for r in hosted_edge_routers]:
                 try:
-                    network.wait_for_status("PROVISIONED", id=router_id, type="edge-router", wait=999, progress=False)
+                    network.wait_for_status("PROVISIONED", id=router_id, type="edge-router", wait=2222, progress=False)
                 except Exception as e:
                     raise RuntimeError(f"error while waiting for router status, got {e}")
         spinner.succeed("All hosted routers online")
@@ -1032,7 +1032,7 @@ def demo(cli):
         # wait for customer router to be PROVISIONED so that registration will be available
         with spinner:
             try:
-                network.wait_for_status("PROVISIONED", id=customer_router['id'], type="edge-router", wait=999, progress=False)
+                network.wait_for_status("PROVISIONED", id=customer_router['id'], type="edge-router", wait=222, progress=False)
                 customer_router_registration = network.rotate_edge_router_registration(id=customer_router['id'])
             except Exception as e:
                 raise RuntimeError(f"error getting router registration, got {e}")
@@ -1208,7 +1208,7 @@ def use_network(organization: object, network_name: str = None, group: str = Non
         elif not network.status == 'PROVISIONED':
             try:
                 spinner.text = f"Waiting for network {network.name} to provision"
-                network.wait_for_status("PROVISIONED", wait=999, progress=False)
+                network.wait_for_status("PROVISIONED", wait=600, progress=False)
             except KeyboardInterrupt:
                 spinner.fail("Cancelled")
                 exit(1)
