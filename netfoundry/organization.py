@@ -34,16 +34,16 @@ class Organization:
     """
 
     def __init__(self,
-        credentials: str=None,
-        organization: str=None,
-        organization_id: str=None,
-        organization_label: str=None,
-        profile: str="default",
-        token: str=None,
-        expiry_minimum: int=600,
-        environment: str=None,
-        logout: bool=False,
-        proxy: str=None):
+                 credentials: str = None,
+                 organization: str = None,
+                 organization_id: str = None,
+                 organization_label: str = None,
+                 profile: str = "default",
+                 token: str = None,
+                 expiry_minimum: int = 600,
+                 environment: str = None,
+                 logout: bool = False,
+                 proxy: str = None):
         """Initialize an instance of organization."""
         # verify auth endpoint's server certificate if proxy is type SOCKS or None
         self.proxy = proxy
@@ -61,7 +61,7 @@ class Organization:
                 self.verify = False
 
         epoch = round(time.time())
-        self.expiry_seconds = 0 # initialize a placeholder for remaining seconds until expiry
+        self.expiry_seconds = 0  # initialize a placeholder for remaining seconds until expiry
         client_id = None
         password = None
         token_endpoint = None
@@ -124,6 +124,7 @@ class Organization:
                 self.token = None
                 self.expiry = None
                 self.audience = None
+                logging.debug(f"ignoring exception while checking for token cache, got {e}")
             else:
                 self.token = token_cache['token']
                 self.expiry = token_cache['expiry']
@@ -137,7 +138,7 @@ class Organization:
             except Exception as e:
                 self.expiry = round(epoch + DEFAULT_TOKEN_EXPIRY)
                 self.expiry_seconds = DEFAULT_TOKEN_EXPIRY
-                logging.debug(f"failed to parse token as JWT, estimating expiry in {DEFAULT_TOKEN_EXPIRY}s")
+                logging.debug(f"failed to parse token as JWT, estimating expiry in {DEFAULT_TOKEN_EXPIRY}s, got {e}")
             else:
                 self.expiry_seconds = round(self.expiry - epoch)
                 logging.debug(f"bearer token expiry in {self.expiry_seconds}s")
@@ -153,19 +154,19 @@ class Organization:
             self.credentials = os.environ['NETFOUNDRY_API_ACCOUNT']
             logging.debug(f"got path to credentials file from env NETFOUNDRY_API_ACCOUNT={self.credentials}")
         # if any credentials var then require all credentials vars
-        elif ('NETFOUNDRY_CLIENT_ID' in os.environ
-                    or 'NETFOUNDRY_PASSWORD' in os.environ
-                    or 'NETFOUNDRY_OAUTH_URL' in os.environ):
-            if ('NETFOUNDRY_CLIENT_ID' in os.environ
-                    and 'NETFOUNDRY_PASSWORD' in os.environ
-                    and 'NETFOUNDRY_OAUTH_URL' in os.environ):
+        elif ('NETFOUNDRY_CLIENT_ID' in os.environ or 'NETFOUNDRY_PASSWORD' in os.environ or 'NETFOUNDRY_OAUTH_URL' in os.environ):
+            if ('NETFOUNDRY_CLIENT_ID' in os.environ and 'NETFOUNDRY_PASSWORD' in os.environ and 'NETFOUNDRY_OAUTH_URL' in os.environ):
                 client_id = os.environ['NETFOUNDRY_CLIENT_ID']
                 password = os.environ['NETFOUNDRY_PASSWORD']
                 token_endpoint = os.environ['NETFOUNDRY_OAUTH_URL']
                 credentials_configured = True
                 logging.debug("configured API account credentials from env NETFOUNDRY_CLIENT_ID, NETFOUNDRY_PASSWORD, NETFOUNDRY_OAUTH_URL")
             else:
-                raise RuntimeError("some but not all credentials vars present. Need NETFOUNDRY_CLIENT_ID, NETFOUNDRY_PASSWORD, and NETFOUNDRY_OAUTH_URL or a credentials file in default file locations or NETFOUNDRY_API_ACCOUNT as path to credentials file.")
+                raise RuntimeError("""
+some but not all credentials vars present. Need NETFOUNDRY_CLIENT_ID, NETFOUNDRY_PASSWORD, and
+NETFOUNDRY_OAUTH_URL or a credentials file in default file locations or NETFOUNDRY_API_ACCOUNT as
+path to credentials file.
+""")
         else:
             self.credentials = "credentials.json"
             logging.debug("token renewal will look for default credentials file name 'credentials.json' in project (cwd), user, and device default paths")
@@ -229,11 +230,11 @@ class Organization:
                 # an exception here is very unlikely because the called
                 # function is designed to provide a sane default in case the
                 # token can't be parsed
-                raise RuntimeError("unexpected error extracting environment from JWT")
+                raise RuntimeError(f"unexpected error extracting environment from JWT, got {e}")
             else:
                 logging.debug(f"parsed token as JWT and found environment {self.environment}")
             finally:
-                if not self.environment in ENVIRONMENTS:
+                if self.environment not in ENVIRONMENTS:
                     logging.warn(f"unexpected environment '{self.environment}'")
 
         if self.environment and not self.audience:
@@ -247,11 +248,11 @@ class Organization:
         # the purpose of this try-except block is to soft-fail all attempts
         # to parse the JWT, which is intended for the API, not this
         # application
-        if self.token and not self.expiry: # if token was obtained in this pass then expiry is already defined by response 'expires_in' property
+        if self.token and not self.expiry:  # if token was obtained in this pass then expiry is already defined by response 'expires_in' property
             try:
                 self.expiry = jwt_expiry(self.token)
             except Exception as e:
-                raise RuntimeError("unexpected error getting expiry from token, got {e}")
+                raise RuntimeError(f"unexpected error getting expiry from token, got {e}")
             else:
                 self.expiry_seconds = round(self.expiry - epoch)
                 logging.debug(f"bearer token expiry in {self.expiry_seconds}s")
@@ -278,7 +279,7 @@ class Organization:
             scope = "https://gateway."+self.environment+".netfoundry.io//ignore-scope"
             # we can gather the URL of the API from the first part of the scope string by
             #  dropping the scope suffix
-            self.audience = scope.replace('/ignore-scope','')
+            self.audience = scope.replace(r'/ignore-scope', '')
             logging.debug(f"using audience parsed from token_endpoint URL {self.audience}")
             # e.g. https://gateway.production.netfoundry.io/
             assertion = {
@@ -304,7 +305,7 @@ class Organization:
                     self.expiry = round(token_text['expires_in'] + epoch)
                     logging.debug(f"computed expiry epoch {self.expiry} from 'expires_in={token_text['expires_in']}'")
                 except Exception as e:
-                    raise RuntimeError(f"failed to find an access_token in the response and instead got: {response.text}")
+                    raise RuntimeError(f"failed to find an access_token in the response and instead got: {response.text}, {e}")
                 else:
                     self.expiry_seconds = round(self.expiry - epoch)
                     logging.debug(f"bearer token expiry in {self.expiry_seconds}s")
@@ -330,7 +331,7 @@ class Organization:
                     }
                     self.token_cache_file_path.write_text(json.dumps(token_cache_out, indent=4))
                 except Exception as e:
-                    logging.warn(f"failed to cache token in '{str(self.token_cache_file_path.resolve())}'")
+                    logging.warn(f"failed to cache token in '{str(self.token_cache_file_path.resolve())}', got {e}")
                 else:
                     logging.debug(f"cached token in '{str(self.token_cache_file_path.resolve())}'")
             else:
@@ -380,7 +381,7 @@ class Organization:
             try:
                 os.remove(self.token_cache_file_path)
             except Exception as e:
-                logging.error(f"failed to remove cached token file '{str(self.token_cache_file_path.resolve())}'")
+                logging.error(f"failed to remove cached token file '{str(self.token_cache_file_path.resolve())}', got {e}")
                 return False
             else:
                 logging.debug(f"removed cached token file '{str(self.token_cache_file_path.resolve())}'")
@@ -413,9 +414,9 @@ class Organization:
         :param str identity: UUIDv4 of the identity to get
         """
         url = self.audience+'identity/v1/identities/'+identity_id
-        headers = { "authorization": "Bearer " + self.token }
+        headers = {"authorization": "Bearer " + self.token}
         try:
-            identity, status_symbol, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            identity, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except Exception as e:
             raise RuntimeError(f"failed to get identity from url: '{url}', got {e}")
         else:
@@ -429,15 +430,12 @@ class Organization:
         params = dict()
         for param in kwargs.keys():
             params[param] = kwargs[param]
-        if params.get('sort'):
-            logging.warn("query param 'sort' is not supported by Identity Service")
-        if params.get('size'):
-            logging.warn("query param 'size' is not supported by Identity Service")
-        if params.get('page'):
-            logging.warn("query param 'page' is not supported by Identity Service")
+        for noop in ['sort', 'size', 'page']:
+            if params.get(noop):
+                logging.warn(f"query param '{noop}' is not supported by Identity Service")
 
         url = self.audience+'identity/v1/identities'
-        headers = { "authorization": "Bearer " + self.token }
+        headers = {"authorization": "Bearer " + self.token}
         try:
             identities = list()
             for i in find_generic_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params):
@@ -447,6 +445,43 @@ class Organization:
         else:
             return(identities)
 
+    def find_roles(self, **kwargs):
+        """Get roles as a collection."""
+        params = dict()
+        for param in kwargs.keys():
+            if param == 'name':
+                params['nameLike'] = kwargs[param]
+            elif param == 'description':
+                params['descriptionLike'] = kwargs[param]
+            else:
+                params[param] = kwargs[param]
+        for noop in ['size', 'page']:
+            if params.get(noop):
+                logging.warn(f"query param '{noop}' is not implemented in this library for Authorization Service")
+
+        url = self.audience+'auth/v1/roles'
+        headers = {"authorization": "Bearer " + self.token}
+        try:
+            roles = list()
+            for i in find_generic_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params):
+                roles.extend(i)
+        except Exception as e:
+            raise RuntimeError(f"failed to get roles from url: '{url}', got {e}")
+        else:
+            return(roles)
+
+    def get_role(self, role_id: str):
+        """Get roles as a collection."""
+
+        url = f"{self.audience}auth/v1/roles/{role_id}"
+        headers = {"authorization": "Bearer " + self.token}
+        try:
+            role, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+        except Exception as e:
+            raise RuntimeError(f"failed to get role from url: '{url}', got {e}")
+        else:
+            return(role)
+
     def get_organizations(self, **kwargs):
         """Find organizations as a collection.
 
@@ -455,15 +490,12 @@ class Organization:
         params = dict()
         for param in kwargs.keys():
             params[param] = kwargs[param]
-        if params.get('sort'):
-            logging.warn("query param 'sort' is not supported by Identity Service")
-        if params.get('size'):
-            logging.warn("query param 'size' is not supported by Identity Service")
-        if params.get('page'):
-            logging.warn("query param 'page' is not supported by Identity Service")
+        for noop in ['sort', 'size', 'page']:
+            if params.get(noop):
+                logging.warn(f"query param '{noop}' is not supported by Identity Service")
 
         url = self.audience+'identity/v1/organizations'
-        headers = { "authorization": "Bearer " + self.token }
+        headers = {"authorization": "Bearer " + self.token}
         try:
             organizations = list()
             for i in find_generic_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params):
@@ -480,7 +512,7 @@ class Organization:
         :param id: the UUID of the org
         """
         url = self.audience+'identity/v1/organizations/'+id
-        headers = { "authorization": "Bearer " + self.token }
+        headers = {"authorization": "Bearer " + self.token}
         try:
             organization, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except Exception as e:
@@ -488,14 +520,14 @@ class Organization:
         else:
             return(organization)
 
-    def get_network_group(self,network_group_id):
+    def get_network_group(self, network_group_id):
         """
         Get a network group by ID.
 
         :param network_group_id: the UUID of the network group
         """
         url = self.audience+'rest/v1/network-groups/'+network_group_id
-        headers = { "authorization": "Bearer " + self.token }
+        headers = {"authorization": "Bearer " + self.token}
         try:
             network_group, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except Exception as e:
@@ -503,7 +535,7 @@ class Organization:
         else:
             return(network_group)
 
-    def get_network(self, network_id: str, embed: str=None, accept: str=None):
+    def get_network(self, network_id: str, embed: str = None, accept: str = None):
         """Describe a Network by ID.
 
         :param str network_id: UUIDv4 of the network to get
@@ -540,7 +572,7 @@ class Organization:
         :param str kwargs: filter results by any supported query param
         """
         url = self.audience+'rest/v1/network-groups'
-        headers = { "authorization": "Bearer " + self.token }
+        headers = {"authorization": "Bearer " + self.token}
         try:
             network_groups = list()
             for i in find_generic_resources(url=url, headers=headers, embedded=RESOURCES['network-groups']._embedded, proxies=self.proxies, verify=self.verify, **kwargs):
@@ -552,7 +584,7 @@ class Organization:
 
     network_groups = get_network_groups_by_organization
 
-    def get_networks_by_organization(self, name: str=None, deleted: bool=False, accept: str=None, **kwargs):
+    def get_networks_by_organization(self, name: str = None, deleted: bool = False, accept: str = None, **kwargs):
         """
         Find networks by organization as a collection.
 
@@ -561,7 +593,7 @@ class Organization:
         :param bool deleted: include resource entities that have a non-null property deletedAt
         """
         url = self.audience+'core/v2/networks'
-        headers = { "authorization": "Bearer " + self.token }
+        headers = {"authorization": "Bearer " + self.token}
         params = {
             "findByName": name
         }
@@ -578,7 +610,7 @@ class Organization:
         else:
             return(networks)
 
-    def network_exists(self, name: str, deleted: bool=False):
+    def network_exists(self, name: str, deleted: bool = False):
         """Check if a network exists.
 
         :param name: the case-insensitive string to search
@@ -589,7 +621,7 @@ class Organization:
         else:
             return(False)
 
-    def count_networks_with_name(self, name: str, deleted: bool=False, unique: bool=True):
+    def count_networks_with_name(self, name: str, deleted: bool = False, unique: bool = True):
         """
         Count the networks with a particular name for this organization.
 
@@ -608,7 +640,7 @@ class Organization:
 
         return normal_names.count(normalize_caseless(name))
 
-    def get_networks_by_group(self, network_group_id: str, deleted: bool=False, accept: str=None, **kwargs):
+    def get_networks_by_group(self, network_group_id: str, deleted: bool = False, accept: str = None, **kwargs):
         """Find networks by network group as a collection.
 
         :param network_group_id: required network group UUIDv4
@@ -623,7 +655,7 @@ class Organization:
             params['status'] = "DELETED"
 
         url = self.audience+'core/v2/networks'
-        headers = { "authorization": "Bearer " + self.token }
+        headers = {"authorization": "Bearer " + self.token}
         try:
             networks = list()
             for i in find_generic_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, accept=accept, proxies=self.proxies, verify=self.verify, **params):

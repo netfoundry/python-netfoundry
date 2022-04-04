@@ -220,7 +220,7 @@ def get_resource_type_by_url(url: str):
     try:
         url_parts = urlparse(url)
         url_path = url_parts.path
-        resource_type = sub(r'/(core|rest|identity|authorization|product-metadata)/v\d+/([^/]+)/?.*', r'\2', url_path)
+        resource_type = sub(r'/(core|rest|identity|auth|product-metadata)/v\d+/([^/]+)/?.*', r'\2', url_path)
     except Exception as e:
         raise(f"error parsing url path, got {e}")
     else:
@@ -310,6 +310,8 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
     else:
         if resource_type.name in ["edge-routers", "network-controllers"]:
             params['embed'] = "host"
+        if resource_type.name in ["process-executions"]:
+            params['beta'] = None
     for param in kwargs.keys():
         if param == 'name' and resource_type.name == 'networks':  # workaround sort param bug in MOP-17863
             params['findByName'] = param
@@ -330,7 +332,7 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
     if params.get('size'):
         get_all_pages = False
     else:
-        if resource_type.name == 'data-centers':
+        if resource_type.name in ['data-centers', 'roles']:
             params['size'] = 3000    # workaround last page bug in MOP-17993
         else:
             params['size'] = DEFAULT_PAGE_SIZE
@@ -385,6 +387,10 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
                                 yield_page = resource_page['_embedded'][embedded]
                             except KeyError as e:
                                 raise RuntimeError(f"failed to find embedded collection in valid JSON response at '_embedded.{embedded}', got: '{e}'")
+                        elif resource_page.get('content'):
+                            yield_page = resource_page['content']
+                        else:
+                            yield_page = resource_page
 
                     # yield first, only, and empty pages
                     yield yield_page
@@ -398,7 +404,17 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
                                 yield from find_generic_resources(url=url, headers=headers, embedded=embedded, proxies=proxies, verify=verify, **params)
                             except Exception as e:
                                 raise RuntimeError(f"failed to get page {next_page} of {total_pages}, got {e}'")
-            else:
+            elif embedded:      # function param 'embedded' specifies the reference in which the collection of resources should be found
+                try:
+                    yield_page = resource_page['_embedded'][embedded]
+                except KeyError as e:
+                    raise RuntimeError(f"failed to find embedded collection in valid JSON response at '_embedded.{embedded}', got: '{e}'")
+                else:
+                    yield yield_page
+            elif isinstance(resource_page, dict) and 'content' in resource_page.keys():  # has the generic embed key 'content'
+                yield_page = resource_page['content']
+                yield yield_page
+            else:  # is a list or a flat dict
                 yield resource_page
 
 
@@ -485,10 +501,16 @@ class ResourceType(ResourceTypeParent):
 
 
 RESOURCES = {
-    'process': ResourceType(
-        name='process',
+    'roles': ResourceType(
+        name='roles',
+        domain='organization',
+        mutable=False,
+        embeddable=False,
+        _embedded='content',
+    ),
+    'process-executions': ResourceType(
+        name='process-executions',
         domain='network',
-        _embedded='dataCenters',      # TODO: raise a bug report because this inconcistency forces consumers to make an exception for this type
         mutable=False,
         embeddable=False,
     ),

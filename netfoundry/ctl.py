@@ -516,10 +516,20 @@ def get(cli, echo: bool = True, embed='all'):
                     query_keys.remove('id')
                     cli.log.warning(f"using 'id' only, ignoring params: '{','.join(query_keys)}'")
                 match = organization.get_identity(identity_id=cli.args.query['id'])
-            elif not query_keys:
+            elif not query_keys:  # return caller identity if not filtering
                 match = organization.caller
             else:
                 matches = organization.get_identities(**cli.args.query)
+                if len(matches) == 1:
+                    match = matches[0]
+        elif cli.args.resource_type == "role":
+            if 'id' in query_keys:
+                if len(query_keys) > 1:
+                    query_keys.remove('id')
+                    cli.log.warning(f"using 'id' only, ignoring params: '{','.join(query_keys)}'")
+                match = organization.get_role(role_id=cli.args.query['id'])
+            else:
+                matches = organization.find_roles(**cli.args.query)
                 if len(matches) == 1:
                     match = matches[0]
         elif cli.args.resource_type == "network":
@@ -628,7 +638,7 @@ def get(cli, echo: bool = True, embed='all'):
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
 @cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create', 'update'], help="request the as=create or as=update alternative form of the resources")
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[type, RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
-@cli.subcommand('find resources as lists')
+@cli.subcommand(description='find resources as lists')
 def list(cli):
     """Find resources as lists."""
     spinner = get_spinner("working")
@@ -657,6 +667,12 @@ def list(cli):
             matches = organization.get_network_groups_by_organization(**cli.args.query)
         elif cli.args.resource_type == "identities":
             matches = organization.get_identities(**cli.args.query)
+        elif cli.args.resource_type == "roles":
+            if cli.args.query.get('identityId') == 'caller':
+                cli.args.query['identityId'] = organization.caller['id']
+                matches = organization.find_roles(**cli.args.query)
+            else:
+                matches = organization.find_roles(**cli.args.query)
         elif cli.args.resource_type == "networks":
             if cli.config.general.network_group:
                 network_group = use_network_group(
@@ -693,7 +709,7 @@ def list(cli):
         # and the set of configured, desired keys
         valid_keys = set(matches[0].keys()) & set(cli.args.keys)
     elif cli.args.output == "text":
-        default_columns = ['name', 'label', 'organizationShortName',
+        default_columns = ['name', 'label', 'organizationShortName', 'type', 'description',
                            'edgeRouterAttributes', 'serviceAttributes', 'endpointAttributes',
                            'status', 'zitiId', 'provider', 'locationCode', 'ipAddress',
                            'region', 'size', 'attributes', 'email', 'productVersion']
