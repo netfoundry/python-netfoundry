@@ -11,7 +11,6 @@ import logging
 import platform
 import re
 import signal
-import sys
 import tempfile
 from getpass import getuser
 from json import dumps as json_dumps
@@ -25,6 +24,7 @@ from shlex import split as shplit
 from shutil import which
 from stat import S_IRUSR, S_IWUSR, S_IXUSR, filemode
 from subprocess import CalledProcessError
+from sys import exit, stdin, stdout
 from xml.sax.xmlreader import InputSource
 
 # importing this causes the 'config' subcommand to be available
@@ -45,7 +45,7 @@ from .exceptions import NeedUserInput, NFAPINoCredentials
 from .network import Network
 from .network_group import NetworkGroup
 from .organization import Organization
-from .utility import DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES, MUTABLE_RESOURCE_ABBREVIATIONS, RESOURCE_ABBREVIATIONS, RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, RESOURCES, is_jwt, normalize_caseless, plural, singular
+from .utility import DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES, MUTABLE_RESOURCE_ABBREVIATIONS, RESOURCE_ABBREVIATIONS, RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, RESOURCE_STATUSES_DELETE_COMPLETE, RESOURCE_STATUSES_DELETE_PROGRESS, RESOURCE_STATUSES_ERROR, RESOURCES, is_jwt, normalize_caseless, plural, singular
 
 set_metadata(version=f"v{netfoundry_version}", author="NetFoundry", name="nfctl")  # must precend import milc.cli
 from milc import cli, questions  # this uses metadata set above
@@ -352,7 +352,7 @@ def copy(cli):
     cli.args['accept'] = 'create'
     cli.args['output'] = 'text'       # implies tty which allows INFO messages
     with spinner:
-        edit_resource_object, network, network_group, organization = get(cli, echo=False)
+        edit_resource_object, network, network_group, organization = get(cli, echo=False, spinner=spinner)
     cli.log.debug(f"opening {cli.args.resource_type} '{edit_resource_object['name']}' for copying")
     copy_request_object = edit_object_as_yaml(edit_resource_object)
     if not copy_request_object:       # is False if editing cancelled by empty buffer
@@ -379,7 +379,7 @@ def create(cli):
         cli.args.resource_type = singular(MUTABLE_RESOURCE_ABBREVIATIONS[cli.args.resource_type].name)
     # get the input object if available, else get the lines (serialized YAML or JSON) and try to deserialize
     create_input_object, create_input_lines, create_object = None, str(), None
-    if sys.stdin.isatty() and not cli.args.file:
+    if stdin.isatty() and not cli.args.file:
         create_input_object = MUTABLE_NETWORK_RESOURCES[plural(cli.args.resource_type)].create_template
     elif cli.args.file:
         try:
@@ -453,7 +453,7 @@ def edit(cli):
     spinner.text = f"Getting {cli.args.resource_type} for editing"
     cli.log.debug(f"opening {cli.args.resource_type} for editing")
     with spinner:
-        edit_resource_object, network, network_group, organization = get(cli, echo=False)
+        edit_resource_object, network, network_group, organization = get(cli, echo=False, spinner=spinner)
     update_request_object = edit_object_as_yaml(edit_resource_object)
     with spinner:
         if not update_request_object:          # is False if editing cancelled by empty buffer
@@ -471,7 +471,7 @@ def edit(cli):
 @cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create', 'update'], help="request the as=create or as=update alternative form of the resource")
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
 @cli.subcommand('get a single resource by query')
-def get(cli, echo: bool = True, embed='all'):
+def get(cli, echo: bool = True, embed='all', spinner: object = None):
     """
     Get a single resource as YAML or JSON.
 
@@ -485,7 +485,10 @@ def get(cli, echo: bool = True, embed='all'):
     match = {}
     matches = []
     query_keys = [*cli.args.query]
-    spinner = get_spinner("working")
+    if not spinner:
+        spinner = get_spinner("working")
+    else:
+        cli.log.debug("got spinner as function param")
     spinner.text = f"Getting {cli.args.resource_type}"
     if not echo:
         spinner.enabled = False
@@ -650,7 +653,7 @@ def list(cli):
     if cli.args.query and cli.args.query.get('id'):
         cli.log.warn("try 'get' command to get by id")
     if cli.args.output == "text":
-        if not sys.stdout.isatty():
+        if not stdout.isatty():
             cli.log.warning("use --output=yaml or json for scripting nfctl")
     else:             # output is YAML or JSON
         # don't emit INFO messages to stdout because they will break deserialization
@@ -769,12 +772,12 @@ def delete(cli):
     spinner = get_spinner("working")
     query_keys = [*cli.args.query]
     if MUTABLE_RESOURCE_ABBREVIATIONS.get(cli.args.resource_type):
-        cli.args.resource_type = singular(MUTABLE_RESOURCE_ABBREVIATIONS[cli.args.resource_type].name)
+        cli.args['resource_type'] = singular(MUTABLE_RESOURCE_ABBREVIATIONS[cli.args.resource_type].name)
     cli.args['accept'] = None
     cli.config.general['wait'] = 0
     spinner.text = f"Finding {cli.args.resource_type} {'by' if query_keys else '...'} {','.join(query_keys)}"
     with spinner:
-        match, network, network_group, organization = get(cli, echo=False, embed=None)
+        match, network, network_group, organization = get(cli, echo=False, embed=None, spinner=spinner)
     if cli.args.resource_type == 'network':
         try:
             delete_confirmed = False
@@ -787,7 +790,7 @@ def delete(cli):
                 scrambled.extend([match['name']])
                 shuffle(scrambled)
                 spinner.stop()
-                if not sys.stdin.isatty():
+                if not stdin.isatty():
                     raise InputSource
                 descrambled = questions.choice(
                     "{style_bright}Enter the number of the unscrambled {fg_yellow}network{fg_reset} name to {fg_red}IRREVERSIBLY DELETE",
@@ -819,7 +822,7 @@ def delete(cli):
             delete_confirmed = False
             if cli.config.general.yes:
                 delete_confirmed = True
-            elif sys.stdin.isatty():
+            elif stdin.isatty():
                 delete_confirmed = questions.yesno("{style_bright}{fg_red}IRREVERSIBLY DELETE{fg_yellow} "+cli.args.resource_type+" {fg_cyan}"+match['name']+" {fg_reset}", default=False)
             else:
                 raise NeedUserInput("Need --yes or user input to confirm delete")
@@ -868,7 +871,7 @@ def demo(cli):
     demo_confirmed = False
     if cli.config.general.yes:
         demo_confirmed = True
-    elif sys.stdin.isatty():
+    elif stdin.isatty():
         spinner.stop()  # always stop for questions
         demo_confirmed = questions.yesno(f"Run demo in network {network_name} ({organization.label}) now?")
     else:
@@ -876,224 +879,226 @@ def demo(cli):
 
     if demo_confirmed:
         spinner.text = f"Finding network '{network_name}'"
-        with spinner:
-            # create network unless exists
-            cli.log.setLevel(logging.WARN)   # FIXME: hack to silence redundant spinners
-            network_group = use_network_group(
-                organization,
-                cli.config.general.network_group)
-            cli.log.setLevel(logging.INFO)   # FIXME: hack to silence redundant spinners
-            if network_group.network_exists(network_name):
-                network, network_group = use_network(
-                    organization=organization,
-                    group=network_group.id,
-                    network_name=network_name,
-                    spinner=spinner)
-                spinner.succeed(f"Found network '{network_name}'")
-            else:
-                cli.log.debug(f"creating network named '{network_name}'")
-                spinner.text = f"Creating network '{network_name}'"
-                network_created = network_group.create_network(
-                    name=network_name,
-                    size=cli.config.demo.size,
-                    version=cli.config.demo.product_version)
-                network, network_group = use_network(
-                    organization=organization,
-                    group=cli.config.general.network_group,
-                    network_name=network_created['name'],
-                    spinner=spinner)
-                spinner.succeed(sub('Creating', 'Created', spinner.text))
-        # existing hosted routers
-        spinner.text = "Finding hosted routers"
-        with spinner:
-            hosted_edge_routers = network.edge_routers(only_hosted=True)
-        # a list of locations to place a hosted router
-        fabric_placements = []
-        for region in cli.config.demo.regions:
-            dc_matches = network.find_edge_router_data_centers(provider=cli.config.demo.provider, location_code=region)
-            if not len(dc_matches) == 1:
-                raise RuntimeError(f"invalid region '{region}'")
-            else:
-                existing_count = len([er for er in hosted_edge_routers if er['provider'] == cli.config.demo.provider and er['region'] == region])
-            if existing_count < 1:             # allow any existing hosted router matching region and provider to satisfy placement
-                fabric_placements += [region]  # otherwise queue for placement
-            else:
-                spinner.succeed(f"Found a hosted router in {region}")
-
-        spinner.text = f"Creating {len(fabric_placements)} hosted router(s)"
-        with spinner:
-            for region in fabric_placements:
-                er_name = f"Hosted Router {region} [{cli.config.demo.provider}]"
-                if not network.edge_router_exists(er_name):
-                    er = network.create_edge_router(
-                        name=er_name,
-                        attributes=[
-                            "#hosted_routers",
-                            "#demo_exits",
-                            f"#{cli.config.demo.provider}",
-                        ],
-                        provider=cli.config.demo.provider,
-                        location_code=region,
-                        tunneler_enabled=True,
-                    )
-                    hosted_edge_routers.extend([er])
-                    spinner.succeed(f"Created {cli.config.demo.provider} router in {region}")
-                else:
-                    er_matches = network.edge_routers(name=er_name, only_hosted=True)
-                    if len(er_matches) == 1:
-                        er = er_matches[0]
-                    else:
-                        raise RuntimeError(f"unexpectedly found more than one matching router for name '{er_name}'")
-                    if er['status'] in ["ERROR", "DELETED", "DELETING"]:
-                        raise RuntimeError(f"hosted router '{er_name}' has status '{er['status']}'")
-
-        try:
-            assert(len(hosted_edge_routers) > 0)
-        except AssertionError:
-            raise RuntimeError("unexpected error with router placements, found zero hosted routers")
-
-        spinner.text = f"Waiting for {len(hosted_edge_routers)} hosted router(s) to provision"
-        with spinner:
-            for router_id in [r['id'] for r in hosted_edge_routers]:
-                try:
-                    network.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, id=router_id, type="edge-router", wait=2222, progress=False)
-                except Exception as e:
-                    raise RuntimeError(f"error while waiting for router status, got {e}")
-        spinner.succeed("All hosted routers online")
-
-        # create a simple global router policy unless one exists with the same name
-        blanket_policy_name = "Default Edge Router Policy"
-        spinner.text = "Finding router policy"
-        with spinner:
-            if not network.edge_router_policy_exists(name=blanket_policy_name):
-                try:
-                    spinner.text = f"Creating router policy '{blanket_policy_name}'"
-                    with spinner:
-                        network.create_edge_router_policy(
-                            name=blanket_policy_name,
-                            edge_router_attributes=["#hosted_routers"],
-                            endpoint_attributes=["#all"])
-                except Exception as e:
-                    raise RuntimeError(f"error creating edge router policy, got {e}")
-                else:
-                    spinner.succeed(sub('Creating', 'Created', spinner.text))
-            else:
-                spinner.succeed(f"Found router policy '{blanket_policy_name}'")
-
-        endpoints = dict()
-        clients = ['Desktop', 'Mobile', 'Laptop']
-        for client in clients:
-            endpoints[client] = {
-                "attributes": ["#work_from_anywhere"]
-            }
-        exits = ['Exit Tunneler']
-        for exit in exits:
-            endpoints[exit] = {
-                "attributes": ["#exits"]
-            }
-        for end in endpoints.keys():
-            spinner.text = f"Finding endpoint '{end}'"
-            with spinner:
-                if not network.endpoint_exists(name=end):
-                    # create an endpoint for the dialing device that will access services
-                    spinner.text = f"Creating endpoint '{end}'"
-                    endpoints[end]['properties'] = network.create_endpoint(name=end, attributes=endpoints[end]['attributes'])
-                    spinner.succeed(sub('Creating', 'Created', spinner.text))
-                else:
-                    endpoints[end]['properties'] = network.endpoints(name=end)[0]
-                    spinner.succeed(sub('Finding', 'Found', spinner.text))
-
-        services = {
-            "Fireworks Service": {
-                "client_attributes": ["#welcome_wagon"],
-                "tcp_port": "80",
-                "client_domain": "fireworks.netfoundry",
-                "exit_attributes": ["#demo_exits"],
-                "exit_domain": "fireworks-load-balancer-1246256380.us-east-1.elb.amazonaws.com",
-            },
-            # "Weather Service": {
-            #     "client_attributes": ["#welcome_wagon"],
-            #     "tcp_port": "80",
-            #     "client_domain": "weather.netfoundry",
-            #     "exit_attributes": ["#demo_exits"],
-            #     "exit_domain": "wttr.in",
-            # },
-            "Echo Service": {
-                "client_attributes": ["#welcome_wagon"],
-                "tcp_port": "80",
-                "client_domain": "echo.netfoundry",
-                "exit_attributes": ["#demo_exits"],
-                "exit_domain": "eth0.me",
-            },
-        }
-        for svc in services.keys():
-            spinner.text = f"Finding service '{svc}'"
-            with spinner:
-                if not network.service_exists(name=svc):
-                    spinner.text = f"Creating service '{svc}'"
-                    services[svc]['properties'] = network.create_service(
-                        name=svc,
-                        attributes=services[svc]['client_attributes'],
-                        endpoints=services[svc]['exit_attributes'],
-                        client_host_name=services[svc]['client_domain'],
-                        server_host_name=services[svc]['exit_domain'],
-                        client_port=services[svc]['tcp_port'],
-                        server_port=services[svc]['tcp_port'],
-                    )
-                    spinner.succeed(sub('Creating', 'Created', spinner.text))
-                else:
-                    services[svc]['properties'] = network.services(name=svc)[0]
-                    spinner.succeed(sub("Finding", "Found", spinner.text))
-
-        # create a customer-hosted ER unless exists
-        customer_router_name = "Branch Exit Router"
-        spinner.text = f"Finding customer router '{customer_router_name}'"
-        with spinner:
-            if not network.edge_router_exists(name=customer_router_name):
-                spinner.text = sub("Finding", "Creating", spinner.text)
-                customer_router = network.create_edge_router(
-                    name=customer_router_name,
-                    attributes=["#branch_exit_routers"],
-                    tunneler_enabled=True)
-            else:
-                customer_router = network.edge_routers(name=customer_router_name)[0]
-                spinner.succeed(sub("Finding", "Found", spinner.text))
-
-        spinner.text = f"Waiting for customer router {customer_router_name} to be ready for registration"
-        # wait for customer router to be PROVISIONED so that registration will be available
-        with spinner:
-            try:
-                network.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, id=customer_router['id'], type="edge-router", wait=222, progress=False)
-                customer_router_registration = network.rotate_edge_router_registration(id=customer_router['id'])
-            except Exception as e:
-                raise RuntimeError(f"error getting router registration, got {e}")
-            else:
-                spinner.succeed(f"Customer router ready to register with key '{customer_router_registration['registrationKey']}'")
-
-        # create unless exists
-        app_wan_name = "Default Service Policy"
-        spinner.text = "Finding service policy"
-        with spinner:
-            if not network.app_wan_exists(name=app_wan_name):
-                # work_from_anywhere may connect to welcome_wagon
-                spinner.text = sub("Finding", "Creating", spinner.text)
-                network.create_app_wan(
-                    name=app_wan_name,
-                    endpoint_attributes=["#work_from_anywhere"],
-                    service_attributes=["#welcome_wagon"])
-                spinner.succeed(sub("Creating", "Created", spinner.text))
-            else:
-                # app_wan = network.app_wans(name=app_wan_name)[0]
-                spinner.text = sub("Finding", "Found", spinner.text)
-
-        spinner.succeed("Demo network is ready")
-
-        for svc in services:
-            cli.log.info(f"{svc}:\thttp://{services[svc]['properties']['model']['clientIngress']['host']}/")
-        cli.log.info("Demo Guide: https://developer.netfoundry.io/guides/demo/")
     else:
         spinner.fail("Demo cancelled")
         cli.run(command=["nfctl", "demo", "--help"], capture_output=False)
+        exit(1)
+
+    with spinner:
+        # create network unless exists
+        cli.log.setLevel(logging.WARN)   # FIXME: hack to silence redundant spinners
+        network_group = use_network_group(
+            organization,
+            cli.config.general.network_group)
+        cli.log.setLevel(logging.INFO)   # FIXME: hack to silence redundant spinners
+        if network_group.network_exists(network_name):
+            network, network_group = use_network(
+                organization=organization,
+                group=network_group.id,
+                network_name=network_name,
+                spinner=spinner)
+            spinner.succeed(f"Found network '{network_name}'")
+        else:
+            cli.log.debug(f"creating network named '{network_name}'")
+            spinner.text = f"Creating network '{network_name}'"
+            network_created = network_group.create_network(
+                name=network_name,
+                size=cli.config.demo.size,
+                version=cli.config.demo.product_version)
+            network, network_group = use_network(
+                organization=organization,
+                group=cli.config.general.network_group,
+                network_name=network_created['name'],
+                spinner=spinner)
+            spinner.succeed(sub('Creating', 'Created', spinner.text))
+    # existing hosted routers
+    spinner.text = "Finding hosted routers"
+    with spinner:
+        hosted_edge_routers = network.edge_routers(only_hosted=True)
+    # a list of locations to place a hosted router
+    fabric_placements = []
+    for region in cli.config.demo.regions:
+        dc_matches = network.find_edge_router_data_centers(provider=cli.config.demo.provider, location_code=region)
+        if not len(dc_matches) == 1:
+            raise RuntimeError(f"invalid region '{region}'")
+        else:
+            existing_count = len([er for er in hosted_edge_routers if er['provider'] == cli.config.demo.provider and er['region'] == region])
+        if existing_count < 1:             # allow any existing hosted router matching region and provider to satisfy placement
+            fabric_placements += [region]  # otherwise queue for placement
+        else:
+            spinner.succeed(f"Found a hosted router in {region}")
+
+    spinner.text = f"Creating {len(fabric_placements)} hosted router(s)"
+    with spinner:
+        for region in fabric_placements:
+            er_name = f"Hosted Router {region} [{cli.config.demo.provider}]"
+            if not network.edge_router_exists(er_name):
+                er = network.create_edge_router(
+                    name=er_name,
+                    attributes=[
+                        "#hosted_routers",
+                        "#demo_exits",
+                        f"#{cli.config.demo.provider}",
+                    ],
+                    provider=cli.config.demo.provider,
+                    location_code=region,
+                    tunneler_enabled=True,
+                )
+                hosted_edge_routers.extend([er])
+                spinner.succeed(f"Created {cli.config.demo.provider} router in {region}")
+            else:
+                er_matches = network.edge_routers(name=er_name, only_hosted=True)
+                if len(er_matches) == 1:
+                    er = er_matches[0]
+                else:
+                    raise RuntimeError(f"unexpectedly found more than one matching router for name '{er_name}'")
+                if er['status'] in RESOURCE_STATUSES_ERROR + RESOURCE_STATUSES_DELETE_PROGRESS + RESOURCE_STATUSES_DELETE_COMPLETE:
+                    raise RuntimeError(f"hosted router '{er_name}' has unexpected status '{er['status']}'")
+
+    try:
+        assert(len(hosted_edge_routers) > 0)
+    except AssertionError:
+        raise RuntimeError("unexpected error with router placements, found zero hosted routers")
+
+    spinner.text = f"Waiting for {len(hosted_edge_routers)} hosted router(s) to provision"
+    with spinner:
+        for router_id in [r['id'] for r in hosted_edge_routers]:
+            try:
+                network.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, id=router_id, type="edge-router", wait=2222, progress=False)
+            except Exception as e:
+                raise RuntimeError(f"error while waiting for router status, got {e}")
+    spinner.succeed("All hosted routers online")
+
+    # create a simple global router policy unless one exists with the same name
+    blanket_policy_name = "Default Edge Router Policy"
+    spinner.text = "Finding router policy"
+    with spinner:
+        if not network.edge_router_policy_exists(name=blanket_policy_name):
+            try:
+                spinner.text = f"Creating router policy '{blanket_policy_name}'"
+                with spinner:
+                    network.create_edge_router_policy(
+                        name=blanket_policy_name,
+                        edge_router_attributes=["#hosted_routers"],
+                        endpoint_attributes=["#all"])
+            except Exception as e:
+                raise RuntimeError(f"error creating edge router policy, got {e}")
+            else:
+                spinner.succeed(sub('Creating', 'Created', spinner.text))
+        else:
+            spinner.succeed(f"Found router policy '{blanket_policy_name}'")
+
+    endpoints = dict()
+    clients = ['Desktop', 'Mobile', 'Laptop']
+    for client in clients:
+        endpoints[client] = {
+            "attributes": ["#work_from_anywhere"]
+        }
+    exits = ['Exit Tunneler']
+    for exit in exits:
+        endpoints[exit] = {
+            "attributes": ["#exits"]
+        }
+    for end in endpoints.keys():
+        spinner.text = f"Finding endpoint '{end}'"
+        with spinner:
+            if not network.endpoint_exists(name=end):
+                # create an endpoint for the dialing device that will access services
+                spinner.text = f"Creating endpoint '{end}'"
+                endpoints[end]['properties'] = network.create_endpoint(name=end, attributes=endpoints[end]['attributes'])
+                spinner.succeed(sub('Creating', 'Created', spinner.text))
+            else:
+                endpoints[end]['properties'] = network.endpoints(name=end)[0]
+                spinner.succeed(sub('Finding', 'Found', spinner.text))
+
+    services = {
+        "Fireworks Service": {
+            "client_attributes": ["#welcome_wagon"],
+            "tcp_port": "80",
+            "client_domain": "fireworks.netfoundry",
+            "exit_attributes": ["#demo_exits"],
+            "exit_domain": "fireworks-load-balancer-1246256380.us-east-1.elb.amazonaws.com",
+        },
+        # "Weather Service": {
+        #     "client_attributes": ["#welcome_wagon"],
+        #     "tcp_port": "80",
+        #     "client_domain": "weather.netfoundry",
+        #     "exit_attributes": ["#demo_exits"],
+        #     "exit_domain": "wttr.in",
+        # },
+        "Echo Service": {
+            "client_attributes": ["#welcome_wagon"],
+            "tcp_port": "80",
+            "client_domain": "echo.netfoundry",
+            "exit_attributes": ["#demo_exits"],
+            "exit_domain": "eth0.me",
+        },
+    }
+    for svc in services.keys():
+        spinner.text = f"Finding service '{svc}'"
+        with spinner:
+            if not network.service_exists(name=svc):
+                spinner.text = f"Creating service '{svc}'"
+                services[svc]['properties'] = network.create_service(
+                    name=svc,
+                    attributes=services[svc]['client_attributes'],
+                    endpoints=services[svc]['exit_attributes'],
+                    client_host_name=services[svc]['client_domain'],
+                    server_host_name=services[svc]['exit_domain'],
+                    client_port=services[svc]['tcp_port'],
+                    server_port=services[svc]['tcp_port'],
+                )
+                spinner.succeed(sub('Creating', 'Created', spinner.text))
+            else:
+                services[svc]['properties'] = network.services(name=svc)[0]
+                spinner.succeed(sub("Finding", "Found", spinner.text))
+
+    # create a customer-hosted ER unless exists
+    customer_router_name = "Branch Exit Router"
+    spinner.text = f"Finding customer router '{customer_router_name}'"
+    with spinner:
+        if not network.edge_router_exists(name=customer_router_name):
+            spinner.text = sub("Finding", "Creating", spinner.text)
+            customer_router = network.create_edge_router(
+                name=customer_router_name,
+                attributes=["#branch_exit_routers"],
+                tunneler_enabled=True)
+        else:
+            customer_router = network.edge_routers(name=customer_router_name)[0]
+            spinner.succeed(sub("Finding", "Found", spinner.text))
+
+    spinner.text = f"Waiting for customer router {customer_router_name} to be ready for registration"
+    # wait for customer router to be PROVISIONED so that registration will be available
+    with spinner:
+        try:
+            network.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, id=customer_router['id'], type="edge-router", wait=222, progress=False)
+            customer_router_registration = network.rotate_edge_router_registration(id=customer_router['id'])
+        except Exception as e:
+            raise RuntimeError(f"error getting router registration, got {e}")
+        else:
+            spinner.succeed(f"Customer router ready to register with key '{customer_router_registration['registrationKey']}'")
+
+    # create unless exists
+    app_wan_name = "Default Service Policy"
+    spinner.text = "Finding service policy"
+    with spinner:
+        if not network.app_wan_exists(name=app_wan_name):
+            # work_from_anywhere may connect to welcome_wagon
+            spinner.text = sub("Finding", "Creating", spinner.text)
+            network.create_app_wan(
+                name=app_wan_name,
+                endpoint_attributes=["#work_from_anywhere"],
+                service_attributes=["#welcome_wagon"])
+            spinner.succeed(sub("Creating", "Created", spinner.text))
+        else:
+            # app_wan = network.app_wans(name=app_wan_name)[0]
+            spinner.text = sub("Finding", "Found", spinner.text)
+
+    spinner.succeed("Demo network is ready")
+
+    for svc in services:
+        cli.log.info(f"{svc}:\thttp://{services[svc]['properties']['model']['clientIngress']['host']}/")
+    cli.log.info("Demo Guide: https://developer.netfoundry.io/guides/demo/")
 
 
 def use_organization(prompt: bool = True, spinner: object = None):
@@ -1256,7 +1261,7 @@ def edit_object_as_yaml(edit: object):
     """
     # unless --yes (config general.yes), if stdout is connected to a terminal
     # then open input for editing and send on exit
-    if cli.config.general.yes or not sys.stdout.isatty():
+    if cli.config.general.yes or not stdout.isatty():
         return edit
     save_error = False
     editor = environ.get('NETFOUNDRY_EDITOR', environ.get('EDITOR', 'vim'))
@@ -1305,8 +1310,8 @@ def get_spinner(text):
     Enabled if stdout is a tty and log level is >= INFO, else disabled to not
     corrupt structured output.
     """
-    inner_spinner = cli.spinner(text=text, spinner='dots12', placement='left', color='green', stream=sys.stdout)
-    if not sys.stdout.isatty():
+    inner_spinner = cli.spinner(text=text, spinner='dots12', placement='left', color='green', stream=stdout)
+    if not stdout.isatty():
         inner_spinner.enabled = False
         cli.log.debug("spinner disabled because stdout is not a tty")
     elif ('eval' in dir(cli.args) and cli.args.eval):

@@ -6,8 +6,8 @@ import re
 import sys
 import time
 
-from .utility import (DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES, NETWORK_RESOURCES, RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, RESOURCES, STATUS_CODES, VALID_SEPARATORS, VALID_SERVICE_PROTOCOLS, any_in, docstring_parameters, find_generic_resources,
-                      get_generic_resource, http, is_uuidv4, normalize_caseless, plural, singular)
+from .utility import (DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES, NETWORK_RESOURCES, RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, RESOURCE_STATUSES_CREATE_UPDATE_PROGRESS, RESOURCE_STATUSES_DELETE_COMPLETE, RESOURCE_STATUSES_DELETE_PROGRESS,
+                      RESOURCE_STATUSES_ERROR, RESOURCES, STATUS_CODES, VALID_SEPARATORS, VALID_SERVICE_PROTOCOLS, any_in, docstring_parameters, find_generic_resources, get_generic_resource, http, is_uuidv4, normalize_caseless, plural, singular)
 
 
 class Network:
@@ -822,16 +822,9 @@ class Network:
         # frame
         if wait:
             try:
-                self.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
+                finished = self.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
             except Exception as e:
                 raise RuntimeError(f"failed while waiting for process status 'FINISHED', caught {e}")
-            try:
-                # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
-                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
-                finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="edge-router",
-                                                          id=started['id'])
-            except Exception as e:
-                raise RuntimeError(f"ERROR: timed out waiting for property 'zitiId' to be defined, caught {e}")
             if tunneler_enabled:
                 self.wait_for_entity_name_exists(entity_name=name, entity_type="endpoint", wait=wait)
             return(finished)
@@ -1925,16 +1918,16 @@ class Network:
             else:
                 logging.debug("get status failed to return a value and didn't raise an exception, still trying")
 
-            if status in ['ERROR', 'FAILED']:
+            if status in RESOURCE_STATUSES_ERROR:
                 raise RuntimeError(f"got status {status} while waiting for {expect}")
-            if expect in ["PROVISIONED", "PROVISIONING", "FINISHED", "STARTED", "SUCCESS"] and status in ["DELETED", "DELETING"]:
+            if expect in RESOURCE_STATUSES_CREATE_UPDATE_PROGRESS + RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE and status in RESOURCE_STATUSES_DELETE_PROGRESS + RESOURCE_STATUSES_DELETE_COMPLETE:
                 raise RuntimeError(f"current status {status} will not progress to desired status {expect}")
             elif not expect == status:
                 time.sleep(sleep)
             # loop until wait seconds
 
         if progress:
-            print()                          # newline terminates progress meter
+            print()                                                   # newline terminates progress meter
 
         # we're done waiting, it's now or never
         if status == expect:
@@ -1946,7 +1939,7 @@ class Network:
         """Continuously poll for the expected statuses until expiry.
 
         :param expected_statuses: list of strings as expected status symbol(s) e.g. ["PROVISIONING","PROVISIONED"]
-        :param id: the UUID of the entity having a status if entity is not a network
+        :param id: the UUID of the entity that has a status, ignorred if checking status of this network
         :param type: optional type of entity e.g. network (default), endpoint, service, edge-router
         :param wait: optional SECONDS after which to raise an exception defaults to five minutes (300)
         :param sleep: SECONDS polling interval
@@ -1963,6 +1956,8 @@ class Network:
         # poll for status until expiry
         if progress:
             sys.stdout.write(f"\twaiting for any status in {expected_statuses} or until {time.ctime(now+wait)}.")
+        else:
+            logging.debug(f"waiting for any status in {expected_statuses} or until {time.ctime(now+wait)}.")
 
         status = str()
         while time.time() < now+wait and status not in expected_statuses:
@@ -1981,15 +1976,21 @@ class Network:
                 ):
                     if progress:
                         sys.stdout.write(f"\n{entity_status['name']:^19s}:{entity_status['status']:^19s}:")
+                    else:
+                        logging.debug(f"{entity_status['name']} has status {entity_status['status']}")
                 status = entity_status['status']
 
-            if status not in expected_statuses:
+            if status in RESOURCE_STATUSES_ERROR:
+                raise RuntimeError(f"got status {status} while waiting for {expected_statuses}")
+            if any_in(expected_statuses, RESOURCE_STATUSES_CREATE_UPDATE_PROGRESS + RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE) and status in RESOURCE_STATUSES_DELETE_PROGRESS + RESOURCE_STATUSES_DELETE_COMPLETE:
+                raise RuntimeError(f"current status {status} will not progress to any of the expected statuses: {expected_statuses}")
+            elif status not in expected_statuses:
                 time.sleep(sleep)
         if progress:
             print()  # newline terminates progress meter
 
         if status in expected_statuses:
-            return(True)
+            return True
         elif not status:
             raise RuntimeError(f"failed to read status while waiting for any status in {expected_statuses}; got {entity_status['http_status']} ({entity_status['response_code']})")
         else:
