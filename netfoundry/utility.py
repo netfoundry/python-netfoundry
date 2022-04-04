@@ -30,6 +30,11 @@ disable_warnings(InsecureRequestWarning)
 p = inflect.engine()
 
 
+def any_in(a, b):
+    "True if any of set a are in set b"
+    return any(i in b for i in a)
+
+
 def plural(singular):
     """Pluralize a singular form."""
     # if already plural then return, else pluralize
@@ -104,11 +109,11 @@ def get_token_cache(path):
     try:
         token_cache = json.loads(path.read_text())
     except FileNotFoundError as e:
-        raise RuntimeError(f"cache file '{path.__str__()}' not found, got {e}")
+        raise RuntimeError(f"cache file '{path.__str__()}' not found, caught {e}")
     except JSONDecodeError as e:
-        raise RuntimeError(f"failed to parse cache file '{path.__str__()}' as JSON, got {e}")
+        raise RuntimeError(f"failed to parse cache file '{path.__str__()}' as JSON, caught {e}")
     except Exception as e:
-        raise RuntimeError(f"failed to read cache file '{path.__str__()}', got {e}")
+        raise RuntimeError(f"failed to read cache file '{path.__str__()}', caught {e}")
     else:
         cache_file_stats = os.stat(path)
         logging.debug(f"parsed token cache file '{path.__str__()}' as JSON with mode {filemode(cache_file_stats.st_mode)}")
@@ -134,7 +139,7 @@ def jwt_expiry(token):
         logging.debug(f"failed to extract expiry epoch from claimset as key 'exp', estimating +{DEFAULT_TOKEN_EXPIRY}s")
         expiry = time.time() + DEFAULT_TOKEN_EXPIRY
     except Exception as e:
-        raise RuntimeError(f"unexpect error, got {e}")
+        raise RuntimeError(f"unexpect error, caught {e}")
     else:
         logging.debug("successfully extracted expiry from JWT")
     finally:
@@ -156,7 +161,7 @@ def jwt_environment(token):
         environment = "production"
         logging.debug("failed to extract the issuer URL from claimset as key 'iss', assuming environment is Production")
     except Exception as e:
-        raise RuntimeError(f"unexpect error, got {e}")
+        raise RuntimeError(f"unexpect error, caught {e}")
 
     else:
         if re.match(r'https://cognito-', iss):
@@ -181,9 +186,9 @@ def jwt_decode(token):
     try:
         claim = jwt.decode(jwt=token, algorithms=["RS256"], options={"verify_signature": False})
     except jwt.exceptions.PyJWTError as e:
-        raise jwt.exceptions.PyJWTError(f"failed to parse bearer token as JWT, got {e}")
+        raise jwt.exceptions.PyJWTError(f"failed to parse bearer token as JWT, caught {e}")
     except Exception as e:
-        raise RuntimeError(f"unexpect error parsing JWT, got {e}")
+        raise RuntimeError(f"unexpect error parsing JWT, caught {e}")
     return claim
 
 
@@ -194,7 +199,7 @@ def is_jwt(token):
     except jwt.exceptions.PyJWTError:
         return False
     except Exception as e:
-        raise RuntimeError(f"unexpect error parsing JWT, got {e}")
+        raise RuntimeError(f"unexpect error parsing JWT, caught {e}")
 
     else:
         return True
@@ -222,7 +227,7 @@ def get_resource_type_by_url(url: str):
         url_path = url_parts.path
         resource_type = sub(r'/(core|rest|identity|auth|product-metadata)/v\d+/([^/]+)/?.*', r'\2', url_path)
     except Exception as e:
-        raise(f"error parsing url path, got {e}")
+        raise(f"error parsing url path, caught {e}")
     else:
         if resource_type == "download-urls.json":
             resource_type = "download-urls"
@@ -259,7 +264,8 @@ def get_generic_resource(url: str, headers: dict, proxies: dict = dict(), verify
         logging.debug(f"detected resource type {resource_type.name}")
         if resource_type.name in ["edge-routers", "network-controllers"]:
             params['embed'] = "host"
-
+        elif resource_type.name in ["process-executions"]:
+            params['beta'] = None
     try:
         response = http.get(
             url,
@@ -403,7 +409,7 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
                                 # recurse
                                 yield from find_generic_resources(url=url, headers=headers, embedded=embedded, proxies=proxies, verify=verify, **params)
                             except Exception as e:
-                                raise RuntimeError(f"failed to get page {next_page} of {total_pages}, got {e}'")
+                                raise RuntimeError(f"failed to get page {next_page} of {total_pages}, caught {e}'")
             elif embedded:      # function param 'embedded' specifies the reference in which the collection of resources should be found
                 try:
                     yield_page = resource_page['_embedded'][embedded]
@@ -465,9 +471,10 @@ class ResourceType(ResourceTypeParent):
     """
 
     name: str                                               # plural form as kebab-case e.g. edge-routers
-    domain: str                                             # most are in network, organization
+    domain: str                                             # most are in network, identity
     mutable: bool                                           # createable, editable, or deletable
     embeddable: bool                                        # legal to request embedding in a parent resource in same domain
+    status: str = field(default='status')                   # name of property where symbolic status is expressed
     _embedded: str = field(default='default')               # the key under which lists are found in the API e.g. networkControllerList (computed if not provided as dromedary case singular)
     create_responses: list = field(default_factory=list)    # expected HTTP response codes for create operation
     no_update_props: list = field(default_factory=list)     # expected HTTP response codes for create operation
@@ -503,7 +510,7 @@ class ResourceType(ResourceTypeParent):
 RESOURCES = {
     'roles': ResourceType(
         name='roles',
-        domain='organization',
+        domain='identity',
         mutable=False,
         embeddable=False,
         _embedded='content',
@@ -513,6 +520,7 @@ RESOURCES = {
         domain='network',
         mutable=False,
         embeddable=False,
+        status="state",
     ),
     'data-centers': ResourceType(
         name='data-centers',
@@ -523,7 +531,7 @@ RESOURCES = {
     ),
     'organizations': ResourceType(
         name='organizations',
-        domain='organization',
+        domain='identity',
         mutable=False,
         embeddable=False,
     ),
@@ -560,7 +568,7 @@ RESOURCES = {
     ),
     'identities': ResourceType(
         name='identities',
-        domain='organization',
+        domain='identity',
         mutable=False,              # TODO: C_UD not yet implemented here in client for org domain
         embeddable=False,           # TODO: embedding not yet implemented in API for org domain
     ),
@@ -650,7 +658,11 @@ MAJOR_REGIONS = {
 }
 
 DC_PROVIDERS = ["AWS", "AZURE", "GCP", "OCP"]
-RESOURCE_STATUSES = ["PROVISIONED", "PROVISIONING", "DELETED", "DELETING", "FINISHED", "STARTED"]
+RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE = ("PROVISIONED", "FINISHED", "SUCCESS", "SUSPENDED")
+RESOURCE_STATUSES_DELETE_COMPLETE = ("FINISHED", "DELETED", "SUCCESS")
+RESOURCE_STATUSES_ERROR = ("ERROR", "FAILED")
+RESOURCE_STATUSES_PROGRESS = ("PROVISIONING", "DELETING", "STARTED", "RUNNING", "UPDATING")
+RESOURCE_STATUSES = RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE + RESOURCE_STATUSES_DELETE_COMPLETE + RESOURCE_STATUSES_PROGRESS + RESOURCE_STATUSES_ERROR
 VALID_SERVICE_PROTOCOLS = ["tcp", "udp"]
 VALID_SEPARATORS = '[:-]'  # : or - will match regex pattern
 

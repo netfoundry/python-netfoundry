@@ -90,7 +90,7 @@ class Organization:
             cache_dir_path.mkdir(mode=S_IRUSR | S_IWUSR | S_IXUSR, parents=True, exist_ok=True)
             cache_dir_path.chmod(mode=S_IRUSR | S_IWUSR | S_IXUSR)
         except Exception as e:
-            raise RuntimeError(f"failed to create cache dir '{str(cache_dir_path.resolve())}', got {e}")
+            raise RuntimeError(f"failed to create cache dir '{str(cache_dir_path.resolve())}', caught {e}")
         else:
             cache_dir_stats = os.stat(cache_dir_path)
             logging.debug(f"token cache dir exists with mode {filemode(cache_dir_stats.st_mode)}")
@@ -124,7 +124,7 @@ class Organization:
                 self.token = None
                 self.expiry = None
                 self.audience = None
-                logging.debug(f"ignoring exception while checking for token cache, got {e}")
+                logging.debug(f"ignoring exception while checking for token cache, caught {e}")
             else:
                 self.token = token_cache['token']
                 self.expiry = token_cache['expiry']
@@ -138,7 +138,7 @@ class Organization:
             except Exception as e:
                 self.expiry = round(epoch + DEFAULT_TOKEN_EXPIRY)
                 self.expiry_seconds = DEFAULT_TOKEN_EXPIRY
-                logging.debug(f"failed to parse token as JWT, estimating expiry in {DEFAULT_TOKEN_EXPIRY}s, got {e}")
+                logging.debug(f"failed to parse token as JWT, estimating expiry in {DEFAULT_TOKEN_EXPIRY}s, caught {e}")
             else:
                 self.expiry_seconds = round(self.expiry - epoch)
                 logging.debug(f"bearer token expiry in {self.expiry_seconds}s")
@@ -230,7 +230,7 @@ path to credentials file.
                 # an exception here is very unlikely because the called
                 # function is designed to provide a sane default in case the
                 # token can't be parsed
-                raise RuntimeError(f"unexpected error extracting environment from JWT, got {e}")
+                raise RuntimeError(f"unexpected error extracting environment from JWT, caught {e}")
             else:
                 logging.debug(f"parsed token as JWT and found environment {self.environment}")
             finally:
@@ -252,7 +252,7 @@ path to credentials file.
             try:
                 self.expiry = jwt_expiry(self.token)
             except Exception as e:
-                raise RuntimeError(f"unexpected error getting expiry from token, got {e}")
+                raise RuntimeError(f"unexpected error getting expiry from token, caught {e}")
             else:
                 self.expiry_seconds = round(self.expiry - epoch)
                 logging.debug(f"bearer token expiry in {self.expiry_seconds}s")
@@ -296,7 +296,7 @@ path to credentials file.
                     proxies=self.proxies)
                 response_code = response.status_code
             except Exception as e:
-                raise RuntimeError(f'failed to contact the authentication endpoint: {token_endpoint}, got {e}')
+                raise RuntimeError(f'failed to contact the authentication endpoint: {token_endpoint}, caught {e}')
 
             if response_code == STATUS_CODES.codes.OK:
                 try:
@@ -331,7 +331,7 @@ path to credentials file.
                     }
                     self.token_cache_file_path.write_text(json.dumps(token_cache_out, indent=4))
                 except Exception as e:
-                    logging.warn(f"failed to cache token in '{str(self.token_cache_file_path.resolve())}', got {e}")
+                    logging.warn(f"failed to cache token in '{str(self.token_cache_file_path.resolve())}', caught {e}")
                 else:
                     logging.debug(f"cached token in '{str(self.token_cache_file_path.resolve())}'")
             else:
@@ -381,7 +381,7 @@ path to credentials file.
             try:
                 os.remove(self.token_cache_file_path)
             except Exception as e:
-                logging.error(f"failed to remove cached token file '{str(self.token_cache_file_path.resolve())}', got {e}")
+                logging.error(f"failed to remove cached token file '{str(self.token_cache_file_path.resolve())}', caught {e}")
                 return False
             else:
                 logging.debug(f"removed cached token file '{str(self.token_cache_file_path.resolve())}'")
@@ -403,7 +403,7 @@ path to credentials file.
             try:
                 caller, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
             except Exception as e:
-                logging.debug(f"failed to get caller identity from url: '{url}', trying next until last, got {e}")
+                logging.debug(f"failed to get caller identity from url: '{url}', trying next until last, caught {e}")
             else:
                 return(caller)
         raise RuntimeError("failed to get caller identity from any url")
@@ -418,11 +418,11 @@ path to credentials file.
         try:
             identity, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except Exception as e:
-            raise RuntimeError(f"failed to get identity from url: '{url}', got {e}")
+            raise RuntimeError(f"failed to get identity from url: '{url}', caught {e}")
         else:
             return(identity)
 
-    def get_identities(self, **kwargs):
+    def find_identities(self, **kwargs):
         """Get identities as a collection.
 
         :param str kwargs: filter results by logical AND query parameters
@@ -441,9 +441,10 @@ path to credentials file.
             for i in find_generic_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params):
                 identities.extend(i)
         except Exception as e:
-            raise RuntimeError(f"failed to get identities from url: '{url}', got {e}")
+            raise RuntimeError(f"failed to get identities from url: '{url}', caught {e}")
         else:
             return(identities)
+    get_identities = find_identities
 
     def find_roles(self, **kwargs):
         """Get roles as a collection."""
@@ -466,7 +467,7 @@ path to credentials file.
             for i in find_generic_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params):
                 roles.extend(i)
         except Exception as e:
-            raise RuntimeError(f"failed to get roles from url: '{url}', got {e}")
+            raise RuntimeError(f"failed to get roles from url: '{url}', caught {e}")
         else:
             return(roles)
 
@@ -478,11 +479,11 @@ path to credentials file.
         try:
             role, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except Exception as e:
-            raise RuntimeError(f"failed to get role from url: '{url}', got {e}")
+            raise RuntimeError(f"failed to get role from url: '{url}', caught {e}")
         else:
             return(role)
 
-    def get_organizations(self, **kwargs):
+    def find_organizations(self, **kwargs):
         """Find organizations as a collection.
 
         :param str kwargs: filter results by logical AND query parameters
@@ -501,9 +502,10 @@ path to credentials file.
             for i in find_generic_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params):
                 organizations.extend(i)
         except Exception as e:
-            raise RuntimeError(f"failed to get organizations from url: '{url}', got {e}")
+            raise RuntimeError(f"failed to get organizations from url: '{url}', caught {e}")
         else:
             return(organizations)
+    get_organizations = find_organizations
 
     def get_organization(self, id):
         """
@@ -516,7 +518,7 @@ path to credentials file.
         try:
             organization, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except Exception as e:
-            raise RuntimeError(f"failed to get organization from url: '{url}', got {e}")
+            raise RuntimeError(f"failed to get organization from url: '{url}', caught {e}")
         else:
             return(organization)
 
@@ -531,7 +533,7 @@ path to credentials file.
         try:
             network_group, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except Exception as e:
-            raise RuntimeError(f"failed to get network_group from url: '{url}', got {e}")
+            raise RuntimeError(f"failed to get network_group from url: '{url}', caught {e}")
         else:
             return(network_group)
 
@@ -562,11 +564,11 @@ path to credentials file.
         try:
             network, status_symbol = get_generic_resource(url=url, headers=headers, accept=accept, proxies=self.proxies, verify=self.verify, **params)
         except Exception as e:
-            raise RuntimeError(f"failed to get network from url: '{url}', got {e}")
+            raise RuntimeError(f"failed to get network from url: '{url}', caught {e}")
         else:
             return(network)
 
-    def get_network_groups_by_organization(self, **kwargs):
+    def find_network_groups_by_organization(self, **kwargs):
         """Find network groups as a collection.
 
         :param str kwargs: filter results by any supported query param
@@ -578,13 +580,13 @@ path to credentials file.
             for i in find_generic_resources(url=url, headers=headers, embedded=RESOURCES['network-groups']._embedded, proxies=self.proxies, verify=self.verify, **kwargs):
                 network_groups.extend(i)
         except Exception as e:
-            raise RuntimeError(f"failed to get network_groups from url: '{url}', got {e}")
+            raise RuntimeError(f"failed to get network_groups from url: '{url}', caught {e}")
         else:
             return(network_groups)
-
+    get_network_groups_by_organization = find_network_groups_by_organization
     network_groups = get_network_groups_by_organization
 
-    def get_networks_by_organization(self, name: str = None, deleted: bool = False, accept: str = None, **kwargs):
+    def find_networks_by_organization(self, name: str = None, deleted: bool = False, accept: str = None, **kwargs):
         """
         Find networks by organization as a collection.
 
@@ -606,9 +608,10 @@ path to credentials file.
             for i in find_generic_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, accept=accept, proxies=self.proxies, verify=self.verify, **params):
                 networks.extend(i)
         except Exception as e:
-            raise RuntimeError(f"failed to get networks from url: '{url}', got {e}")
+            raise RuntimeError(f"failed to get networks from url: '{url}', caught {e}")
         else:
             return(networks)
+    get_networks_by_organization = find_networks_by_organization
 
     def network_exists(self, name: str, deleted: bool = False):
         """Check if a network exists.
@@ -640,7 +643,7 @@ path to credentials file.
 
         return normal_names.count(normalize_caseless(name))
 
-    def get_networks_by_group(self, network_group_id: str, deleted: bool = False, accept: str = None, **kwargs):
+    def find_networks_by_group(self, network_group_id: str, deleted: bool = False, accept: str = None, **kwargs):
         """Find networks by network group as a collection.
 
         :param network_group_id: required network group UUIDv4
@@ -661,9 +664,10 @@ path to credentials file.
             for i in find_generic_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, accept=accept, proxies=self.proxies, verify=self.verify, **params):
                 networks.extend(i)
         except Exception as e:
-            raise RuntimeError(f"failed to get networks from url: '{url}', got {e}")
+            raise RuntimeError(f"failed to get networks from url: '{url}', caught {e}")
         else:
             return(networks)
+    get_networks_by_group = find_networks_by_group
 
     # if not NETWORK_RESOURCES.get(plural(type)):
     #     logging.error("unknown resource type '{plural}'. Choices: {choices}".format(

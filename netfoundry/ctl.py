@@ -45,7 +45,7 @@ from .exceptions import NeedUserInput, NFAPINoCredentials
 from .network import Network
 from .network_group import NetworkGroup
 from .organization import Organization
-from .utility import DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES, MUTABLE_RESOURCE_ABBREVIATIONS, RESOURCE_ABBREVIATIONS, RESOURCES, is_jwt, normalize_caseless, plural, singular
+from .utility import DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES, MUTABLE_RESOURCE_ABBREVIATIONS, RESOURCE_ABBREVIATIONS, RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, RESOURCES, is_jwt, normalize_caseless, plural, singular
 
 set_metadata(version=f"v{netfoundry_version}", author="NetFoundry", name="nfctl")  # must precend import milc.cli
 from milc import cli, questions  # this uses metadata set above
@@ -184,6 +184,7 @@ export NETFOUNDRY_ORGANIZATION="{organization.id}"
                 cli.echo(highlighted)
             else:
                 cli.echo(token_env)
+
 
 @cli.argument('-u', '--user', help="alternative proxy user, default is logged in username")
 @cli.argument('-s', '--ssh', help="alternative ssh executable, default is 'ssh'")
@@ -415,12 +416,12 @@ def create(cli):
             if cli.config.general.network_group:
                 network_group = use_network_group(organization=organization, )
             else:
-                org_count = len(organization.get_network_groups_by_organization())
+                org_count = len(organization.find_network_groups_by_organization())
                 if org_count > 1:
                     cli.log.error("specify --network-group because there is more than one available to caller's identity")
                     exit(org_count)
                 else:                   # use the only available group
-                    network_group_id = organization.get_network_groups_by_organization()[0]['id']
+                    network_group_id = organization.find_network_groups_by_organization()[0]['id']
                     network_group = use_network_group(
                         organization=organization,
                         group=network_group_id)
@@ -497,7 +498,7 @@ def get(cli, echo: bool = True, embed='all'):
                     cli.log.warning(f"using 'id' only, ignoring params: '{','.join(query_keys)}'")
                 match = organization.get_organization(id=cli.args.query['id'])
             else:
-                matches = organization.get_organizations(**cli.args.query)
+                matches = organization.find_organizations(**cli.args.query)
                 if len(matches) == 1:
                     match = organization.get_organization(id=matches[0]['id'])
         elif cli.args.resource_type == "network-group":
@@ -507,7 +508,7 @@ def get(cli, echo: bool = True, embed='all'):
                     cli.log.warning(f"using 'id' only, ignoring params: '{','.join(query_keys)}'")
                 match = organization.get_network_group(network_group_id=cli.args.query['id'])
             else:
-                matches = organization.get_network_groups_by_organization(**cli.args.query)
+                matches = organization.find_network_groups_by_organization(**cli.args.query)
                 if len(matches) == 1:
                     match = organization.get_network_group(network_group_id=matches[0]['id'])
         elif cli.args.resource_type == "identity":
@@ -519,7 +520,7 @@ def get(cli, echo: bool = True, embed='all'):
             elif not query_keys:  # return caller identity if not filtering
                 match = organization.caller
             else:
-                matches = organization.get_identities(**cli.args.query)
+                matches = organization.find_identities(**cli.args.query)
                 if len(matches) == 1:
                     match = matches[0]
         elif cli.args.resource_type == "role":
@@ -544,7 +545,7 @@ def get(cli, echo: bool = True, embed='all'):
                         organization,
                         group=cli.config.general.network_group,
                         )
-                    matches = organization.get_networks_by_group(network_group.id, **cli.args.query)
+                    matches = organization.find_networks_by_group(network_group.id, **cli.args.query)
                 elif cli.config.general.network:
                     network, network_group = use_network(
                         organization=organization,
@@ -552,7 +553,7 @@ def get(cli, echo: bool = True, embed='all'):
                         )
                     match = organization.get_network(network_id=network.id, embed=embed, accept=cli.args.accept)
                 else:
-                    matches = organization.get_networks_by_organization(**cli.args.query)
+                    matches = organization.find_networks_by_organization(**cli.args.query)
                 if len(matches) == 1:
                     network, network_group = use_network(
                         organization=organization,
@@ -579,7 +580,7 @@ def get(cli, echo: bool = True, embed='all'):
                         cli.log.warning(f"using 'id' only, ignoring params: '{','.join(query_keys)}'")
                     match = network.get_data_center_by_id(id=cli.args.query['id'])
                 else:
-                    matches = network.get_edge_router_data_centers(**cli.args.query)
+                    matches = network.find_edge_router_data_centers(**cli.args.query)
                     if len(matches) == 1:
                         match = network.get_data_center_by_id(id=matches[0]['id'])
             else:
@@ -589,7 +590,7 @@ def get(cli, echo: bool = True, embed='all'):
                         cli.log.warning(f"using 'id' only, ignoring params: '{','.join(query_keys)}'")
                     match = network.get_resource_by_id(type=cli.args.resource_type, id=cli.args.query['id'], accept=cli.args.accept)
                 else:
-                    matches = network.get_resources(type=cli.args.resource_type, accept=cli.args.accept, **cli.args.query)
+                    matches = network.find_resources(type=cli.args.resource_type, accept=cli.args.accept, **cli.args.query)
                     if len(matches) == 1:
                         match = matches[0]
 
@@ -662,11 +663,11 @@ def list(cli):
     with spinner:
         organization = use_organization(spinner=spinner)
         if cli.args.resource_type == "organizations":
-            matches = organization.get_organizations(**cli.args.query)
+            matches = organization.find_organizations(**cli.args.query)
         elif cli.args.resource_type == "network-groups":
-            matches = organization.get_network_groups_by_organization(**cli.args.query)
+            matches = organization.find_network_groups_by_organization(**cli.args.query)
         elif cli.args.resource_type == "identities":
-            matches = organization.get_identities(**cli.args.query)
+            matches = organization.find_identities(**cli.args.query)
         elif cli.args.resource_type == "roles":
             if cli.args.query.get('identityId') == 'caller':
                 cli.args.query['identityId'] = organization.caller['id']
@@ -679,9 +680,9 @@ def list(cli):
                     organization=organization,
                     group=cli.config.general.network_group,
                     spinner=spinner)
-                matches = organization.get_networks_by_group(network_group.id, accept=cli.args.accept, **cli.args.query)
+                matches = organization.find_networks_by_group(network_group.id, accept=cli.args.accept, **cli.args.query)
             else:
-                matches = organization.get_networks_by_organization(accept=cli.args.accept, **cli.args.query)
+                matches = organization.find_networks_by_organization(accept=cli.args.accept, **cli.args.query)
         else:
             if cli.config.general.network:
                 network, network_group = use_network(
@@ -693,9 +694,9 @@ def list(cli):
                 cli.log.error("first configure a network: '--network=ACMENet'")
                 exit(1)
             if cli.args.resource_type == "data-centers":
-                matches = network.get_edge_router_data_centers(**cli.args.query)
+                matches = network.find_edge_router_data_centers(**cli.args.query)
             else:
-                matches = network.get_resources(type=cli.args.resource_type, accept=cli.args.accept, **cli.args.query)
+                matches = network.find_resources(type=cli.args.resource_type, accept=cli.args.accept, **cli.args.query)
 
     if len(matches) == 0:
         spinner.fail(f"Found no {cli.args.resource_type} by '{','.join(query_keys)}'")
@@ -909,7 +910,7 @@ def demo(cli):
         # a list of locations to place a hosted router
         fabric_placements = []
         for region in cli.config.demo.regions:
-            dc_matches = network.get_edge_router_data_centers(provider=cli.config.demo.provider, location_code=region)
+            dc_matches = network.find_edge_router_data_centers(provider=cli.config.demo.provider, location_code=region)
             if not len(dc_matches) == 1:
                 raise RuntimeError(f"invalid region '{region}'")
             else:
@@ -955,7 +956,7 @@ def demo(cli):
         with spinner:
             for router_id in [r['id'] for r in hosted_edge_routers]:
                 try:
-                    network.wait_for_status("PROVISIONED", id=router_id, type="edge-router", wait=2222, progress=False)
+                    network.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, id=router_id, type="edge-router", wait=2222, progress=False)
                 except Exception as e:
                     raise RuntimeError(f"error while waiting for router status, got {e}")
         spinner.succeed("All hosted routers online")
@@ -1062,7 +1063,7 @@ def demo(cli):
         # wait for customer router to be PROVISIONED so that registration will be available
         with spinner:
             try:
-                network.wait_for_status("PROVISIONED", id=customer_router['id'], type="edge-router", wait=222, progress=False)
+                network.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, id=customer_router['id'], type="edge-router", wait=222, progress=False)
                 customer_router_registration = network.rotate_edge_router_registration(id=customer_router['id'])
             except Exception as e:
                 raise RuntimeError(f"error getting router registration, got {e}")
@@ -1194,7 +1195,7 @@ def use_network(organization: object, network_name: str = None, group: str = Non
                 spinner=spinner)
             existing_networks = network_group.networks_by_name()
         else:
-            existing_networks = organization.get_networks_by_organization()
+            existing_networks = organization.find_networks_by_organization()
         if len(existing_networks) == 1:
             network_name = existing_networks[0]['name']
 
@@ -1214,7 +1215,7 @@ def use_network(organization: object, network_name: str = None, group: str = Non
     else:
         existing_count = organization.count_networks_with_name(network_name)
         if existing_count == 1:
-            existing_networks = organization.get_networks_by_organization(name=network_name)
+            existing_networks = organization.find_networks_by_organization(name=network_name)
             existing_network = existing_networks[0]
             network_group = use_network_group(
                 organization,
@@ -1238,7 +1239,7 @@ def use_network(organization: object, network_name: str = None, group: str = Non
         elif not network.status == 'PROVISIONED':
             try:
                 spinner.text = f"Waiting for network {network.name} to provision"
-                network.wait_for_status("PROVISIONED", wait=600, progress=False)
+                network.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, wait=600, progress=False)
             except KeyboardInterrupt:
                 spinner.fail("Cancelled")
                 exit(1)

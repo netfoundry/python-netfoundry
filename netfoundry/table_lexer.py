@@ -1,4 +1,4 @@
-from pygments.lexer import RegexLexer, bygroups
+from pygments.lexer import RegexLexer
 from pygments.token import Comment, Keyword, Name, Number, Operator, Punctuation, String, Text, Whitespace, Generic, Error
 
 from netfoundry.utility import DC_PROVIDERS, RESOURCE_STATUSES
