@@ -603,6 +603,18 @@ RESOURCES = {
         mutable=False,              # TODO: C_UD not yet implemented here in client for org domain
         embeddable=False,           # TODO: embedding not yet implemented in API for org domain
     ),
+    'user-identities': ResourceType(
+        name='user-identities',
+        domain='identity',
+        mutable=False,
+        embeddable=False,
+    ),
+    'api-account-identities': ResourceType(
+        name='api-account-identities',
+        domain='identity',
+        mutable=False,
+        embeddable=False,
+    ),
     'hosts': ResourceType(
         name='hosts',
         domain='network',

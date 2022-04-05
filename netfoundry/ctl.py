@@ -265,10 +265,11 @@ def ziti(cli):
                 ziti_ctrl_ip = controller_host['ipAddress']
             try:
                 session = network.get_controller_session(network.network_controller['id'])
-                ziti_token = session['sessionToken']
-            except Exception as e:
-                raise RuntimeError(f"failed to get the ziti token from session '{session or None}', got {e}")
+            except:
+                spinner.fail("experimental ziti login failed")
+                sysexit(1)
             else:
+                ziti_token = session['sessionToken']
                 ssh_config = f"""
 Host {ziti_ctrl_ip}
     User {controller_host['username']}
