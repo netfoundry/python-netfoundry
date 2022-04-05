@@ -6,8 +6,8 @@ import re
 import sys
 import time
 
-from .utility import (DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES, NETWORK_RESOURCES, RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, RESOURCE_STATUSES_CREATE_UPDATE_PROGRESS, RESOURCE_STATUSES_DELETE_COMPLETE, RESOURCE_STATUSES_DELETE_PROGRESS,
-                      RESOURCE_STATUSES_ERROR, RESOURCES, STATUS_CODES, VALID_SEPARATORS, VALID_SERVICE_PROTOCOLS, any_in, docstring_parameters, find_generic_resources, get_generic_resource, http, is_uuidv4, normalize_caseless, plural, singular)
+from .utility import (DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES, NETWORK_RESOURCES, RESOURCES, STATUS_CODES, VALID_SEPARATORS, VALID_SERVICE_PROTOCOLS, any_in, docstring_parameters, find_generic_resources,
+                      get_generic_resource, http, is_uuidv4, normalize_caseless, plural, singular)
 
 
 class Network:
@@ -285,13 +285,21 @@ class Network:
         """
         params = dict()
         for param in kwargs.keys():
-            params[param] = kwargs[param]
-        params["productVersion"] = self.product_version
-        params["hostType"] = "ER"
+            if param == 'region':
+                location_code = kwargs[param]
+            else:
+                params[param] = kwargs[param]
+        if not params.get('productVersion'):
+            params["productVersion"] = self.product_version
+        elif not params.get('hostType'):
+            params["hostType"] = "ER"
+
         if location_code:
-            params["locationCode"] = location_code  # not yet implemented in API
+            params["locationCode"] = location_code
         elif params.get('locationCode'):
-            location_code = params['locationCode']
+            location_code = params['locationCode']  # query param not yet implemented in API so store it in function to filter the list in response
+        elif params.get('region'):
+            location_code = params['region']        # alternatively, get the location_code from a 'region' query param
         if provider is not None:
             if provider in DC_PROVIDERS:
                 params['provider'] = provider
@@ -409,7 +417,7 @@ class Network:
         headers = {"authorization": "Bearer " + self.token}
         try:
             resources = list()
-            for i in find_generic_resources(url=url, headers=headers, embedded=NETWORK_RESOURCES[type]._embedded, accept=accept, proxies=self.proxies, verify=self.verify, **params):
+            for i in find_generic_resources(url=url, headers=headers, embedded=NETWORK_RESOURCES[plural(type)]._embedded, accept=accept, proxies=self.proxies, verify=self.verify, **params):
                 resources.extend(i)
         except Exception as e:
             raise RuntimeError(f"failed to get {plural(type)} from url: '{url}', caught {e}")
@@ -441,13 +449,14 @@ class Network:
             :param id: optional entity ID, needed if put object lacks a self link, ignored if self link present
         """
         headers = {"authorization": "Bearer " + self.token}
-
+        if type:
+            type = plural(type)
         # prefer the self link if present, else require type and id to compose the self link
         try:
             self_link = patch['_links']['self']['href']
         except KeyError:
             try:
-                self_link = self.audience+'core/v2/'+plural(type)+'/'+id
+                self_link = self.audience+'core/v2/'+type+'/'+id
             except NameError as e:
                 raise RuntimeError(f"error composing URL to patch resource, caught {e}")
         else:
@@ -463,7 +472,7 @@ class Network:
             # compare the patch to the discovered, current state, adding new or updated keys to pruned_patch
             pruned_patch = dict()
             for k in patch.keys():
-                if k not in RESOURCES[type].no_update_props and before_resource.get(k):
+                if k not in RESOURCES[plural(type)].no_update_props and before_resource.get(k):
                     if isinstance(patch[k], list):
                         if not set(before_resource[k]) == set(patch[k]):
                             pruned_patch[k] = list(set(patch[k]))
@@ -489,39 +498,32 @@ class Network:
                     after_response_code = after_response.status_code
                 except Exception as e:
                     raise RuntimeError(f"error with PATCH request to {self_link}, caught {e}")
-                if after_response_code in [STATUS_CODES.codes.OK, STATUS_CODES.codes.ACCEPTED]:  # HTTP 202
+                if after_response_code in [STATUS_CODES.codes.OK, STATUS_CODES.codes.ACCEPTED]:
                     try:
-                        after_resource = after_response.json()
+                        resource = after_response.json()
                     except ValueError as e:
                         raise RuntimeError(f"failed to load {type} object from PATCH response, caught {e}")
                 else:
                     raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[after_response_code][0].upper()} ({after_response_code}) for patch: {json.dumps(patch, indent=2)}")
 
-                # if API responded with async promise then parse the expected process execution ID
-                if wait and after_response_code == STATUS_CODES.codes.ACCEPTED:                  # HTTP 202
-                    # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
-                    process_id = after_resource['_links']['process']['href'].split('/')[6]
-
-                    # monitor async process
-                    if wait:
-                        try:
-                            self.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
-                        except Exception as e:
-                            raise RuntimeError(f"timed out waiting for process status 'FINISHED', caught {e}")
-                        try:
-                            # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
-                            #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
-                            finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type=type,
-                                                                      id=after_resource['id'])
-                        except Exception as e:
-                            raise RuntimeError(f"timed out waiting for property 'zitiId' to be defined, caught {e}")
-                        return(finished)
-                    else:  # if not wait then merely verify the async process was at least started if not finished
-                        try:
-                            self.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, type="process-executions", id=process_id, wait=5, sleep=2, progress=progress)
-                        except Exception as e:
-                            raise RuntimeError(f"timed out waiting for process status 'STARTED' or 'FINISHED', caught {e}")
-                return(after_resource)
+                if wait and resource.get('_links'):
+                    process_id = resource['_links']['process-executions']['href'].split('/')[6]
+                    try:
+                        self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
+                    except Exception as e:
+                        raise RuntimeError(f"error while waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
+                    else:
+                        return(resource)
+                elif wait:
+                    logging.warning("unable to wait for async complete because response did not provide a process execution id")
+                    return(resource)
+                else:    # only wait for the process to start, not finish, or timeout
+                    try:
+                        self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
+                    except Exception as e:
+                        raise RuntimeError(f"error waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                    else:
+                        return(resource)
             else:
                 # no change, return the existing unmodified entity
                 return(before_resource)
@@ -539,8 +541,9 @@ class Network:
             self_link = put['_links']['self']['href']
         except KeyError:
             if not type:
-                logging.error('need put object with "self" link or need type param')
-                raise Exception('need put object with "self" link or need type param')
+                raise RuntimeError('need put object with "self" link or need type param')
+            else:
+                type = plural(type)
             if not id:
                 if put.get('id'):
                     id = put['id']
@@ -549,15 +552,13 @@ class Network:
                     logging.error('missing id of {type} to update, need put object with "self" link, "id" property, or need "id" param'.format(type=type))
                     raise Exception('missing id of {type} to update, need put object with "self" link, "id" property, or need "id" param'.format(type=type))
             try:
-                self_link = self.audience+'core/v2/'+plural(type)+'/'+id
+                self_link = self.audience+'core/v2/'+type+'/'+id
             except NameError as e:
                 raise(e)
         else:
-            type = self_link.split('/')[5]  # e.g. endpoints, app-wans, edge-routers, etc...
+            type = plural(self_link.split('/')[5])  # e.g. endpoints, app-wans, edge-routers, etc...
         try:
-            headers = {
-                "authorization": "Bearer " + self.token
-            }
+            headers = {"authorization": "Bearer " + self.token}
             response = http.put(
                 self_link,
                 proxies=self.proxies,
@@ -578,31 +579,24 @@ class Network:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) for put: {json.dumps(put, indent=2)}")
 
         # if API responded with async promise then parse the expected process execution ID, error if missing
-        if wait and response_code == STATUS_CODES.codes.ACCEPTED:  # HTTP 202
-            # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
-            process_id = resource['_links']['process']['href'].split('/')[6]
-
-            # monitor async process, moot if API responded OK because this implies synchronous fulfillment of request
-            if wait:
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
-                except RuntimeError as e:
-                    raise RuntimeError(f"error while waiting for process status 'FINISHED', caught {e}")
-                try:
-                    # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
-                    #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
-                    finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type=type,
-                                                              id=resource['id'])
-                except Exception as e:
-                    raise RuntimeError(f"error waiting for property 'zitiId' to be defined, caught {e}")
-                return(finished)
-            else:   # if not wait then merely verify the async process was at least started if not finished
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, type="process-executions", id=process_id, wait=5, sleep=2, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"error waiting for process status 'STARTED' or 'FINISHED', caught {e}")
-
-        return(resource)
+        if wait and resource.get('_links'):
+            process_id = resource['_links']['process-executions']['href'].split('/')[6]
+            try:
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
+            except Exception as e:
+                raise RuntimeError(f"error while waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
+            else:
+                return(resource)
+        elif wait:
+            logging.warning("unable to wait for async complete because response did not provide a process execution id")
+            return(resource)
+        else:    # only wait for the process to start, not finish, or timeout
+            try:
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
+            except Exception as e:
+                raise RuntimeError(f"error waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+            else:
+                return(resource)
 
     def create_resource(self, type: str, post: dict, wait: int = 30, sleep: int = 2, progress: bool = False):
         """
@@ -611,15 +605,14 @@ class Network:
         :param type: entity type such as endpoint, service, edge-router, app-wan
         :param post: required dictionary with all properties required by the particular resource type's model
         """
+        type = plural(type)
         try:
-            headers = {
-                "authorization": "Bearer " + self.token
-            }
+            headers = {"authorization": "Bearer " + self.token}
             post['networkId'] = self.id
             if post.get('name'):
                 post['name'] = post['name'].strip('"')
             response = http.post(
-                self.audience+'core/v2/'+plural(type),
+                self.audience+'core/v2/'+type,
                 proxies=self.proxies,
                 verify=self.verify,
                 headers=headers,
@@ -627,9 +620,9 @@ class Network:
             )
             response_code = response.status_code
         except Exception as e:
-            raise RuntimeError(f"error POST to {self.audience+'core/v2/'+plural(type)}, caught {e}")
+            raise RuntimeError(f"error POST to {self.audience}core/v2/{type}, caught {e}")
 
-        if response_code in [STATUS_CODES.codes.OK, STATUS_CODES.codes.ACCEPTED]:  # HTTP 202
+        if response_code in [STATUS_CODES.codes.OK, STATUS_CODES.codes.ACCEPTED]:
             try:
                 resource = response.json()
             except ValueError as e:
@@ -637,32 +630,24 @@ class Network:
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) for post: {json.dumps(post, indent=2)}")
 
-        # if API responded with async promise then parse the expected process execution ID, error if missing
-        if response_code == STATUS_CODES.codes.ACCEPTED:                           # HTTP 202
-            # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
-            process_id = resource['_links']['process']['href'].split('/')[6]
-
-            # monitor async process, moot if API responded OK because this implies synchronous fulfillment of request
-            if wait:
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"failed while waiting for process status 'FINISHED', caught {e}")
-                try:
-                    # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
-                    #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
-                    finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type=type,
-                                                              id=resource['id'])
-                except Exception as e:
-                    raise RuntimeError(f"failed while waiting for property 'zitiId' to be defined, caught {e}")
-                return(finished)
-            else:  # if not wait then merely verify the async process was at least started if not finished
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, type="process-executions", id=process_id, wait=5, sleep=2, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"failed while waiting for process status 'STARTED' or 'FINISHED', caught {e}")
-
-        return(resource)
+        if wait and resource.get('_links'):
+            process_id = resource['_links']['process-executions']['href'].split('/')[6]
+            try:
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
+            except Exception as e:
+                raise RuntimeError(f"error while waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
+            else:
+                return(resource)
+        elif wait:
+            logging.warning("unable to wait for async complete because response did not provide a process execution id")
+            return(resource)
+        else:    # only wait for the process to start, not finish, or timeout
+            try:
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
+            except Exception as e:
+                raise RuntimeError(f"error waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+            else:
+                return(resource)
 
     def create_endpoint(self, name: str, attributes: list = [], session_identity: str = None, wait: int = 30, sleep: int = 2, progress: bool = False):
         """Create an endpoint.
@@ -700,43 +685,36 @@ class Network:
         except Exception as e:
             raise RuntimeError(f"error with POST to {self.audience+'core/v2/endpoints'}, caught {e}")
 
-        started = None
+        resource = None
 
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, NETWORK_RESOURCES['endpoints'].create_responses):
             try:
-                started = response.json()
+                resource = response.json()
             except ValueError as e:
                 raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response '{response.text}', caught {e}")
 
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}")
 
-        # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
-        process_id = started['_links']['process-executions']['href'].split('/')[6]
-
-        # a non-zero integer value for 'wait' guarantees that the method returns the fully-provisioned entity's object or times out
-        #  with an exception, and a zero value guarantees only that the async create process started successfully within a short time
-        # frame
-        if wait:
+        if wait and resource.get('_links'):
+            process_id = resource['_links']['process-executions']['href'].split('/')[6]
             try:
-                self.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, type="process-execution", id=process_id, wait=wait, sleep=sleep, progress=progress)
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
             except Exception as e:
-                raise RuntimeError(f"ERROR: timed out waiting for process status 'FINISHED', caught {e}")
+                raise RuntimeError(f"error while waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
+            else:
+                return(resource)
+        elif wait:
+            logging.warning("unable to wait for async complete because response did not provide a process execution id")
+            return(resource)
+        else:    # only wait for the process to start, not finish, or timeout
             try:
-                # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
-                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
-                finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="endpoint",
-                                                          id=started['id'])
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
             except Exception as e:
-                raise RuntimeError(f"ERROR: timed out waiting for property 'zitiId' to be defined, caught {e}")
-            return(finished)
-        else:
-            try:
-                self.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, type="process-execution", id=process_id, wait=5, sleep=2, progress=progress)
-            except Exception as e:
-                raise RuntimeError(f"ERROR: timed out waiting for process status 'STARTED' or 'FINISHED', caught {e}")
-            return(started)
+                raise RuntimeError(f"error waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+            else:
+                return(resource)
 
     @docstring_parameters(providers=str(DC_PROVIDERS))
     def create_edge_router(self, name: str, attributes: list = list(), link_listener: bool = False, data_center_id: str = None,
@@ -803,7 +781,7 @@ class Network:
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, NETWORK_RESOURCES['edge-routers'].create_responses):
             try:
-                started = json.loads(response.text)
+                resource = response.json()
             except ValueError as e:
                 raise RuntimeError(f"failed to load JSON from POST response, caught {e}")
             else:
@@ -814,26 +792,26 @@ class Network:
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
-        # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
-        process_id = started['_links']['process-executions']['href'].split('/')[6]
-
-        # a non-zero integer value for 'wait' guarantees that the method returns the fully-provisioned entity's object or times out
-        #  with an exception, and a zero value guarantees only that the async create process started successfully within a short time
-        # frame
-        if wait:
+        if wait and resource.get('_links'):
+            process_id = resource['_links']['process-executions']['href'].split('/')[6]
             try:
-                finished = self.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
             except Exception as e:
-                raise RuntimeError(f"failed while waiting for process status 'FINISHED', caught {e}")
-            if tunneler_enabled:
-                self.wait_for_entity_name_exists(entity_name=name, entity_type="endpoint", wait=wait)
-            return(finished)
-        else:
+                raise RuntimeError(f"error while waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
+            else:
+                if tunneler_enabled:
+                    self.wait_for_entity_name_exists(entity_name=name, entity_type="endpoint", wait=wait)
+                return(resource)
+        elif wait:
+            logging.warning("unable to wait for async complete because response did not provide a process execution id")
+            return(resource)
+        else:    # only wait for the process to start, not finish, or timeout
             try:
-                self.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, type="process-executions", id=process_id, wait=5, sleep=2, progress=progress)
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
             except Exception as e:
-                raise RuntimeError(f"ERROR: timed out waiting for process status 'STARTED' or 'FINISHED', caught {e}")
-            return(started)
+                raise RuntimeError(f"error waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+            else:
+                return(resource)
 
     def create_edge_router_policy(self, name: str, endpoint_attributes: list = [], edge_router_attributes: list = [], wait: int = 30):
         """Create an edge router Policy.
@@ -913,9 +891,7 @@ class Network:
         :param: encryption_required is optional Boolean. Default is to enable edge-to-edge encryption.
         """
         try:
-            headers = {
-                "authorization": "Bearer " + self.token
-            }
+            headers = {"authorization": "Bearer " + self.token}
             for role in attributes:
                 if not role[0:1] == '#':
                     raise Exception(f'invalid role "{role}". Must begin with "#"')
@@ -1001,10 +977,6 @@ class Network:
                 body['model']['bindEndpointAttributes'] = bind_endpoints
 
             params = dict()
-            # params = {
-            #     "beta": ''
-            # }
-
             response = http.post(
                 self.audience+'core/v2/services',
                 proxies=self.proxies,
@@ -1020,37 +992,30 @@ class Network:
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, NETWORK_RESOURCES['services'].create_responses):
             try:
-                started = response.json()
+                resource = response.json()
             except ValueError as e:
                 raise RuntimeError(f"failed to load JSON from POST response, caught {e}")
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
-        # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
-        process_id = started['_links']['process-executions']['href'].split('/')[6]
-
-        # a non-zero integer value for 'wait' guarantees that the method returns the fully-provisioned entity's object or times out
-        #  with an exception, and a zero value guarantees only that the async create process started successfully within a short time
-        # frame
-        if wait:
+        if wait and resource.get('_links'):
+            process_id = resource['_links']['process-executions']['href'].split('/')[6]
             try:
-                self.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
             except Exception as e:
-                raise RuntimeError(f"ERROR: timed out waiting for process status 'FINISHED', caught {e}")
+                raise RuntimeError(f"error while waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
+            else:
+                return(resource)
+        elif wait:
+            logging.warning("unable to wait for async complete because response did not provide a process execution id")
+            return(resource)
+        else:    # only wait for the process to start, not finish, or timeout
             try:
-                # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
-                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
-                finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service",
-                                                          id=started['id'])
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
             except Exception as e:
-                raise RuntimeError(f"ERROR: timed out waiting for property 'zitiId' to be defined, caught {e}")
-            return(finished)
-        else:
-            try:
-                self.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, type="process-executions", id=process_id, wait=5, sleep=2, progress=progress)
-            except Exception as e:
-                raise RuntimeError(f"ERROR: timed out waiting for process status 'STARTED' or 'FINISHED', caught {e}")
-            return(started)
+                raise RuntimeError(f"error waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+            else:
+                return(resource)
 
     # the above method was renamed to follow the development of PSM-based services (platform service models)
     create_service = create_service_simple
@@ -1109,37 +1074,30 @@ class Network:
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, NETWORK_RESOURCES['service-policies'].create_responses):
             try:
-                started = response.json()
+                resource = response.json()
             except ValueError as e:
                 raise RuntimeError(f"failed to load JSON from POST response, caught {e}")
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
-        # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
-        process_id = started['_links']['process-executions']['href'].split('/')[6]
-
-        # a non-zero integer value for 'wait' guarantees that the method returns the fully-provisioned entity's object or times out
-        #  with an exception, and a zero value guarantees only that the async create process started successfully within a short time
-        # frame
-        if wait:
+        if wait and resource.get('_links'):
+            process_id = resource['_links']['process-executions']['href'].split('/')[6]
             try:
-                self.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
             except Exception as e:
-                raise RuntimeError(f"ERROR: timed out waiting for process status 'FINISHED', caught {e}")
+                raise RuntimeError(f"error while waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
+            else:
+                return(resource)
+        elif wait:
+            logging.warning("unable to wait for async complete because response did not provide a process execution id")
+            return(resource)
+        else:    # only wait for the process to start, not finish, or timeout
             try:
-                # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
-                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
-                finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service-policy",
-                                                          id=started['id'])
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
             except Exception as e:
-                raise RuntimeError(f"ERROR: timed out waiting for property 'zitiId' to be defined, caught {e}")
-            return(finished)
-        else:
-            try:
-                self.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, type="process-executions", id=process_id, wait=5, sleep=2, progress=progress)
-            except Exception as e:
-                raise RuntimeError(f"ERROR: timed out waiting for process status 'STARTED' or 'FINISHED', caught {e}")
-            return(started)
+                raise RuntimeError(f"error waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+            else:
+                return(resource)
 
     def create_service_edge_router_policy(self, name: str, services: list, edge_routers: list, semantic: str = "AnyOf",
                                           dry_run: bool = False, wait: int = 30, sleep: int = 10, progress: bool = False):
@@ -1189,37 +1147,30 @@ class Network:
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, NETWORK_RESOURCES['service-edge-router-policies'].create_responses):
             try:
-                started = response.json()
+                resource = response.json()
             except ValueError as e:
                 raise RuntimeError(f"failed to load JSON from POST response, caught {e}")
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
-        # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
-        process_id = started['_links']['process-executions']['href'].split('/')[6]
-
-        # a non-zero integer value for 'wait' guarantees that the method returns the fully-provisioned entity's object or times out
-        #  with an exception, and a zero value guarantees only that the async create process started successfully within a short time
-        # frame
-        if wait:
+        if wait and resource.get('_links'):
+            process_id = resource['_links']['process-executions']['href'].split('/')[6]
             try:
-                self.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
             except Exception as e:
-                raise RuntimeError(f"ERROR: timed out waiting for process status 'FINISHED', caught {e}")
+                raise RuntimeError(f"error while waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
+            else:
+                return(resource)
+        elif wait:
+            logging.warning("unable to wait for async complete because response did not provide a process execution id")
+            return(resource)
+        else:    # only wait for the process to start, not finish, or timeout
             try:
-                # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
-                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
-                finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service-edge-router-policy",
-                                                          id=started['id'])
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
             except Exception as e:
-                raise RuntimeError(f"ERROR: timed out waiting for property 'zitiId' to be defined, caught {e}")
-            return(finished)
-        else:
-            try:
-                self.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, type="process-executions", id=process_id, wait=5, sleep=2, progress=progress)
-            except Exception as e:
-                raise RuntimeError(f"ERROR: timed out waiting for process status 'STARTED' or 'FINISHED', caught {e}")
-            return(started)
+                raise RuntimeError(f"error waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+            else:
+                return(resource)
 
     def create_service_with_configs(self, name: str, intercept_config_data: dict, host_config_data: dict, attributes: list = [],
                                     encryption_required: bool = True, dry_run: bool = False, wait: int = 60, sleep: int = 10,
@@ -1286,37 +1237,30 @@ class Network:
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, NETWORK_RESOURCES['services'].create_responses):
             try:
-                started = response.json()
+                resource = response.json()
             except ValueError as e:
                 raise RuntimeError(f"failed to load JSON from POST response, caught {e}")
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
-        # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
-        process_id = started['_links']['process-executions']['href'].split('/')[6]
-
-        # a non-zero integer value for 'wait' guarantees that the method returns the fully-provisioned entity's object or times out
-        #  with an exception, and a zero value guarantees only that the async create process started successfully within a short time
-        # frame
-        if wait:
+        if wait and resource.get('_links'):
+            process_id = resource['_links']['process-executions']['href'].split('/')[6]
             try:
-                self.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
             except Exception as e:
-                raise RuntimeError(f"ERROR: timed out waiting for process status 'FINISHED', caught {e}")
+                raise RuntimeError(f"error while waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
+            else:
+                return(resource)
+        elif wait:
+            logging.warning("unable to wait for async complete because response did not provide a process execution id")
+            return(resource)
+        else:    # only wait for the process to start, not finish, or timeout
             try:
-                # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
-                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
-                finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service",
-                                                          id=started['id'])
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
             except Exception as e:
-                raise RuntimeError(f"ERROR: timed out waiting for property 'zitiId' to be defined, caught {e}")
-            return(finished)
-        else:
-            try:
-                self.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, type="process-executions", id=process_id, wait=5, sleep=2, progress=progress)
-            except Exception as e:
-                raise RuntimeError(f"ERROR: timed out waiting for process status 'STARTED' or 'FINISHED', caught {e}")
-            return(started)
+                raise RuntimeError(f"error waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+            else:
+                return(resource)
 
     @docstring_parameters(valid_service_protocols=VALID_SERVICE_PROTOCOLS)
     def create_service_transparent(self, name: str, client_hosts: list, client_ports: list, transparent_hosts: list,
@@ -1597,37 +1541,30 @@ class Network:
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, NETWORK_RESOURCES['services'].create_responses):
             try:
-                started = response.json()
+                resource = response.json()
             except ValueError as e:
                 raise RuntimeError(f"failed to load JSON from POST response, caught {e}")
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
-        # extract UUIDv4 part 6 in https://gateway.production.netfoundry.io/core/v2/process/5dcef954-9d02-4751-885e-63184c5dc8f2
-        process_id = started['_links']['process-executions']['href'].split('/')[6]
-
-        # a non-zero integer value for 'wait' guarantees that the method returns the fully-provisioned entity's object or times out
-        #  with an exception, and a zero value guarantees only that the async create process started successfully within a short time
-        # frame
-        if wait:
+        if wait and resource.get('_links'):
+            process_id = resource['_links']['process-executions']['href'].split('/')[6]
             try:
-                self.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
             except Exception as e:
-                raise RuntimeError(f"ERROR: timed out waiting for process status 'FINISHED', caught {e}")
+                raise RuntimeError(f"error while waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
+            else:
+                return(resource)
+        elif wait:
+            logging.warning("unable to wait for async complete because response did not provide a process execution id")
+            return(resource)
+        else:    # only wait for the process to start, not finish, or timeout
             try:
-                # this may be redundant, but in any case was already present as a mechanism for fetching the finished entity,
-                #  and may still serve as insurance that the zitiId is in fact defined when process status is FINISHED
-                finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="service",
-                                                          id=started['id'])
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
             except Exception as e:
-                raise RuntimeError(f"ERROR: timed out waiting for property 'zitiId' to be defined, caught {e}")
-            return(finished)
-        else:
-            try:
-                self.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, type="process-executions", id=process_id, wait=5, sleep=2, progress=progress)
-            except Exception as e:
-                raise RuntimeError(f"ERROR: timed out waiting for process status 'STARTED' or 'FINISHED', caught {e}")
-            return(started)
+                raise RuntimeError(f"error waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+            else:
+                return(resource)
 
     # the above method was renamed to follow the development of PSM-based services (platform service models)
     create_endpoint_service = create_service_advanced
@@ -1918,10 +1855,8 @@ class Network:
             else:
                 logging.debug("get status failed to return a value and didn't raise an exception, still trying")
 
-            if status in RESOURCE_STATUSES_ERROR:
+            if status in RESOURCES[plural(type)].status_symbols["error"]:
                 raise RuntimeError(f"got status {status} while waiting for {expect}")
-            if expect in RESOURCE_STATUSES_CREATE_UPDATE_PROGRESS + RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE and status in RESOURCE_STATUSES_DELETE_PROGRESS + RESOURCE_STATUSES_DELETE_COMPLETE:
-                raise RuntimeError(f"current status {status} will not progress to desired status {expect}")
             elif not expect == status:
                 time.sleep(sleep)
             # loop until wait seconds
@@ -1953,6 +1888,8 @@ class Network:
         if not wait >= sleep:
             raise RuntimeError(f"wait duration ({wait}) must be greater than or equal to polling interval ({sleep})")
 
+        unexpected_statuses = RESOURCES[plural(type)].status_symbols['error'] + RESOURCES[plural(type)].status_symbols['deleting'] + RESOURCES[plural(type)].status_symbols['deleted']
+
         # poll for status until expiry
         if progress:
             sys.stdout.write(f"\twaiting for any status in {expected_statuses} or until {time.ctime(now+wait)}.")
@@ -1979,11 +1916,9 @@ class Network:
                     else:
                         logging.debug(f"{entity_status['name']} has status {entity_status['status']}")
                 status = entity_status['status']
-
-            if status in RESOURCE_STATUSES_ERROR:
+            # import epdb; epdb.serve()
+            if status in unexpected_statuses:
                 raise RuntimeError(f"got status {status} while waiting for {expected_statuses}")
-            if any_in(expected_statuses, RESOURCE_STATUSES_CREATE_UPDATE_PROGRESS + RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE) and status in RESOURCE_STATUSES_DELETE_PROGRESS + RESOURCE_STATUSES_DELETE_COMPLETE:
-                raise RuntimeError(f"current status {status} will not progress to any of the expected statuses: {expected_statuses}")
             elif status not in expected_statuses:
                 time.sleep(sleep)
         if progress:

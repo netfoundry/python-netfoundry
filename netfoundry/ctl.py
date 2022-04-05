@@ -24,7 +24,8 @@ from shlex import split as shplit
 from shutil import which
 from stat import S_IRUSR, S_IWUSR, S_IXUSR, filemode
 from subprocess import CalledProcessError
-from sys import exit, stdin, stdout
+from sys import exit as sysexit
+from sys import stdin, stdout
 from xml.sax.xmlreader import InputSource
 
 # importing this causes the 'config' subcommand to be available
@@ -45,7 +46,7 @@ from .exceptions import NeedUserInput, NFAPINoCredentials
 from .network import Network
 from .network_group import NetworkGroup
 from .organization import Organization
-from .utility import DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES, MUTABLE_RESOURCE_ABBREVIATIONS, RESOURCE_ABBREVIATIONS, RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, RESOURCE_STATUSES_DELETE_COMPLETE, RESOURCE_STATUSES_DELETE_PROGRESS, RESOURCE_STATUSES_ERROR, RESOURCES, is_jwt, normalize_caseless, plural, singular
+from .utility import DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES, MUTABLE_RESOURCE_ABBREVIATIONS, RESOURCE_ABBREVIATIONS, RESOURCES, is_jwt, normalize_caseless, plural, singular
 
 set_metadata(version=f"v{netfoundry_version}", author="NetFoundry", name="nfctl")  # must precend import milc.cli
 from milc import cli, questions  # this uses metadata set above
@@ -195,7 +196,7 @@ def ziti(cli):
     """Run read-only Ziti CLI commands remotely on controller host."""
     if not cli.config.general.network:
         cli.log.error("need --network=ACMENet")
-        exit(1)
+        sysexit(1)
 
     # set up the ziti config cache
     network_name_safe = '_'.join(cli.config.general.network.casefold().split())
@@ -225,13 +226,13 @@ def ziti(cli):
         cli.log.debug(f"found ssh executable in {which_ssh}")
     else:
         cli.log.error(f"missing executable '{ssh_bin}' in PATH: {environ['PATH']}")
-        exit(1)
+        sysexit(1)
     exec = cli.run([which_ssh, '-V'])
     if exec.returncode == 0:
         cli.log.debug(f"found '{which_ssh}' version '{exec.stdout}'")
     else:
         cli.log.error(f"failed to get {which_ssh} version: {exec.stderr}")
-        exit(exec.returncode)
+        sysexit(exec.returncode)
 
     if cli.config.ziti.user:
         proxy_user = cli.config.ziti.user
@@ -298,7 +299,7 @@ Host {ziti_ctrl_ip}
                     spinner.succeed("Login succeeded")
                 else:
                     spinner.fail("Login failed")
-                    exit(exec.returncode)
+                    sysexit(exec.returncode)
 
     elif ssh_config_file.exists():
         # compute and check network unique signature
@@ -311,7 +312,7 @@ Host {ziti_ctrl_ip}
         cli.run(shplit(proxy_jump_cmd + ziti_cmd + cli.args.ziti_subcmd) + cli.args.ziti_args, capture_output=False)
     else:
         cli.log.error("need login:\n\t nfctl --network=ACMENet ziti edge login")
-        exit(1)
+        sysexit(1)
 
 
 @cli.subcommand('logout current profile from an organization')
@@ -329,7 +330,7 @@ def logout(cli):
             )
     except Exception as e:
         cli.log.error(f"unexpected error while logging out profile '{cli.config.general.profile}': {e}")
-        exit(1)
+        sysexit(1)
     else:
         spinner.succeed(sub('Logging', 'Logged', spinner.text))
 
@@ -379,7 +380,7 @@ def create(cli):
         cli.args.resource_type = singular(MUTABLE_RESOURCE_ABBREVIATIONS[cli.args.resource_type].name)
     # get the input object if available, else get the lines (serialized YAML or JSON) and try to deserialize
     create_input_object, create_input_lines, create_object = None, str(), None
-    if stdin.isatty() and not cli.args.file:
+    if not cli.args.file:
         create_input_object = MUTABLE_NETWORK_RESOURCES[plural(cli.args.resource_type)].create_template
     elif cli.args.file:
         try:
@@ -389,7 +390,7 @@ def create(cli):
             raise RuntimeError(f"failed to read the input file: {e}")
     else:
         cli.log.error("need input file '--file=FILE'")
-        exit(1)
+        sysexit(1)
     if not create_input_object and create_input_lines:
         try:
             create_input_object = yaml_loads(create_input_lines)
@@ -401,12 +402,11 @@ def create(cli):
                 cli.log.debug(f"failed to parse input lines from file as JSON: {e}")
     if not create_input_object:
         cli.log.error("failed to parse input lines as an object (deserialized JSON or YAML)")
-        exit(1)
+        sysexit(1)
 
     create_object = edit_object_as_yaml(create_input_object)
-
-    if not create_object:              # is False if editing cancelled by empty buffer
-        spinner.text = f"Creating {cli.args.resource_type} cancelled"
+    if not create_object:              # False if editing cancelled by empty buffer
+        cli.log.debug = f"Creating {cli.args.resource_type} cancelled"
         return True
     else:
         spinner.text = f"Creating {cli.args.resource_type}"
@@ -419,7 +419,7 @@ def create(cli):
                 org_count = len(organization.find_network_groups_by_organization())
                 if org_count > 1:
                     cli.log.error("specify --network-group because there is more than one available to caller's identity")
-                    exit(org_count)
+                    sysexit(org_count)
                 else:                   # use the only available group
                     network_group_id = organization.find_network_groups_by_organization()[0]['id']
                     network_group = use_network_group(
@@ -572,7 +572,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
                     )
             else:
                 cli.log.error("need --network=ACMENet")
-                exit(1)
+                sysexit(1)
             if cli.args.resource_type == "data-center":
                 if cli.args.accept:
                     cli.log.warning("'accept' param not applicable to data-centers")
@@ -611,7 +611,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
                     filtered_match = {key: match[key] for key in match.keys() if key in valid_keys}
                 else:
                     cli.log.error(f"no valid keys requested in list: {','.join(cli.args.keys)}, need at least one of {','.join(match.keys())}")
-                    exit(1)
+                    sysexit(1)
             else:
                 cli.log.debug("not filtering output keys")
                 filtered_match = match
@@ -629,13 +629,13 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
                     cli.echo(json_dumps(filtered_match, indent=4))
     elif len(matches) == 0:
         cli.log.warning(f"found no {cli.args.resource_type} by '{','.join(query_keys)}'")
-        exit(1)
+        sysexit(1)
     else:                   # len(matches) > 1:
         if cli.args.query:
             cli.log.error(f"found more than one {cli.args.resource_type} by param(s): '{','.join(query_keys)}', try a more specific query")
         else:
             cli.log.error(f"found more than one {cli.args.resource_type}, try using a query like 'name=AcmeThing%' (% is wildcard)")
-        exit(len(matches))
+        sysexit(len(matches))
 
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
@@ -695,7 +695,7 @@ def list(cli):
                     spinner=spinner)
             else:
                 cli.log.error("first configure a network: '--network=ACMENet'")
-                exit(1)
+                sysexit(1)
             if cli.args.resource_type == "data-centers":
                 matches = network.find_edge_router_data_centers(**cli.args.query)
             else:
@@ -703,7 +703,7 @@ def list(cli):
 
     if len(matches) == 0:
         spinner.fail(f"Found no {cli.args.resource_type} by '{','.join(query_keys)}'")
-        exit(0)
+        sysexit(0)
     else:
         cli.log.debug(f"found at least one {cli.args.resource_type} by '{','.join(query_keys)}'")
 
@@ -716,7 +716,7 @@ def list(cli):
         default_columns = ['name', 'label', 'organizationShortName', 'type', 'description',
                            'edgeRouterAttributes', 'serviceAttributes', 'endpointAttributes',
                            'status', 'zitiId', 'provider', 'locationCode', 'ipAddress',
-                           'region', 'size', 'attributes', 'email', 'productVersion']
+                           'region', 'size', 'attributes', 'email', 'productVersion', 'state']
         valid_keys = set(matches[0].keys()) & set(default_columns)
 
     if valid_keys:
@@ -805,17 +805,17 @@ def delete(cli):
                         network.delete_network(progress=False, wait=cli.config.general.wait)
                 except Exception as e:
                     cli.log.error(f"unknown error deleting network, got {e}")
-                    exit(1)
+                    sysexit(1)
                 else:
                     spinner.succeed(sub('Deleting', 'Deleted', spinner.text))
             else:
                 spinner.fail(f"Not deleting network '{match['name']}'.")
         except KeyboardInterrupt:
             spinner.fail("Cancelled")
-            exit(1)
+            sysexit(1)
         except Exception as e:
             cli.log.error(f"unknown error in {e}")
-            exit(1)
+            sysexit(1)
     else:   # network child resource, not the network itself
         try:
             spinner.stop()
@@ -834,20 +834,20 @@ def delete(cli):
                         network.delete_resource(type=cli.args.resource_type, id=match['id'])
                 except KeyboardInterrupt:
                     spinner.fail("Cancelled")
-                    exit(1)
+                    sysexit(1)
                 except Exception as e:
                     cli.log.error(f"unknown error in {e}")
-                    exit(1)
+                    sysexit(1)
                 else:
                     spinner.succeed(sub('Deleting', 'Deleted', spinner.text))
             else:
                 spinner.fail(f"Not deleting {cli.args.resource_type} '{match['name']}'")
         except KeyboardInterrupt:
             spinner.fail("Cancelled")
-            exit(1)
+            sysexit(1)
         except Exception as e:
             cli.log.error(f"unknown error in {e}")
-            exit(1)
+            sysexit(1)
 
 
 @cli.argument("-s", "--size", default="small", help=argparse.SUPPRESS)   # troubleshoot scale-up instance size factor
@@ -882,7 +882,7 @@ def demo(cli):
     else:
         spinner.fail("Demo cancelled")
         cli.run(command=["nfctl", "demo", "--help"], capture_output=False)
-        exit(1)
+        sysexit(1)
 
     with spinner:
         # create network unless exists
@@ -952,7 +952,7 @@ def demo(cli):
                     er = er_matches[0]
                 else:
                     raise RuntimeError(f"unexpectedly found more than one matching router for name '{er_name}'")
-                if er['status'] in RESOURCE_STATUSES_ERROR + RESOURCE_STATUSES_DELETE_PROGRESS + RESOURCE_STATUSES_DELETE_COMPLETE:
+                if er['status'] in RESOURCES["edge-routers"].status_symbols["error"] + RESOURCES["edge-routers"].status_symbols["deleting"] + RESOURCES["edge-routers"].status_symbols["deleted"]:
                     raise RuntimeError(f"hosted router '{er_name}' has unexpected status '{er['status']}'")
 
     try:
@@ -964,7 +964,7 @@ def demo(cli):
     with spinner:
         for router_id in [r['id'] for r in hosted_edge_routers]:
             try:
-                network.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, id=router_id, type="edge-router", wait=2222, progress=False)
+                network.wait_for_statuses(expected_statuses=RESOURCES["edge-routers"].status_symbols["complete"], id=router_id, type="edge-router", wait=2222, progress=False)
             except Exception as e:
                 raise RuntimeError(f"error while waiting for router status, got {e}")
     spinner.succeed("All hosted routers online")
@@ -1071,7 +1071,7 @@ def demo(cli):
     # wait for customer router to be PROVISIONED so that registration will be available
     with spinner:
         try:
-            network.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, id=customer_router['id'], type="edge-router", wait=222, progress=False)
+            network.wait_for_statuses(expected_statuses=RESOURCES["edge-routers"].status_symbols["complete"], id=customer_router['id'], type="edge-router", wait=222, progress=False)
             customer_router_registration = network.rotate_edge_router_registration(id=customer_router['id'])
         except Exception as e:
             raise RuntimeError(f"error getting router registration, got {e}")
@@ -1126,10 +1126,10 @@ def use_organization(prompt: bool = True, spinner: object = None):
                 token_from_prompt = questions.password(prompt='Enter Bearer Token:', confirm=False, validate=is_jwt)
             except KeyboardInterrupt:
                 spinner.fail("Cancelled")
-                exit(1)
+                sysexit(1)
             except Exception as e:
                 cli.log.error(f"unknown error in {e}")
-                exit(1)
+                sysexit(1)
 
             try:
                 spinner.text = "Trying token for profile '{:s}'".format(cli.config.general.profile)
@@ -1143,7 +1143,7 @@ def use_organization(prompt: bool = True, spinner: object = None):
                     )
             except PyJWTError:
                 spinner.fail("Not a valid token")
-                exit(1)
+                sysexit(1)
             except Exception as e:
                 raise RuntimeError(f"unknown error in {e}")
         else:
@@ -1207,7 +1207,7 @@ def use_network(organization: object, network_name: str = None, group: str = Non
             cli.log.debug(f"using the only available network: '{network_name}'")
         else:
             cli.log.error("You have multiple networks, which one would you like to use? Need 'nfctl --network=NETWORK' or 'nfctl config.general.network=NETWORK'.")
-            exit(1)
+            sysexit(1)
     elif group:
         network_group = use_network_group(
             organization=organization,
@@ -1216,7 +1216,7 @@ def use_network(organization: object, network_name: str = None, group: str = Non
         existing_networks = network_group.network_ids_by_normal_name
         if not existing_networks.get(normalize_caseless(network_name)):
             cli.log.error(f"failed to find a network named '{network_name}' in network group '{network_group['name']}'.")
-            exit(1)
+            sysexit(1)
     else:
         existing_count = organization.count_networks_with_name(network_name)
         if existing_count == 1:
@@ -1228,10 +1228,10 @@ def use_network(organization: object, network_name: str = None, group: str = Non
                 spinner=spinner)
         elif existing_count > 1:
             cli.log.error(f"there were {existing_count} networks named '{network_name}' visible to your identity. Try narrowing the search with '--network-group=NETWORK_GROUP'.")
-            exit(1)
+            sysexit(1)
         else:
             cli.log.error(f"failed to find a network named '{network_name}'.")
-            exit(1)
+            sysexit(1)
 
     # use the network
     spinner.text = f"Configuring network '{network_name}'"
@@ -1244,10 +1244,10 @@ def use_network(organization: object, network_name: str = None, group: str = Non
         elif not network.status == 'PROVISIONED':
             try:
                 spinner.text = f"Waiting for network {network.name} to provision"
-                network.wait_for_statuses(expected_statuses=RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE, wait=600, progress=False)
+                network.wait_for_statuses(expected_statuses=RESOURCES["networks"].status_symbols["complete"], wait=600, progress=False)
             except KeyboardInterrupt:
                 spinner.fail("Cancelled")
-                exit(1)
+                sysexit(1)
             except Exception as e:
                 raise RuntimeError(f"unknown error in {e}")
     spinner.succeed(sub("Configuring", "Configured", spinner.text))
@@ -1299,8 +1299,8 @@ def edit_object_as_yaml(edit: object):
             else:
                 return edited_object
     if save_error:
-        cli.log.error(f"your buffer was saved and you may continue editing it  'create TYPE --file {temp_file}'")
-        exit(1)
+        cli.log.error(f"your buffer was saved in {temp_file}")
+        sysexit(1)
 
 
 def get_spinner(text):

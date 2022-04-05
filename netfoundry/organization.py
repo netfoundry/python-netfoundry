@@ -4,17 +4,15 @@ import json
 import logging
 import os
 import re  # regex
-from stat import S_IRUSR, S_IWUSR, S_IXUSR, filemode
 import time  # enforce a timeout; sleep
 from pathlib import Path
+from stat import S_IRUSR, S_IWUSR, S_IXUSR, filemode
 
 from platformdirs import user_cache_path, user_config_path
 
 from .exceptions import NFAPINoCredentials
-from .utility import (DEFAULT_TOKEN_EXPIRY, ENVIRONMENTS,
-                      EMBEDDABLE_NETWORK_RESOURCES, NETWORK_RESOURCES, RESOURCES,
-                      STATUS_CODES, find_generic_resources, get_generic_resource, http,
-                      is_uuidv4, normalize_caseless, get_token_cache, jwt_environment, jwt_expiry)
+from .utility import (DEFAULT_TOKEN_EXPIRY, EMBEDDABLE_NETWORK_RESOURCES, ENVIRONMENTS, NETWORK_RESOURCES, RESOURCES, STATUS_CODES, find_generic_resources, get_generic_resource, get_token_cache, http, is_uuidv4, jwt_environment, jwt_expiry,
+                      normalize_caseless, plural)
 
 
 class Organization:
@@ -553,7 +551,7 @@ path to credentials file.
             params['embed'] = ','.join(EMBEDDABLE_NETWORK_RESOURCES)
             logging.debug(f"requesting embed all resource types in network domain: {params['embed']}")
         elif embed:
-            valid_types = [type for type in embed.split(',') if RESOURCES[type]['domain'] == "network"]
+            valid_types = [plural(type) for type in embed.split(',') if RESOURCES[plural(type)]['domain'] == "network"]
             params['embed'] = ','.join(valid_types)
             logging.debug(f"requesting embed some resource types in network domain: {valid_types}")
             for type in embed.split(','):

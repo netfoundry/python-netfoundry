@@ -31,7 +31,7 @@ p = inflect.engine()
 
 
 def any_in(a, b):
-    "True if any of set a are in set b"
+    "True if any of a are in b"
     return any(i in b for i in a)
 
 
@@ -323,6 +323,8 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
             params['findByName'] = param
         elif param == 'networkGroupId' and resource_type.name == 'network-groups':
             params['findByNetworkGroupId'] = param
+        elif param == 'region' and resource_type.name == 'data-center':
+            params['locationCode'] = param
         else:
             params[param] = kwargs[param]
 
@@ -350,8 +352,10 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
         params['page'] = 0
 
     if accept:
+
         if accept in ["create", "update"]:
-            headers['accept'] = "application/json;as="+accept
+            headers['accept'] = "application/hal+json;as="+accept
+            embedded = accept + embedded[0].upper() + embedded[1:]  # compose "createEndpointList" from "endpointList"
         else:
             logging.warn("ignoring invalid value for header 'accept': '{:s}'".format(accept))
 
@@ -393,6 +397,10 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
                                 yield_page = resource_page['_embedded'][embedded]
                             except KeyError as e:
                                 raise RuntimeError(f"failed to find embedded collection in valid JSON response at '_embedded.{embedded}', got: '{e}'")
+                            else:
+                                if accept in ["create", "update"]:
+                                    for i in yield_page:
+                                        del i['_links']
                         elif resource_page.get('content'):
                             yield_page = resource_page['content']
                         else:
@@ -445,7 +453,29 @@ MUTABLE_RESOURCE_ABBREVIATIONS = dict()
 EMBEDDABLE_NETWORK_RESOURCES = dict()
 RESOURCE_ABBREVIATIONS = dict()
 
+PROCESS_STATUS_SYMBOLS = {
+    "complete": ("FINISHED", "SUCCESS", "SUSPENDED"),
+    "progress": ("STARTED", "RUNNING"),
+    "error": ("FAILED",),
+    "deleting": tuple(),
+    "deleted": tuple(),
+}
+RESOURCE_STATUS_SYMBOLS = {
+    "complete": ("PROVISIONED",),
+    "progress": ("PROVISIONING", "UPDATING"),
+    "error": ("ERROR",),
+    "deleting": ("DELETING",),
+    "deleted": ("DELETED",),
+}
+RESOURCE_STATUSES = set()
+for k, v in RESOURCE_STATUS_SYMBOLS.items():
+    for i in v:
+        RESOURCE_STATUSES.add(i)
 
+
+# The purpose of the parent class is to validate the type of child class
+# attributes. Homing this logic in a parent class allows any number of child
+# classes to use it.
 @dataclass
 class ResourceTypeParent:
     """Parent class for ResourceType class."""
@@ -457,10 +487,9 @@ class ResourceTypeParent:
                 current_type = type(self.__dict__[name])
                 raise TypeError(f"The field `{name}` was assigned by `{current_type}` instead of `{field_type}`")
 
+
 # the instance's attributes can not be frozen because we're computing the
 # _embedded key and assigning post-init
-
-
 @dataclass(frozen=False)
 class ResourceType(ResourceTypeParent):
     """Typed resource type spec.
@@ -482,6 +511,7 @@ class ResourceType(ResourceTypeParent):
         'hint': "No template was found for this resource type. Replace the contents of this buffer with the request body as YAML or JSON to create a resource. networkId will be added automatically."
     })                                                      # object to load when creating from scratch in nfctl
     abbreviation: str = field(default='default')
+    status_symbols: dict = field(default_factory=lambda: RESOURCE_STATUS_SYMBOLS)  # dictionary with three predictable keys: complete, progress, error, each a tuple associating status symbols with a state
 
     def __post_init__(self):
         """Compute and assign _embedded if not supplied and then check types in parent class."""
@@ -521,11 +551,13 @@ RESOURCES = {
         mutable=False,
         embeddable=False,
         status="state",
+        status_symbols=PROCESS_STATUS_SYMBOLS,
+        _embedded='process-executions',
     ),
     'data-centers': ResourceType(
         name='data-centers',
         domain='network',
-        _embedded='dataCenters',      # TODO: raise a bug report because this inconcistency forces consumers to make an exception for this type
+        _embedded='dataCenters',
         mutable=False,
         embeddable=False,
     ),
@@ -538,7 +570,7 @@ RESOURCES = {
     'network-groups': ResourceType(
         name='network-groups',
         domain='network-group',
-        _embedded='organizations',    # TODO: prune this exception when groups migrate to the Core network domain
+        _embedded='organizations',
         mutable=False,
         embeddable=False,
     ),
@@ -658,12 +690,6 @@ MAJOR_REGIONS = {
 }
 
 DC_PROVIDERS = ["AWS", "AZURE", "GCP", "OCP"]
-RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE = ("PROVISIONED", "FINISHED", "SUCCESS", "SUSPENDED")
-RESOURCE_STATUSES_DELETE_COMPLETE = ("FINISHED", "DELETED", "SUCCESS")
-RESOURCE_STATUSES_CREATE_UPDATE_PROGRESS = ("PROVISIONING", "STARTED", "RUNNING", "UPDATING")
-RESOURCE_STATUSES_DELETE_PROGRESS = ("DELETING",)
-RESOURCE_STATUSES_ERROR = ("ERROR", "FAILED")
-RESOURCE_STATUSES = RESOURCE_STATUSES_CREATE_UPDATE_COMPLETE + RESOURCE_STATUSES_DELETE_COMPLETE + RESOURCE_STATUSES_CREATE_UPDATE_PROGRESS + RESOURCE_STATUSES_DELETE_PROGRESS + RESOURCE_STATUSES_ERROR
 VALID_SERVICE_PROTOCOLS = ["tcp", "udp"]
 VALID_SEPARATORS = '[:-]'  # : or - will match regex pattern
 
