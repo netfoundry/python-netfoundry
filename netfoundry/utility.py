@@ -352,7 +352,6 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
         params['page'] = 0
 
     if accept:
-
         if accept in ["create", "update"]:
             headers['accept'] = "application/hal+json;as="+accept
             embedded = accept + embedded[0].upper() + embedded[1:]  # compose "createEndpointList" from "endpointList"

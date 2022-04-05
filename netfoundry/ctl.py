@@ -46,7 +46,7 @@ from .exceptions import NeedUserInput, NFAPINoCredentials
 from .network import Network
 from .network_group import NetworkGroup
 from .organization import Organization
-from .utility import DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES, MUTABLE_RESOURCE_ABBREVIATIONS, RESOURCE_ABBREVIATIONS, RESOURCES, is_jwt, normalize_caseless, plural, singular
+from .utility import DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES, MUTABLE_RESOURCE_ABBREVIATIONS, RESOURCE_ABBREVIATIONS, RESOURCE_STATUS_SYMBOLS, RESOURCES, is_jwt, normalize_caseless, plural, singular
 
 set_metadata(version=f"v{netfoundry_version}", author="NetFoundry", name="nfctl")  # must precend import milc.cli
 from milc import cli, questions  # this uses metadata set above
@@ -1237,8 +1237,8 @@ def use_network(organization: object, network_name: str = None, group: str = Non
     spinner.text = f"Configuring network '{network_name}'"
     with spinner:
         network = Network(network_group, network_name=network_name)
-        if network.status == 'ERROR':
-            cli.log.error(f"network {network.name} has status ERROR")
+        if network.status in RESOURCES['networks'].status_symbols['deleting'] + RESOURCES['networks'].status_symbols['deleted'] + RESOURCES['networks'].status_symbols['error']:
+            cli.log.error(f"network {network.name} has status {network.status}")
         elif not cli.config.general.wait:
             cli.log.debug("wait seconds is 0, not waiting for network to provision")
         elif not network.status == 'PROVISIONED':
