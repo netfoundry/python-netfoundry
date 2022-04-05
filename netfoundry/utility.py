@@ -502,6 +502,7 @@ class ResourceType(ResourceTypeParent):
     domain: str                                             # most are in network, identity
     mutable: bool                                           # createable, editable, or deletable
     embeddable: bool                                        # legal to request embedding in a parent resource in same domain
+    parent: str = field(default=None)                       # optional parent ResourceType instance name
     status: str = field(default='status')                   # name of property where symbolic status is expressed
     _embedded: str = field(default='default')               # the key under which lists are found in the API e.g. networkControllerList (computed if not provided as dromedary case singular)
     create_responses: list = field(default_factory=list)    # expected HTTP response codes for create operation
@@ -608,12 +609,14 @@ RESOURCES = {
         domain='identity',
         mutable=False,
         embeddable=False,
+        parent='identities',
     ),
     'api-account-identities': ResourceType(
         name='api-account-identities',
         domain='identity',
         mutable=False,
         embeddable=False,
+        parent='identities',
     ),
     'hosts': ResourceType(
         name='hosts',
@@ -647,13 +650,6 @@ RESOURCES = {
         embeddable=True,
         create_responses=["OK", "ACCEPTED"],
     ),
-    'app-wans': ResourceType(
-        name='app-wans',
-        domain='network',
-        mutable=True,
-        embeddable=True,
-        create_responses=["OK", "ACCEPTED"],
-    ),
     'services': ResourceType(
         name='services',
         domain='network',
@@ -667,6 +663,14 @@ RESOURCES = {
         mutable=True,
         embeddable=True,
         create_responses=["ACCEPTED"],
+    ),
+    'app-wans': ResourceType(
+        name='app-wans',
+        domain='network',
+        mutable=True,
+        embeddable=True,
+        create_responses=["OK", "ACCEPTED"],
+        parent='service-policies',
     ),
     'service-edge-router-policies': ResourceType(
         name='service-edge-router-policies',
