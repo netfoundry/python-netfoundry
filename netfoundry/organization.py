@@ -571,12 +571,8 @@ path to credentials file.
                     logging.warning(f"not requesting '{type}', not a resource type in the network domain")
 
         url = self.audience+'core/v2/networks/'+network_id
-        try:
-            network, status_symbol = get_generic_resource(url=url, headers=headers, accept=accept, proxies=self.proxies, verify=self.verify, **params)
-        except Exception as e:
-            raise RuntimeError(f"failed to get network from url: '{url}', caught {e}")
-        else:
-            return(network)
+        network, status_symbol = get_generic_resource(url=url, headers=headers, accept=accept, proxies=self.proxies, verify=self.verify, **params)
+        return(network)
 
     def find_network_groups_by_organization(self, **kwargs):
         """Find network groups as a collection.
