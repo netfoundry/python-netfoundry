@@ -453,16 +453,16 @@ EMBEDDABLE_NETWORK_RESOURCES = dict()
 RESOURCE_ABBREVIATIONS = dict()
 
 PROCESS_STATUS_SYMBOLS = {
-    "complete": ("FINISHED", "SUCCESS", "SUSPENDED"),
+    "complete": ("FINISHED", "SUCCESS"),
     "progress": ("STARTED", "RUNNING"),
     "error": ("FAILED",),
     "deleting": tuple(),
     "deleted": tuple(),
 }
 RESOURCE_STATUS_SYMBOLS = {
-    "complete": ("PROVISIONED",),
-    "progress": ("PROVISIONING", "UPDATING"),
-    "error": ("ERROR",),
+    "complete": ("PROVISIONED"),
+    "progress": ("NEW", "PROVISIONING", "UPDATING", "REPLACING"),
+    "error": ("ERROR", "SUSPENDED"),
     "deleting": ("DELETING",),
     "deleted": ("DELETED",),
 }
@@ -502,7 +502,7 @@ class ResourceType(ResourceTypeParent):
     domain: str                                             # most are in network, identity
     mutable: bool                                           # createable, editable, or deletable
     embeddable: bool                                        # legal to request embedding in a parent resource in same domain
-    parent: str = field(default=None)                       # optional parent ResourceType instance name
+    parent: str = field(default=str())                       # optional parent ResourceType instance name
     status: str = field(default='status')                   # name of property where symbolic status is expressed
     _embedded: str = field(default='default')               # the key under which lists are found in the API e.g. networkControllerList (computed if not provided as dromedary case singular)
     create_responses: list = field(default_factory=list)    # expected HTTP response codes for create operation
@@ -544,6 +544,7 @@ RESOURCES = {
         mutable=False,
         embeddable=False,
         _embedded='content',
+        abbreviation='rol',
     ),
     'process-executions': ResourceType(
         name='process-executions',
@@ -553,6 +554,20 @@ RESOURCES = {
         status="state",
         status_symbols=PROCESS_STATUS_SYMBOLS,
         _embedded='process-executions',
+    ),
+    'regions': ResourceType(
+        name='regions',
+        domain='network',
+        mutable=False,
+        embeddable=False,
+        abbreviation='reg',
+    ),
+    'network-versions': ResourceType(
+        name='network-versions',
+        domain='network',
+        mutable=False,
+        embeddable=False,
+        _embedded='network-versions',
     ),
     'data-centers': ResourceType(
         name='data-centers',

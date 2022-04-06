@@ -43,7 +43,7 @@ from yaml import parser
 from netfoundry import __version__ as netfoundry_version
 
 from .exceptions import NeedUserInput, NFAPINoCredentials
-from .network import Network
+from .network import Networks, Network
 from .network_group import NetworkGroup
 from .organization import Organization
 from .utility import DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES, MUTABLE_RESOURCE_ABBREVIATIONS, RESOURCE_ABBREVIATIONS, RESOURCE_STATUS_SYMBOLS, RESOURCES, is_jwt, normalize_caseless, plural, singular
@@ -106,7 +106,7 @@ def login(cli):
     spinner = get_spinner("working")
     spinner.text = f"Logging in profile '{cli.config.general.profile}'"
     with spinner:
-        organization = use_organization(spinner=spinner)
+        organization, networks = use_organization(spinner=spinner)
         if cli.config.general.network_group and cli.config.general.network:
             cli.log.debug(f"configuring network {cli.config.general.network} in group {cli.config.general.network_group}")
             network, network_group = use_network(
@@ -251,7 +251,7 @@ def ziti(cli):
             cli.log.warning(f"ignoring extra args: {' '.join(cli.args.ziti_args[1:])}")
         spinner = get_spinner("Logging in to Ziti Controller Edge Management API")
         with spinner:
-            organization = use_organization(spinner=spinner)
+            organization, networks = use_organization(spinner=spinner)
             network, network_group = use_network(
                 organization=organization,
                 group=cli.config.general.network_group,
@@ -412,7 +412,7 @@ def create(cli):
     else:
         spinner.text = f"Creating {cli.args.resource_type}"
     with spinner:
-        organization = use_organization(spinner=spinner)
+        organization, networks = use_organization(spinner=spinner)
         if cli.args.resource_type == "network":
             if cli.config.general.network_group:
                 network_group = use_network_group(organization=organization, )
@@ -494,7 +494,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
     if not echo:
         spinner.enabled = False
     with spinner:
-        organization = use_organization(spinner=spinner)
+        organization, networks = use_organization(spinner=spinner)
         if cli.args.resource_type == "organization":
             if 'id' in query_keys:
                 if len(query_keys) > 1:
@@ -665,9 +665,11 @@ def list(cli):
     else:
         spinner.text = f"Finding all {cli.args.resource_type}"
     with spinner:
-        organization = use_organization(spinner=spinner)
+        organization, networks = use_organization(spinner=spinner)
         if cli.args.resource_type == "organizations":
             matches = organization.find_organizations(**cli.args.query)
+        elif cli.args.resource_type in ["network-versions"]:
+            matches = find_networks(resource_type=cli.args.resource_type, **cli.args.query)
         elif cli.args.resource_type == "network-groups":
             matches = organization.find_network_groups_by_organization(**cli.args.query)
         elif cli.args.resource_type == "identities":
@@ -716,8 +718,9 @@ def list(cli):
     elif cli.args.output == "text":
         default_columns = ['name', 'label', 'organizationShortName', 'type', 'description',
                            'edgeRouterAttributes', 'serviceAttributes', 'endpointAttributes',
-                           'status', 'zitiId', 'provider', 'locationCode', 'ipAddress',
-                           'region', 'size', 'attributes', 'email', 'productVersion', 'state']
+                           'status', 'zitiId', 'provider', 'locationCode', 'ipAddress', 'networkVersion',
+                           'active', 'default', 'region', 'size', 'attributes', 'email', 'productVersion',
+                           'state']
         valid_keys = set(matches[0].keys()) & set(default_columns)
 
     if valid_keys:
@@ -860,7 +863,7 @@ def demo(cli):
     """Create a demo network or add demo resources to existing network."""
     spinner = get_spinner("working")
     with spinner:
-        organization = use_organization(spinner=spinner)
+        organization, networks = use_organization(spinner=spinner)
     if cli.config.general.network:
         network_name = cli.config.general.network
     else:
@@ -1103,7 +1106,7 @@ def demo(cli):
 
 
 def use_organization(prompt: bool = True, spinner: object = None):
-    """Cache an expiring token for your identity in organization."""
+    """Cache an expiring token for an identity and configure access to the network domain."""
     if not spinner:
         spinner = get_spinner("working")
     else:
@@ -1152,7 +1155,8 @@ def use_organization(prompt: bool = True, spinner: object = None):
             raise NFAPINoCredentials()
     spinner.succeed(f"Logged in profile '{cli.config.general.profile}'")
     cli.log.debug(f"logged-in organization label is {organization.label}.")
-    return organization
+    networks = Networks(Organization=organization)
+    return organization, networks
 
 
 def use_network_group(organization: object, group: str = None, spinner: object = None):

@@ -6,6 +6,8 @@ import re
 import sys
 import time
 
+from netfoundry.exceptions import UnknownResourceType
+
 from .utility import (DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES, NETWORK_RESOURCES, RESOURCES, STATUS_CODES, VALID_SEPARATORS, VALID_SERVICE_PROTOCOLS, any_in, docstring_parameters, find_generic_resources,
                       get_generic_resource, http, is_uuidv4, normalize_caseless, plural, singular)
 
@@ -14,7 +16,7 @@ class Network:
     """Describe and use a network."""
 
     def __init__(self, NetworkGroup: object, network_id: str = None, network_name: str = None, network: str = None):
-        """Initialize network.
+        """Initialize a particular network. Networks are always known by their network group.
 
         :param obj NetworkGroup: required parent network group of this network
         :param str network: optional identifier to resolve as UUID or name, ignored if network_id or network_name
@@ -2067,3 +2069,74 @@ class Network:
                 raise RuntimeError(f"error waiting for deletedAt, caught {e}")
 
         return(True)
+
+
+class Networks:
+    """
+    Interact with the network resource domain.
+
+    This class does not require configuration of a particular network, and so
+    exposes methods and attributes for the network domain across all visible
+    networks.
+    """
+
+    def __init__(self, Organization: object) -> None:
+        """
+        :organization: an instance of netfoundry.Organization provides a session and configuration
+        """
+        self.audience = Organization.audience
+        self.token = Organization.token
+
+    def find_all_networks_resources(self, resource_type: str, **kwargs):
+        """
+        Find resources of a particular type as a collection.
+
+        Found resources are not necessarily associated with a particular network.
+        """
+        if not RESOURCES.get(resource_type):
+            raise UnknownResourceType(f"Unrecognized type: {resource_type}")
+        else:
+            resource_spec = RESOURCES.get(resource_type)
+
+        if RESOURCES[resource_spec]._embedded:
+            _embedded = RESOURCES[resource_spec]._embedded
+        else:
+            _embedded = None
+
+        params = dict()
+        for k, v in kwargs.items():
+            params[k] = v
+
+        url = f"{self.audience}core/v2/{resource_type}"
+        headers = {"authorization": "Bearer " + self.token}
+        resources = list()
+        for i in find_generic_resources(
+            url=url,
+            headers=headers,
+            embedded=_embedded,
+            proxies=self.proxies,
+            verify=self.verify,
+            **params,
+        ):
+            resources.extend(i)
+        return(resources)
+
+    def get_all_networks_resource(self,  resource_type: str, id: str, **kwargs):
+        """
+        Get a resources of a particular type as a dictionary.
+
+        Found resources are not necessarily associated with a particular network.
+        """
+        if not RESOURCES.get(resource_type):
+            raise UnknownResourceType(f"Unrecognized type: {resource_type}")
+        # else:
+        #     resource_spec = RESOURCES.get(resource_type)
+
+        params = dict()
+        for k, v in kwargs.items():
+            params[k] = v
+
+        url = f"{self.audience}core/v2/{resource_type}"
+        headers = {"authorization": "Bearer " + self.token}
+        resource = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params)
+        return(resource)

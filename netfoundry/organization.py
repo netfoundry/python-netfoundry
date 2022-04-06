@@ -667,12 +667,3 @@ path to credentials file.
             return(networks)
     get_networks_by_group = find_networks_by_group
 
-    # if not NETWORK_RESOURCES.get(plural(type)):
-    #     logging.error("unknown resource type '{plural}'. Choices: {choices}".format(
-    #         singular=type,
-    #         plural=plural(type),
-    #         choices=NETWORK_RESOURCES.keys()
-    #     ))
-    #     raise RuntimeError
-    # elif plural(type) in ["edge-routers","network-controllers"]:
-    #     params['embed'] = "host"
