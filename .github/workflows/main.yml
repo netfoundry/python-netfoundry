@@ -99,10 +99,11 @@ jobs:
         repository_url: https://test.pypi.org/legacy/
 
     - name: Temporarily Store the Python Package in GitHub # for convenient reference, troubleshooting, investigation, etc...
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: netfoundry-pypi-${{ github.run_id }}
         path: dist/netfoundry-*.tar.gz
+    if-no-files-found: error
 
     - name: Append 'latest' tag if release
       env:

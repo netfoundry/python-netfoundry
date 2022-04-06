@@ -1,21 +1,20 @@
 """Use a network group and find its networks."""
 
-from ast import Or
 import json
 import logging
 
 from .utility import (NETWORK_RESOURCES, RESOURCES, STATUS_CODES,
                       find_generic_resources, get_generic_resource, http, is_uuidv4,
-                      normalize_caseless)
+                      normalize_caseless, any_in)
 
 
 class NetworkGroup:
     """use a network group by name or ID.
-    
+
     The default is to use the first network group available to the organization of the caller.
     """
 
-    def __init__(self, Organization: object, network_group_id: str=None, network_group_name: str=None, group: str=None):
+    def __init__(self, Organization: object, network_group_id: str = None, network_group_name: str = None, group: str = None):
         """Initialize the network group class with a group name or ID."""
         self.network_groups = Organization.get_network_groups_by_organization()
         if (not network_group_id and not network_group_name) and group:
@@ -25,13 +24,13 @@ class NetworkGroup:
                 network_group_name = group
         if network_group_id:
             self.network_group_id = network_group_id
-            self.network_group_name = [ ng['organizationShortName'] for ng in self.network_groups if ng['id'] == network_group_id ][0]
+            self.network_group_name = [ng['organizationShortName'] for ng in self.network_groups if ng['id'] == network_group_id][0]
         # TODO: review the use of org short name ref https://mattermost.tools.netfoundry.io/netfoundry/pl/gegyzuybypb9jxnrw1g1imjywh
         elif network_group_name:
             self.network_group_name = network_group_name
-            network_group_matches = [ ng['id'] for ng in self.network_groups if ng['organizationShortName'] == network_group_name ]
+            network_group_matches = [ng['id'] for ng in self.network_groups if ng['organizationShortName'] == network_group_name]
             if len(network_group_matches) == 1:
-                self.network_group_id = [ ng['id'] for ng in self.network_groups if ng['organizationShortName'] == network_group_name ][0]
+                self.network_group_id = [ng['id'] for ng in self.network_groups if ng['organizationShortName'] == network_group_name][0]
             else:
                 raise RuntimeError(f"there was not exactly one network group matching the name '{network_group_name}'")
         elif len(self.network_groups) > 0:
@@ -75,7 +74,7 @@ class NetworkGroup:
     # resolve network UUIDs by name
     def network_id_by_normal_name(self, name):
         """Find network ID in group by case-insensitive (caseless, normalized) name.
-        
+
         Case-insensitive uniqueness is enforced by the API for each type of entity.
         """
         caseless = normalize_caseless(name)
@@ -84,9 +83,9 @@ class NetworkGroup:
         else:
             raise RuntimeError(f"no network named '{name}' in this network group")
 
-    def network_exists(self, name: str, deleted: bool=False):
+    def network_exists(self, name: str, deleted: bool = False):
         """Check if a network exists in the current group.
-        
+
         :param name: the case-insensitive string to search
         :param deleted: include deleted networks in results
         """
@@ -103,35 +102,35 @@ class NetworkGroup:
             params[param] = kwargs[param]
         params["productVersion"] = self.find_latest_product_version(is_active=True)
         params["hostType"] = "NC"
-        #params["provider"] = "AWS"
+        params["provider"] = "AWS"
 
         url = self.audience+'core/v2/data-centers'
-        headers = { "authorization": "Bearer " + self.token }
+        headers = {"authorization": "Bearer " + self.token}
         try:
             data_centers = list()
             for i in find_generic_resources(url=url, headers=headers, embedded=NETWORK_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params):
                 data_centers.extend(i)
         except Exception as e:
-            raise RuntimeError(f"failed to get data-centers from url: '{url}'")
+            raise RuntimeError(f"failed to get data-centers from url: '{url}', caught {e}")
         else:
             return(data_centers)
 
     # provide a compatible alias
-    get_controller_data_centers = nc_data_centers 
+    get_controller_data_centers = nc_data_centers
 
-    def get_product_metadata(self, is_active: bool=True):
+    def get_product_metadata(self, is_active: bool = True):
         """
         Get product version metadata.
-        
+
         :param is_active: filter for only active product versions
         :param product_version: semver string of a single version to get, default is all versions
         """
         url = self.audience+'product-metadata/v2/download-urls.json'
-        headers = dict() # no auth
+        headers = dict()  # no auth
         try:
             all_product_metadata, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except Exception as e:
-            raise RuntimeError(f"failed to get product-metadata from url: '{url}'")
+            raise RuntimeError(f"failed to get product-metadata from url: '{url}', caught {e}")
         else:
             if is_active:
                 filtered_product_metadata = dict()
@@ -142,7 +141,7 @@ class NetworkGroup:
             else:
                 return (all_product_metadata)
 
-    def list_product_versions(self, product_metadata: dict=dict(), is_active: bool=True):
+    def list_product_versions(self, product_metadata: dict = dict(), is_active: bool = True):
         """Find product versions in all products' metadata."""
         if product_metadata:
             product_versions = product_metadata.keys()
@@ -152,7 +151,7 @@ class NetworkGroup:
 
         return (product_versions)
 
-    def find_latest_product_version(self, product_versions: list=list(), is_active: bool=True):
+    def find_latest_product_version(self, product_versions: list = list(), is_active: bool = True):
         """Get the highest product version number (may be experimental, not stable)."""
         if not product_versions:
             product_versions = self.list_product_versions(is_active=is_active)
@@ -160,7 +159,7 @@ class NetworkGroup:
         from distutils.version import LooseVersion
         return sorted(product_versions, key=LooseVersion)[-1]
 
-    def create_network(self, name: str, network_group_id: str=None, location: str="us-east-1", version: str=None, size: str="small", **kwargs):
+    def create_network(self, name: str, network_group_id: str = None, location: str = "us-east-1", version: str = None, size: str = "small", **kwargs):
         """
         Create a network in this network group.
 
@@ -175,7 +174,7 @@ class NetworkGroup:
             raise RuntimeError(f"unexpected network location '{location}'. Valid locations include: {','.join(my_nc_data_centers_by_location.keys())}.")
 
         # map incongruent api keys from kwargs to function params ("name", "size" are congruent)
-        for param,value in kwargs.items():
+        for param, value in kwargs.items():
             if param == 'networkGroupId':
                 if network_group_id:
                     logging.debug("clobbering param 'network_group_id' with kwarg 'networkGroupId'")
@@ -209,7 +208,7 @@ class NetworkGroup:
             elif version in product_versions:
                 request['productVersion'] = version
             elif version == "default":
-                pass # do not specify a value for productVersion
+                pass    # do not specify a value for productVersion
             else:
                 raise RuntimeError(f"invalid version '{version}'. Expected one of {product_versions}")
         headers = {
@@ -227,9 +226,8 @@ class NetworkGroup:
             )
             response_code = response.status_code
         except Exception as e:
-            raise
+            raise RuntimeError(f"problem creating network, caught {e}")
 
-        any_in = lambda a, b: any(i in b for i in a)
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['networks'].create_responses):
             try:
@@ -258,10 +256,10 @@ class NetworkGroup:
             elif network_name and self.network_ids_by_normal_name.get(normalize_caseless(network_name)):
                 network_id = self.network_ids_by_normal_name[normalize_caseless(network_name)]
         except Exception as e:
-            raise RuntimeError(f"need one of network_id or network_name for a network in this network group: {self.name}, got {e}")
+            raise RuntimeError(f"need one of network_id or network_name for a network in this network group: {self.name}, caught {e}")
 
         try:
-            headers = { "authorization": "Bearer " + self.token }
+            headers = {"authorization": "Bearer " + self.token}
             entity_url = self.audience+'core/v2/networks/'+network_id
             response = http.delete(
                 entity_url,
@@ -272,10 +270,9 @@ class NetworkGroup:
             response_code = response.status_code
             network = response.json()
         except Exception as e:
-            raise RuntimeError(f"failed deleting network {entity_url} or loading JSON from response, got {e}")
+            raise RuntimeError(f"failed deleting network {entity_url} or loading JSON from response, caught {e}")
 
         if not response_code == STATUS_CODES.codes.ACCEPTED:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
         return(network)
-
