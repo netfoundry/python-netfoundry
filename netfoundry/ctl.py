@@ -25,7 +25,7 @@ from shutil import which
 from stat import S_IRUSR, S_IWUSR, S_IXUSR, filemode
 from subprocess import CalledProcessError
 from sys import exit as sysexit
-from sys import stdin, stdout
+from sys import stdin, stdout, stderr
 from xml.sax.xmlreader import InputSource
 
 # importing this causes the 'config' subcommand to be available
@@ -64,8 +64,17 @@ class StoreDictKeyPair(argparse.Action):
         my_dict = {}
         if values is not None:                 # and len(values.split(',')) > 0:
             for kv in values.split(','):
-                k, v = kv.split('=')
-                my_dict[k] = v
+                try:
+                    k, v = kv.split('=')
+                except ValueError:
+                    # logging is not set up yet because MILC redirects to null
+                    # device until decorators are exec'd and metadata is
+                    # configured and cli() is invoked
+                    stderr.write(f"invalid value '{kv}', expected a comma-sep list of one or more k=v pairs e.g. name=ACMENet,productVersion=1.2.3\n")
+                    stderr.flush()
+                    exit(1)
+                else:
+                    my_dict[k] = v
         setattr(namespace, self.dest, my_dict)
 
 
@@ -450,7 +459,7 @@ def edit(cli):
     spinner = get_spinner("working")
     if MUTABLE_RESOURCE_ABBREVIATIONS.get(cli.args.resource_type):
         cli.args.resource_type = singular(MUTABLE_RESOURCE_ABBREVIATIONS[cli.args.resource_type].name)
-    cli.args['accept'] = 'update'
+    cli.args['accept'] = None
     spinner.text = f"Getting {cli.args.resource_type} for editing"
     cli.log.debug(f"opening {cli.args.resource_type} for editing")
     with spinner:
@@ -469,7 +478,7 @@ def edit(cli):
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
-@cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create', 'update'], help="request the as=create or as=update alternative form of the resource")
+@cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create'], help="request the as=create alternative form of the resource")
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
 @cli.subcommand('get a single resource by query')
 def get(cli, echo: bool = True, embed='all', spinner: object = None):
@@ -505,6 +514,16 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
                 matches = organization.find_organizations(**cli.args.query)
                 if len(matches) == 1:
                     match = organization.get_organization(id=matches[0]['id'])
+        elif cli.args.resource_type in ["network-version"]:
+            if 'id' in query_keys:
+                if len(query_keys) > 1:
+                    query_keys.remove('id')
+                    cli.log.warning(f"using 'id' only, ignoring params: '{','.join(query_keys)}'")
+                match = networks.get_network_domain_resource(resource_type=cli.args.resource_type, id=cli.args.query['id'])
+            else:
+                matches = networks.find_network_domain_resources(resource_type=cli.args.resource_type, **cli.args.query)
+                if len(matches) == 1:
+                    match = matches[0]
         elif cli.args.resource_type == "network-group":
             if 'id' in query_keys:
                 if len(query_keys) > 1:
@@ -641,7 +660,8 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
-@cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create', 'update'], help="request the as=create or as=update alternative form of the resources")
+@cli.argument('-m', '--mine', arg_only=True, action='store_true', help="filter roles by caller identity")
+@cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create'], help="request the as=create alternative form of the resources")
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[type, RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
 @cli.subcommand(description='find resources as lists')
 def list(cli):
@@ -669,13 +689,15 @@ def list(cli):
         if cli.args.resource_type == "organizations":
             matches = organization.find_organizations(**cli.args.query)
         elif cli.args.resource_type in ["network-versions"]:
-            matches = find_networks(resource_type=cli.args.resource_type, **cli.args.query)
+            matches = networks.find_network_domain_resources(resource_type=cli.args.resource_type, **cli.args.query)
         elif cli.args.resource_type == "network-groups":
             matches = organization.find_network_groups_by_organization(**cli.args.query)
-        elif cli.args.resource_type == "identities":
-            matches = organization.find_identities(**cli.args.query)
+        elif cli.args.resource_type in ["identities", "user-identities", "api-account-identities"]:
+            matches = organization.find_identities(type=cli.args.resource_type, **cli.args.query)
         elif cli.args.resource_type == "roles":
-            if cli.args.query.get('identityId') == 'caller':
+            if cli.args.mine:
+                if cli.args.query.get('identityId'):
+                    cli.log.warning("got --mine, ignoring param 'identityId'")
                 cli.args.query['identityId'] = organization.caller['id']
                 matches = organization.find_roles(**cli.args.query)
             else:

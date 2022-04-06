@@ -420,9 +420,10 @@ path to credentials file.
         else:
             return(identity)
 
-    def find_identities(self, **kwargs):
+    def find_identities(self, type: str = 'identities', **kwargs):
         """Get identities as a collection.
 
+        :param str type: optional sub-type "user-identities" or "api-account-identities"
         :param str kwargs: filter results by logical AND query parameters
         """
         params = dict()
@@ -431,8 +432,14 @@ path to credentials file.
         for noop in ['sort', 'size', 'page']:
             if params.get(noop):
                 logging.warn(f"query param '{noop}' is not supported by Identity Service")
-
-        url = self.audience+'identity/v1/identities'
+        if type in ["UserIdentity", "user-identities"]:
+            url = self.audience+'identity/v1/user-identities'
+        elif type in ["ApiAccountIdentity", "api-account-identities"]:
+            url = self.audience+'identity/v1/api-account-identities'
+        elif type == "identities":
+            url = self.audience+'identity/v1/identities'
+        else:
+            raise RuntimeError(f"unexpected value for param 'type', got {type}, need one of 'user-identities' or 'api-account-identities'")
         headers = {"authorization": "Bearer " + self.token}
         try:
             identities = list()
@@ -447,16 +454,21 @@ path to credentials file.
     def find_roles(self, **kwargs):
         """Get roles as a collection."""
         params = dict()
-        for param in kwargs.keys():
-            if param == 'name':
-                params['nameLike'] = kwargs[param]
-            elif param == 'description':
-                params['descriptionLike'] = kwargs[param]
+        for k, v in kwargs.items():
+            if k == 'name':
+                params['nameLike'] = v
+            elif k == 'description':
+                params['descriptionLike'] = v
+            elif k == 'identityId':
+                identity_id = self.get_identity(identity_id=v)
+                if identity_id['type'] == 'ApiAccountIdentity':
+                    logging.warning("Auth Service may not report roles for identityId type ApiAccountIdentity")
+                params[k] = v
             else:
-                params[param] = kwargs[param]
+                params[k] = v
         for noop in ['size', 'page']:
             if params.get(noop):
-                logging.warn(f"query param '{noop}' is not implemented in this library for Authorization Service")
+                logging.warn(f"query param '{noop}' is not implemented for Authorization Service in this application")
 
         url = self.audience+'auth/v1/roles'
         headers = {"authorization": "Bearer " + self.token}
@@ -666,4 +678,3 @@ path to credentials file.
         else:
             return(networks)
     get_networks_by_group = find_networks_by_group
-

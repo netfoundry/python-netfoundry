@@ -293,7 +293,7 @@ class Network:
                 params[param] = kwargs[param]
         if not params.get('productVersion'):
             params["productVersion"] = self.product_version
-        elif not params.get('hostType'):
+        if not params.get('hostType'):
             params["hostType"] = "ER"
 
         if location_code:
@@ -310,17 +310,13 @@ class Network:
 
         url = self.audience+'core/v2/data-centers'
         headers = {"authorization": "Bearer " + self.token}
-        try:
-            data_centers = list()
-            for i in find_generic_resources(url=url, headers=headers, embedded=NETWORK_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params):
-                data_centers.extend(i)
-        except Exception as e:
-            raise RuntimeError(f"failed to get data-centers from url: '{url}', caught {e}")
+        data_centers = list()
+        for i in find_generic_resources(url=url, headers=headers, embedded=NETWORK_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params):
+            data_centers.extend(i)
+        if location_code:
+            return [dc for dc in data_centers if dc['locationCode'] == location_code]
         else:
-            if location_code:
-                return [dc for dc in data_centers if dc['locationCode'] == location_code]
-            else:
-                return data_centers
+            return data_centers
     get_edge_router_data_centers = find_edge_router_data_centers
 
     def share_endpoint(self, recipient, endpoint_id):
@@ -1910,7 +1906,7 @@ class Network:
         else:
             logging.debug(f"waiting for any status in {expected_statuses} or until {time.ctime(now+wait)}.")
 
-        status = str()
+        status = 'NEW'
         while time.time() < now+wait and status not in expected_statuses:
             if progress:
                 sys.stdout.write('.')    # print a stop each iteration to imply progress
@@ -2084,22 +2080,26 @@ class Networks:
         """
         :organization: an instance of netfoundry.Organization provides a session and configuration
         """
-        self.audience = Organization.audience
         self.token = Organization.token
+        self.proxies = Organization.proxies
+        self.verify = Organization.verify
+        self.audience = Organization.audience
+        self.environment = Organization.environment
 
-    def find_all_networks_resources(self, resource_type: str, **kwargs):
+    def find_network_domain_resources(self, resource_type: str, **kwargs):
         """
         Find resources of a particular type as a collection.
 
-        Found resources are not necessarily associated with a particular network.
+        Search across all networks for resources in the network domain.
         """
+        resource_type = plural(resource_type)
         if not RESOURCES.get(resource_type):
-            raise UnknownResourceType(f"Unrecognized type: {resource_type}")
+            raise UnknownResourceType(resource_type, RESOURCES.keys())
         else:
             resource_spec = RESOURCES.get(resource_type)
 
-        if RESOURCES[resource_spec]._embedded:
-            _embedded = RESOURCES[resource_spec]._embedded
+        if resource_spec._embedded:
+            _embedded = resource_spec._embedded
         else:
             _embedded = None
 
@@ -2121,14 +2121,15 @@ class Networks:
             resources.extend(i)
         return(resources)
 
-    def get_all_networks_resource(self,  resource_type: str, id: str, **kwargs):
+    def get_network_domain_resource(self,  resource_type: str, id: str, **kwargs):
         """
-        Get a resources of a particular type as a dictionary.
+        Get a resources of a particular type from the network domain.
 
-        Found resources are not necessarily associated with a particular network.
+        This is probably most useful for shared,  immutable resources like versions and regions.
         """
+        resource_type = plural(resource_type)
         if not RESOURCES.get(resource_type):
-            raise UnknownResourceType(f"Unrecognized type: {resource_type}")
+            raise UnknownResourceType(resource_type, RESOURCES.keys())
         # else:
         #     resource_spec = RESOURCES.get(resource_type)
 

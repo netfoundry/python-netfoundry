@@ -331,7 +331,8 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
     # normalize output with a default sort param
     if not params.get('sort'):
         params["sort"] = "name,asc"
-    if resource_type.name == 'identities':     # workaround sort param bug in MOP-18018
+    # workaround sort param bug in MOP-18018
+    if resource_type.name in ['identities', 'user-identities', 'api-account-identities']:
         del params['sort']
     elif resource_type.name == 'hosts':      # workaround sort param bug in MOP-17863
         del params['sort']
@@ -502,7 +503,7 @@ class ResourceType(ResourceTypeParent):
     domain: str                                             # most are in network, identity
     mutable: bool                                           # createable, editable, or deletable
     embeddable: bool                                        # legal to request embedding in a parent resource in same domain
-    parent: str = field(default=str())                       # optional parent ResourceType instance name
+    parent: str = field(default=str())                      # optional parent ResourceType instance name
     status: str = field(default='status')                   # name of property where symbolic status is expressed
     _embedded: str = field(default='default')               # the key under which lists are found in the API e.g. networkControllerList (computed if not provided as dromedary case singular)
     create_responses: list = field(default_factory=list)    # expected HTTP response codes for create operation
