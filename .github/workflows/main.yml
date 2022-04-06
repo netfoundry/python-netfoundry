@@ -103,7 +103,7 @@ jobs:
       with:
         name: netfoundry-pypi-${{ github.run_id }}
         path: dist/netfoundry-*.tar.gz
-    if-no-files-found: error
+        if-no-files-found: error
 
     - name: Append 'latest' tag if release
       env:
