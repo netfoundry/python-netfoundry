@@ -32,8 +32,12 @@ setuptools.setup(
         'platformdirs >= 2.4',
         'tabulate >= 0.8',
         'packaging >= 20.9',
-        'nanoid >= 2.0',
         'pygments >= 2.11'
-    ]
+    ],
+    entry_points={
+        'console_scripts': [
+            'nfdemo = netfoundry.demo:main',
+            'nfctl = netfoundry.ctl:cli',
+        ]
+    }
 )
-
