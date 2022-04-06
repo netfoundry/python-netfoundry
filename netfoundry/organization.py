@@ -581,14 +581,10 @@ path to credentials file.
         """
         url = self.audience+'rest/v1/network-groups'
         headers = {"authorization": "Bearer " + self.token}
-        try:
-            network_groups = list()
-            for i in find_generic_resources(url=url, headers=headers, embedded=RESOURCES['network-groups']._embedded, proxies=self.proxies, verify=self.verify, **kwargs):
-                network_groups.extend(i)
-        except Exception as e:
-            raise RuntimeError(f"failed to get network_groups from url: '{url}', caught {e}")
-        else:
-            return(network_groups)
+        network_groups = list()
+        for i in find_generic_resources(url=url, headers=headers, embedded=RESOURCES['network-groups']._embedded, proxies=self.proxies, verify=self.verify, **kwargs):
+            network_groups.extend(i)
+        return(network_groups)
     get_network_groups_by_organization = find_network_groups_by_organization
     network_groups = get_network_groups_by_organization
 

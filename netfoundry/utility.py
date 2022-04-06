@@ -360,6 +360,7 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
             logging.warn("ignoring invalid value for header 'accept': '{:s}'".format(accept))
 
     try:
+        status_symbol = "UNKNOWN"
         response = http.get(
             url,
             headers=headers,
@@ -370,10 +371,7 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
         status_symbol = STATUS_CODES._codes[response.status_code][0].upper()
         response.raise_for_status()
     except RequestException as e:
-        logging.error('unexpected HTTP response code {:s} ({:d}) and response {:s}'.format(
-                status_symbol,
-                response.status_code,
-                response.text))
+        logging.error(f"unexpected HTTP response code {status_symbol} ({response.status_code}) and response {response.text}")
         raise e
     else:
         try:
