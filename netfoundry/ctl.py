@@ -30,7 +30,6 @@ from xml.sax.xmlreader import InputSource
 
 # importing this causes the 'config' subcommand to be available
 from jwt.exceptions import PyJWTError
-from milc import set_metadata  # this function needed to set metadata immediately below
 from platformdirs import user_cache_path
 from pygments import highlight
 from pygments.formatters import Terminal256Formatter
@@ -48,6 +47,7 @@ from .network_group import NetworkGroup
 from .organization import Organization
 from .utility import DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES, MUTABLE_RESOURCE_ABBREVIATIONS, RESOURCE_ABBREVIATIONS, RESOURCE_STATUS_SYMBOLS, RESOURCES, is_jwt, normalize_caseless, plural, singular
 
+from milc import set_metadata  # this function needed to set metadata immediately below
 set_metadata(version=f"v{netfoundry_version}", author="NetFoundry", name="nfctl")  # must precend import milc.cli
 from milc import cli, questions  # this uses metadata set above
 from milc.subcommand import config  # this creates the config subcommand
@@ -194,135 +194,6 @@ export NETFOUNDRY_ORGANIZATION="{organization.id}"
                 cli.echo(highlighted)
             else:
                 cli.echo(token_env)
-
-
-@cli.argument('-u', '--user', help="alternative proxy user, default is logged in username")
-@cli.argument('-s', '--ssh', help="alternative ssh executable, default is 'ssh'")
-@cli.argument('ziti_args', help=argparse.SUPPRESS, arg_only=True, nargs='*')
-@cli.argument('ziti_subcmd', help=argparse.SUPPRESS, arg_only=True)
-@cli.subcommand('run ziti CLI', hidden=True)
-def ziti(cli):
-    """Run read-only Ziti CLI commands remotely on controller host."""
-    if not cli.config.general.network:
-        cli.log.error("need --network=ACMENet")
-        sysexit(1)
-
-    # set up the ziti config cache
-    network_name_safe = '_'.join(cli.config.general.network.casefold().split())
-    cache_dir_path = user_cache_path(appname=cli.prog_name)
-    try:
-        # create and correct mode to 0o700
-        cache_dir_path.mkdir(mode=S_IRUSR | S_IWUSR | S_IXUSR, parents=True, exist_ok=True)
-        cache_dir_path.chmod(mode=S_IRUSR | S_IWUSR | S_IXUSR)
-    except Exception as e:
-        raise RuntimeError(f"failed to create cache dir '{str(cache_dir_path.resolve())}', got {e}")
-    else:
-        cache_dir_stats = stat(cache_dir_path)
-        logging.debug(f"ziti config cache dir {str(cache_dir_path.resolve())} has mode {filemode(cache_dir_stats.st_mode)}")
-    ssh_config_file = Path(cache_dir_path / network_name_safe)
-    logging.debug(f"ziti config file path is computed '{str(ssh_config_file.resolve())}'")
-
-    # verify we can run OpenSSH client `ssh`, optionally an alternative `ssh` executable
-    if cli.config.login.ssh:
-        ssh_bin = cli.config.login.ssh
-    else:
-        if platform.system() == 'Windows':
-            ssh_bin = 'ssh.exe'
-        else:
-            ssh_bin = 'ssh'
-    which_ssh = which(ssh_bin)
-    if which_ssh:
-        cli.log.debug(f"found ssh executable in {which_ssh}")
-    else:
-        cli.log.error(f"missing executable '{ssh_bin}' in PATH: {environ['PATH']}")
-        sysexit(1)
-    exec = cli.run([which_ssh, '-V'])
-    if exec.returncode == 0:
-        cli.log.debug(f"found '{which_ssh}' version '{exec.stdout}'")
-    else:
-        cli.log.error(f"failed to get {which_ssh} version: {exec.stderr}")
-        sysexit(exec.returncode)
-
-    if cli.config.ziti.user:
-        proxy_user = cli.config.ziti.user
-    else:
-        try:
-            proxy_user = getuser()
-            assert proxy_user, f"failed to get logged in username, got {proxy_user}"
-        except AssertionError:
-            raise
-
-    ziti_cmd = " /opt/netfoundry/ziti/ziti "
-
-    # if command is 'edge' and verb is 'login' then get a token and cache to ziti ssh config file, ignoring extra args
-    if cli.args.ziti_subcmd == 'edge' and cli.args.ziti_args[0] == 'login':
-        if len(cli.args.ziti_args[1:]) > 0:
-            cli.log.warning(f"ignoring extra args: {' '.join(cli.args.ziti_args[1:])}")
-        spinner = get_spinner("Logging in to Ziti Controller Edge Management API")
-        with spinner:
-            organization, networks = use_organization(spinner=spinner)
-            network, network_group = use_network(
-                organization=organization,
-                group=cli.config.general.network_group,
-                network_name=cli.config.general.network,
-                spinner=spinner)
-            network_controller = network.get_resource_by_id(type="network-controller", id=network.network_controller['id'])
-            controller_host = network.get_resource_by_id(type="host", id=network_controller['hostId'])
-            if network_controller.get('domainName') and network_controller['domainName']:
-                ziti_ctrl_ip = network_controller['domainName']
-            else:
-                ziti_ctrl_ip = controller_host['ipAddress']
-            try:
-                session = network.get_controller_session(network.network_controller['id'])
-            except:
-                spinner.fail("experimental ziti login failed")
-                sysexit(1)
-            else:
-                ziti_token = session['sessionToken']
-                ssh_config = f"""
-Host {ziti_ctrl_ip}
-    User {controller_host['username']}
-    ProxyJump {proxy_user}@bastion.{organization.environment}.netfoundry.io
-    PubKeyAuthentication yes
-    PasswordAuthentication no
-    GSSAPIAuthentication no
-    ControlMaster auto
-    ControlPersist 9m
-    ControlPath {str(cache_dir_path.resolve()) + r'/ssh-%u-%C'}
-"""
-#    UserKnownHostsFile /dev/null
-            try:
-                with open(ssh_config_file, 'w') as f:
-                    f.write(ssh_config)
-            except Exception as e:
-                raise RuntimeError(f"problem writing ssh_config in {str(ssh_config_file.resolve())}, got {e}")
-            else:
-                cli.log.debug(f"wrote ssh_config in {str(ssh_config_file.resolve())}")
-            proxy_jump_cmd = f" {which_ssh} -F '{str(ssh_config_file.resolve())}' {ziti_ctrl_ip} "
-            ziti_login_cmd = f" edge login 127.0.0.1:{controller_host['port']}/edge/management/v1/ --token {ziti_token} --cert /opt/netfoundry/ziti/ziti-controller/certs/ca.external/certs/intermediate-chain.pem --read-only "
-            try:
-                exec = cli.run(shplit(proxy_jump_cmd + ziti_cmd + ziti_login_cmd), capture_output=False)
-            except Exception as e:
-                raise RuntimeError(f"problem running ssh command: {proxy_jump_cmd + ziti_cmd + ziti_login_cmd}, got {e}")
-            else:
-                if exec.returncode == 0:            # if succeeded
-                    spinner.succeed("Login succeeded")
-                else:
-                    spinner.fail("Login failed")
-                    sysexit(exec.returncode)
-
-    elif ssh_config_file.exists():
-        # compute and check network unique signature
-        # pass-through ziti commands to remote
-        with open(ssh_config_file, 'r') as f:
-            for line in f:
-                if len(line.split()) == 2 and line.split()[0] == "Host":
-                    ziti_ctrl_ip = line.split()[1]
-        proxy_jump_cmd = f" {which_ssh} -F '{str(ssh_config_file.resolve())}' {ziti_ctrl_ip} "
-        cli.run(shplit(proxy_jump_cmd + ziti_cmd + cli.args.ziti_subcmd) + cli.args.ziti_args, capture_output=False)
-    else:
-        cli.log.error("need login:\n\t nfctl --network=ACMENet ziti edge login")
-        sysexit(1)
 
 
 @cli.subcommand('logout current profile from an organization')
@@ -664,9 +535,12 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
 @cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create'], help="request the as=create alternative form of the resources")
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[type, RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
 @cli.subcommand(description='find resources as lists')
-def list(cli):
+def list(cli, spinner: object = None):
     """Find resources as lists."""
-    spinner = get_spinner("working")
+    if not spinner:
+        spinner = get_spinner("working")
+    else:
+        cli.log.debug("got spinner as function param")
     if RESOURCE_ABBREVIATIONS.get(cli.args.resource_type):
         cli.args.resource_type = RESOURCE_ABBREVIATIONS[cli.args.resource_type].name
     if cli.args.accept and not MUTABLE_NETWORK_RESOURCES.get(cli.args.resource_type):  # mutable excludes data-centers
