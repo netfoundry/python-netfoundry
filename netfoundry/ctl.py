@@ -30,7 +30,6 @@ from xml.sax.xmlreader import InputSource
 
 # importing this causes the 'config' subcommand to be available
 from jwt.exceptions import PyJWTError
-from platformdirs import user_cache_path
 from pygments import highlight
 from pygments.formatters import Terminal256Formatter
 from pygments.lexers import get_lexer_by_name, load_lexer_from_file
@@ -52,8 +51,9 @@ set_metadata(version=f"v{netfoundry_version}", author="NetFoundry", name="nfctl"
 from milc import cli, questions  # this uses metadata set above
 from milc.subcommand import config  # this creates the config subcommand
 
-# this allows the app the terminate gracefully when piped to a truncating consumer like `head`
-signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+if platform.system() == 'Linux':
+    # this allows the app the terminate gracefully when piped to a truncating consumer like `head`
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 
 class StoreDictKeyPair(argparse.Action):
