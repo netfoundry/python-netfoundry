@@ -8,7 +8,7 @@ import time
 
 from netfoundry.exceptions import UnknownResourceType
 
-from .utility import (DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES, NETWORK_RESOURCES, RESOURCES, STATUS_CODES, VALID_SEPARATORS, VALID_SERVICE_PROTOCOLS, any_in, docstring_parameters, find_generic_resources,
+from .utility import (DC_PROVIDERS, MUTABLE_NET_RESOURCES, NET_RESOURCES, RESOURCES, STATUS_CODES, VALID_SEPARATORS, VALID_SERVICE_PROTOCOLS, any_in, docstring_parameters, find_generic_resources,
                       get_generic_resource, http, is_uuidv4, normalize_caseless, plural, singular)
 
 
@@ -222,7 +222,7 @@ class Network:
 
         return(valid_port_ranges)
 
-    @docstring_parameters(resource_entity_types=str(NETWORK_RESOURCES.keys()))
+    @docstring_parameters(resource_entity_types=str(NET_RESOURCES.keys()))
     def validate_entity_roles(self, entities: list, type: str):
         """Return a list of valid, existing entities and hashtag role attributes.
 
@@ -311,7 +311,7 @@ class Network:
         url = self.audience+'core/v2/data-centers'
         headers = {"authorization": "Bearer " + self.token}
         data_centers = list()
-        for i in find_generic_resources(url=url, headers=headers, embedded=NETWORK_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params):
+        for i in find_generic_resources(url=url, headers=headers, embedded=NET_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params):
             data_centers.extend(i)
         if location_code:
             return [dc for dc in data_centers if dc['locationCode'] == location_code]
@@ -371,8 +371,8 @@ class Network:
                 logging.warn(f"ignoring invalid value for param 'accept': '{accept}'")
         if not type == "network":
             params["networkId"] = self.id
-        if not NETWORK_RESOURCES.get(plural(type)):
-            raise RuntimeError(f"unknown resource type '{plural(type)}'. Choices: {','.join(NETWORK_RESOURCES.keys())}")
+        if not NET_RESOURCES.get(plural(type)):
+            raise RuntimeError(f"unknown resource type '{plural(type)}'. Choices: {', '.join(NET_RESOURCES.keys())}")
 
         headers = {"authorization": "Bearer " + self.token}
         url = self.audience+'core/v2/'+plural(type)+'/'+id
@@ -415,7 +415,7 @@ class Network:
         headers = {"authorization": "Bearer " + self.token}
         try:
             resources = list()
-            for i in find_generic_resources(url=url, headers=headers, embedded=NETWORK_RESOURCES[plural(type)]._embedded, accept=accept, proxies=self.proxies, verify=self.verify, **params):
+            for i in find_generic_resources(url=url, headers=headers, embedded=NET_RESOURCES[plural(type)]._embedded, accept=accept, proxies=self.proxies, verify=self.verify, **params):
                 resources.extend(i)
         except Exception as e:
             raise RuntimeError(f"failed to get {plural(type)} from url: '{url}', caught {e}")
@@ -460,7 +460,7 @@ class Network:
         else:
             type = self_link.split('/')[5]           # e.g. endpoints, app-wans, edge-routers, etc...
 
-        if not MUTABLE_NETWORK_RESOURCES.get(type):  # prune properties that can't be patched
+        if not MUTABLE_NET_RESOURCES.get(type):  # prune properties that can't be patched
             raise RuntimeError(f"got unexpected type {type} for patch request to {self_link}")
         try:
             before_resource, status_symbol = get_generic_resource(url=self_link, headers=headers, proxies=self.proxies, verify=self.verify, accept='update')
@@ -504,20 +504,20 @@ class Network:
                 else:
                     raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[after_response_code][0].upper()} ({after_response_code}) for patch: {json.dumps(patch, indent=2)}")
 
-                if resource.get('_links'):
+                if resource.get('_links') and resource['_links'].get('process-executions'):
                     process_id = resource['_links']['process-executions']['href'].split('/')[6]
                     if wait:
                         try:
                             self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
                         except Exception as e:
-                            raise RuntimeError(f"error while waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
+                            raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
                         else:
                             return(resource)
                     else:    # only wait for the process to start, not finish, or timeout
                         try:
                             self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
                         except Exception as e:
-                            raise RuntimeError(f"error waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                            raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
                         else:
                             return(resource)
                 elif wait:
@@ -577,20 +577,20 @@ class Network:
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) for put: {json.dumps(put, indent=2)}")
 
-        if resource.get('_links'):
+        if resource.get('_links') and resource['_links'].get('process-executions'):
             process_id = resource['_links']['process-executions']['href'].split('/')[6]
             if wait:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error while waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
+                    raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
                 else:
                     return(resource)
             else:    # only wait for the process to start, not finish, or timeout
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
                 else:
                     return(resource)
         elif wait:
@@ -629,13 +629,13 @@ class Network:
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) for post: {json.dumps(post, indent=2)}")
 
-        if resource.get('_links'):
+        if resource.get('_links') and resource['_links'].get('process-executions'):
             process_id = resource['_links']['process-executions']['href'].split('/')[6]
             if wait:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error while waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
+                    raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
                 else:
                     resource = self.get_resource_by_id(type=singular(type), id=resource['id'])
                     return(resource)
@@ -643,7 +643,7 @@ class Network:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
                 else:
                     return(resource)
         elif wait:
@@ -689,7 +689,7 @@ class Network:
         resource = None
 
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, NETWORK_RESOURCES['endpoints'].create_responses):
+        if any_in(response_code_symbols, NET_RESOURCES['endpoints'].create_responses):
             try:
                 resource = response.json()
             except ValueError as e:
@@ -698,13 +698,13 @@ class Network:
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}")
 
-        if resource.get('_links'):
+        if resource.get('_links') and resource['_links'].get('process-executions'):
             process_id = resource['_links']['process-executions']['href'].split('/')[6]
             if wait:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error while waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
+                    raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
                 else:
                     resource = self.get_resource_by_id(type='endpoint', id=resource['id'])
                     return(resource)
@@ -712,7 +712,7 @@ class Network:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
                 else:
                     return(resource)
         elif wait:
@@ -782,7 +782,7 @@ class Network:
             raise RuntimeError(f"error with POST to {self.audience+'core/v2/edge-routers'}, caught {e}")
 
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, NETWORK_RESOURCES['edge-routers'].create_responses):
+        if any_in(response_code_symbols, NET_RESOURCES['edge-routers'].create_responses):
             try:
                 resource = response.json()
             except ValueError as e:
@@ -795,13 +795,13 @@ class Network:
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
-        if resource.get('_links'):
+        if resource.get('_links') and resource['_links'].get('process-executions'):
             process_id = resource['_links']['process-executions']['href'].split('/')[6]
             if wait:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error while waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
+                    raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
                 else:
                     if tunneler_enabled:
                         self.wait_for_entity_name_exists(entity_name=name, entity_type="endpoint", wait=wait)
@@ -811,7 +811,7 @@ class Network:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
                 else:
                     return(resource)
         elif wait:
@@ -851,7 +851,7 @@ class Network:
             raise RuntimeError(f"error with POST to {self.audience+'core/v2/edge-router-policies'}, caught {e}")
 
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, NETWORK_RESOURCES['edge-router-policies'].create_responses):
+        if any_in(response_code_symbols, NET_RESOURCES['edge-router-policies'].create_responses):
             try:
                 started = response.json()
             except ValueError as e:
@@ -995,7 +995,7 @@ class Network:
             raise RuntimeError(f"error with POST to {self.audience+'core/v2/services'}, caught {e}")
 
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, NETWORK_RESOURCES['services'].create_responses):
+        if any_in(response_code_symbols, NET_RESOURCES['services'].create_responses):
             try:
                 resource = response.json()
             except ValueError as e:
@@ -1003,20 +1003,20 @@ class Network:
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
-        if resource.get('_links'):
+        if resource.get('_links') and resource['_links'].get('process-executions'):
             process_id = resource['_links']['process-executions']['href'].split('/')[6]
             if wait:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error while waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
+                    raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
                 else:
                     return(resource)
             else:    # only wait for the process to start, not finish, or timeout
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
                 else:
                     return(resource)
         elif wait:
@@ -1078,7 +1078,7 @@ class Network:
             raise RuntimeError(f"error with POST to {self.audience+'core/v2/service-policies'}, caught {e}")
 
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, NETWORK_RESOURCES['service-policies'].create_responses):
+        if any_in(response_code_symbols, NET_RESOURCES['service-policies'].create_responses):
             try:
                 resource = response.json()
             except ValueError as e:
@@ -1086,20 +1086,20 @@ class Network:
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
-        if resource.get('_links'):
+        if resource.get('_links') and resource['_links'].get('process-executions'):
             process_id = resource['_links']['process-executions']['href'].split('/')[6]
             if wait:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error while waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
+                    raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
                 else:
                     return(resource)
             else:    # only wait for the process to start, not finish, or timeout
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
                 else:
                     return(resource)
         elif wait:
@@ -1152,7 +1152,7 @@ class Network:
             raise RuntimeError(f"error with POST to {self.audience+'core/v2/service-edge-router-policies'}, caught {e}")
 
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, NETWORK_RESOURCES['service-edge-router-policies'].create_responses):
+        if any_in(response_code_symbols, NET_RESOURCES['service-edge-router-policies'].create_responses):
             try:
                 resource = response.json()
             except ValueError as e:
@@ -1160,20 +1160,20 @@ class Network:
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
-        if resource.get('_links'):
+        if resource.get('_links') and resource['_links'].get('process-executions'):
             process_id = resource['_links']['process-executions']['href'].split('/')[6]
             if wait:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error while waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
+                    raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
                 else:
                     return(resource)
             else:    # only wait for the process to start, not finish, or timeout
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
                 else:
                     return(resource)
         elif wait:
@@ -1243,7 +1243,7 @@ class Network:
             raise RuntimeError(f"error with POST to {self.audience+'core/v2/services'}, caught {e}")
 
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, NETWORK_RESOURCES['services'].create_responses):
+        if any_in(response_code_symbols, NET_RESOURCES['services'].create_responses):
             try:
                 resource = response.json()
             except ValueError as e:
@@ -1251,20 +1251,20 @@ class Network:
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
-        if resource.get('_links'):
+        if resource.get('_links') and resource['_links'].get('process-executions'):
             process_id = resource['_links']['process-executions']['href'].split('/')[6]
             if wait:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error while waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
+                    raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
                 else:
                     return(resource)
             else:    # only wait for the process to start, not finish, or timeout
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
                 else:
                     return(resource)
         elif wait:
@@ -1548,7 +1548,7 @@ class Network:
             raise RuntimeError(f"error with POST to {self.audience+'core/v2/services'}, caught {e}")
 
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, NETWORK_RESOURCES['services'].create_responses):
+        if any_in(response_code_symbols, NET_RESOURCES['services'].create_responses):
             try:
                 resource = response.json()
             except ValueError as e:
@@ -1556,20 +1556,20 @@ class Network:
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
-        if resource.get('_links'):
+        if resource.get('_links') and resource['_links'].get('process-executions'):
             process_id = resource['_links']['process-executions']['href'].split('/')[6]
             if wait:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error while waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
+                    raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
                 else:
                     return(resource)
             else:    # only wait for the process to start, not finish, or timeout
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {','.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
                 else:
                     return(resource)
         elif wait:
@@ -1615,7 +1615,7 @@ class Network:
             raise RuntimeError(f"error with POST to {self.audience+'core/v2/app-wans'}, caught {e}")
 
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, NETWORK_RESOURCES['app-wans'].create_responses):
+        if any_in(response_code_symbols, NET_RESOURCES['app-wans'].create_responses):
             try:
                 started = response.json()
             except ValueError as e:
@@ -1647,7 +1647,7 @@ class Network:
             if len(networks) == 1:
                 return(networks[0])
             else:
-                raise RuntimeError(f"failed to find exactly one network named '{name}', found {len(networks)}: '{','.join([n['name'] for n in networks])}'")
+                raise RuntimeError(f"failed to find exactly one network named '{name}', found {len(networks)}: '{', '.join([n['name'] for n in networks])}'")
 
     def get_network_by_id(self, network_id):
         """Return the network object for a particular UUID.
@@ -1766,7 +1766,7 @@ class Network:
         else:
             raise RuntimeError(f"timed out waiting for property {property_name} to have expected type: {str(property_type)}")
 
-    @docstring_parameters(resource_entity_types=str(NETWORK_RESOURCES.keys()))
+    @docstring_parameters(resource_entity_types=str(NET_RESOURCES.keys()))
     def wait_for_entity_name_exists(self, entity_name: str, entity_type: str, wait: int = 60, sleep: int = 3, progress: bool = False):
         """Continuously poll until expiry for the expected entity name to exist.
 
@@ -1781,8 +1781,8 @@ class Network:
         if not wait >= sleep:
             raise RuntimeError(f"wait duration ({wait}) must be greater than or equal to polling interval ({sleep})")
 
-        if not NETWORK_RESOURCES.get(plural(entity_type)):
-            raise Exception(f"ERROR: unknown type '{entity_type}'. Choices: {','.join(NETWORK_RESOURCES.keys())}")
+        if not NET_RESOURCES.get(plural(entity_type)):
+            raise Exception(f"ERROR: unknown type '{entity_type}'. Choices: {', '.join(NET_RESOURCES.keys())}")
 
         # poll for status until expiry
         if progress:

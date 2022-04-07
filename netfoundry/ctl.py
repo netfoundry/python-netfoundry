@@ -12,16 +12,16 @@ import platform
 import re
 import signal
 import tempfile
-from getpass import getuser
+# from getpass import getuser
 from json import dumps as json_dumps
 from json import load as json_load
 from json import loads as json_loads
-from os import environ, path, stat
-from pathlib import Path
+from os import environ, path  # , stat
+# from pathlib import Path
 from random import choice, sample, shuffle
 from re import sub
-from shlex import split as shplit
-from shutil import which
+# from shlex import split as shplit
+# from shutil import which
 from stat import S_IRUSR, S_IWUSR, S_IXUSR, filemode
 from subprocess import CalledProcessError
 from sys import exit as sysexit
@@ -44,7 +44,7 @@ from .exceptions import NeedUserInput, NFAPINoCredentials
 from .network import Networks, Network
 from .network_group import NetworkGroup
 from .organization import Organization
-from .utility import DC_PROVIDERS, MUTABLE_NETWORK_RESOURCES, MUTABLE_RESOURCE_ABBREVIATIONS, RESOURCE_ABBREVIATIONS, RESOURCE_STATUS_SYMBOLS, RESOURCES, is_jwt, normalize_caseless, plural, singular
+from .utility import DC_PROVIDERS, MUTABLE_NET_RESOURCES, MUTABLE_RESOURCE_ABBREV, RESOURCE_ABBREV, RESOURCES, is_jwt, normalize_caseless, plural, singular
 
 from milc import set_metadata  # this function needed to set metadata immediately below
 set_metadata(version=f"v{netfoundry_version}", author="NetFoundry", name="nfctl")  # must precend import milc.cli
@@ -217,7 +217,7 @@ def logout(cli):
 
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
-@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in MUTABLE_NETWORK_RESOURCES.keys()] for choice in group])
+@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type), MUTABLE_NET_RESOURCES[type].abbreviation] for type in MUTABLE_NET_RESOURCES.keys()] for choice in group])
 # this allows us to pass the edit subcommand's cli object to function get without further modifying that functions params
 @cli.subcommand('duplicate a resource')
 def copy(cli):
@@ -228,8 +228,8 @@ def copy(cli):
     return e.g. "code --wait".
     """
     spinner = get_spinner("working")
-    if MUTABLE_RESOURCE_ABBREVIATIONS.get(cli.args.resource_type):
-        cli.args.resource_type = singular(MUTABLE_RESOURCE_ABBREVIATIONS[cli.args.resource_type].name)
+    if MUTABLE_RESOURCE_ABBREV.get(cli.args.resource_type):
+        cli.args.resource_type = singular(MUTABLE_RESOURCE_ABBREV[cli.args.resource_type].name)
     spinner.text = f"Getting {cli.args.resource_type} for copying"
     cli.args['accept'] = 'create'
     cli.args['output'] = 'text'       # implies tty which allows INFO messages
@@ -247,7 +247,7 @@ def copy(cli):
 
 
 @cli.argument('-f', '--file', help='JSON or YAML file', type=argparse.FileType('r', encoding='UTF-8'))
-@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in MUTABLE_NETWORK_RESOURCES.keys()] for choice in group])
+@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in MUTABLE_NET_RESOURCES.keys()] for choice in group])
 @cli.subcommand('create a resource from a file')
 def create(cli):
     """Create a resource.
@@ -257,12 +257,12 @@ def create(cli):
     object as create request immediately.
     """
     spinner = get_spinner("working")
-    if MUTABLE_RESOURCE_ABBREVIATIONS.get(cli.args.resource_type):
-        cli.args.resource_type = singular(MUTABLE_RESOURCE_ABBREVIATIONS[cli.args.resource_type].name)
+    if MUTABLE_RESOURCE_ABBREV.get(cli.args.resource_type):
+        cli.args.resource_type = singular(MUTABLE_RESOURCE_ABBREV[cli.args.resource_type].name)
     # get the input object if available, else get the lines (serialized YAML or JSON) and try to deserialize
     create_input_object, create_input_lines, create_object = None, str(), None
     if not cli.args.file:
-        create_input_object = MUTABLE_NETWORK_RESOURCES[plural(cli.args.resource_type)].create_template
+        create_input_object = MUTABLE_NET_RESOURCES[plural(cli.args.resource_type)].create_template
     elif cli.args.file:
         try:
             create_input_lines = cli.args.file.read()
@@ -317,7 +317,7 @@ def create(cli):
 
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
-@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in MUTABLE_NETWORK_RESOURCES.keys()] for choice in group])
+@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in MUTABLE_NET_RESOURCES.keys()] for choice in group])
 # this allows us to pass the edit subcommand's cli object to function get without further modifying that functions params
 @cli.subcommand('edit a resource with EDITOR')
 def edit(cli):
@@ -328,8 +328,8 @@ def edit(cli):
     return e.g. "code --wait".
     """
     spinner = get_spinner("working")
-    if MUTABLE_RESOURCE_ABBREVIATIONS.get(cli.args.resource_type):
-        cli.args.resource_type = singular(MUTABLE_RESOURCE_ABBREVIATIONS[cli.args.resource_type].name)
+    if MUTABLE_RESOURCE_ABBREV.get(cli.args.resource_type):
+        cli.args.resource_type = singular(MUTABLE_RESOURCE_ABBREV[cli.args.resource_type].name)
     cli.args['accept'] = None
     spinner.text = f"Getting {cli.args.resource_type} for editing"
     cli.log.debug(f"opening {cli.args.resource_type} for editing")
@@ -359,8 +359,8 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
     :param echo: False allows capture instead of print the match
     :param embed: False avoids expensive operations when we just need a shallow view
     """
-    if RESOURCE_ABBREVIATIONS.get(cli.args.resource_type):
-        cli.args.resource_type = singular(RESOURCE_ABBREVIATIONS[cli.args.resource_type].name)
+    if RESOURCE_ABBREV.get(cli.args.resource_type):
+        cli.args.resource_type = singular(RESOURCE_ABBREV[cli.args.resource_type].name)
     if not cli.config.general.verbose and cli.args.output in ["yaml", "json"]:    # don't change level if output=text
         cli.log.setLevel(logging.WARN)                                            # don't emit INFO messages to stdout because they will break deserialization
     match = {}
@@ -379,7 +379,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warning(f"using 'id' only, ignoring params: '{','.join(query_keys)}'")
+                    cli.log.warning(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
                 match = organization.get_organization(id=cli.args.query['id'])
             else:
                 matches = organization.find_organizations(**cli.args.query)
@@ -389,7 +389,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warning(f"using 'id' only, ignoring params: '{','.join(query_keys)}'")
+                    cli.log.warning(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
                 match = networks.get_network_domain_resource(resource_type=cli.args.resource_type, id=cli.args.query['id'])
             else:
                 matches = networks.find_network_domain_resources(resource_type=cli.args.resource_type, **cli.args.query)
@@ -399,7 +399,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warning(f"using 'id' only, ignoring params: '{','.join(query_keys)}'")
+                    cli.log.warning(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
                 match = organization.get_network_group(network_group_id=cli.args.query['id'])
             else:
                 matches = organization.find_network_groups_by_organization(**cli.args.query)
@@ -409,7 +409,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warning(f"using 'id' only, ignoring params: '{','.join(query_keys)}'")
+                    cli.log.warning(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
                 match = organization.get_identity(identity_id=cli.args.query['id'])
             elif not query_keys:  # return caller identity if not filtering
                 match = organization.caller
@@ -421,7 +421,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warning(f"using 'id' only, ignoring params: '{','.join(query_keys)}'")
+                    cli.log.warning(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
                 match = organization.get_role(role_id=cli.args.query['id'])
             else:
                 matches = organization.find_roles(**cli.args.query)
@@ -431,7 +431,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warning(f"using 'id' only, ignoring params: '{','.join(query_keys)}'")
+                    cli.log.warning(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
                 match = organization.get_network(network_id=cli.args.query['id'], embed=embed, accept=cli.args.accept)
             else:
                 if cli.config.general.network_group and not cli.config.general.network:
@@ -471,7 +471,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
                     cli.log.warning("data centers fetched by ID may not support this network's product version, try provider or locationCode params for safety")
                     if len(query_keys) > 1:
                         query_keys.remove('id')
-                        cli.log.warning(f"using 'id' only, ignoring params: '{','.join(query_keys)}'")
+                        cli.log.warning(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
                     match = network.get_data_center_by_id(id=cli.args.query['id'])
                 else:
                     matches = network.find_edge_router_data_centers(**cli.args.query)
@@ -481,7 +481,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
                 if 'id' in query_keys:
                     if len(query_keys) > 1:
                         query_keys.remove('id')
-                        cli.log.warning(f"using 'id' only, ignoring params: '{','.join(query_keys)}'")
+                        cli.log.warning(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
                     match = network.get_resource_by_id(type=cli.args.resource_type, id=cli.args.query['id'], accept=cli.args.accept)
                 else:
                     matches = network.find_resources(type=cli.args.resource_type, accept=cli.args.accept, **cli.args.query)
@@ -489,7 +489,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
                         match = matches[0]
 
     if match:
-        cli.log.debug(f"found exactly one {cli.args.resource_type} by '{','.join(query_keys)}'")
+        cli.log.debug(f"found exactly one {cli.args.resource_type} by '{', '.join(query_keys)}'")
         if not echo:                           # edit() uses echo=False to get a match for updating
             return match, network, network_group, organization
         else:
@@ -501,7 +501,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
                     cli.log.debug(f"valid keys: {str(valid_keys)}")
                     filtered_match = {key: match[key] for key in match.keys() if key in valid_keys}
                 else:
-                    cli.log.error(f"no valid keys requested in list: {','.join(cli.args.keys)}, need at least one of {','.join(match.keys())}")
+                    cli.log.error(f"no valid keys requested in list: {', '.join(cli.args.keys)}, need at least one of {', '.join(match.keys())}")
                     sysexit(1)
             else:
                 cli.log.debug("not filtering output keys")
@@ -519,11 +519,11 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
                 else:
                     cli.echo(json_dumps(filtered_match, indent=4))
     elif len(matches) == 0:
-        cli.log.warning(f"found no {cli.args.resource_type} by '{','.join(query_keys)}'")
+        cli.log.warning(f"found no {cli.args.resource_type} by '{', '.join(query_keys)}'")
         sysexit(1)
     else:                   # len(matches) > 1:
         if cli.args.query:
-            cli.log.error(f"found more than one {cli.args.resource_type} by param(s): '{','.join(query_keys)}', try a more specific query")
+            cli.log.error(f"found more than one {cli.args.resource_type} by param(s): '{', '.join(query_keys)}', try a more specific query")
         else:
             cli.log.error(f"found more than one {cli.args.resource_type}, try using a query like 'name=AcmeThing%' (% is wildcard)")
         sysexit(len(matches))
@@ -541,9 +541,9 @@ def list(cli, spinner: object = None):
         spinner = get_spinner("working")
     else:
         cli.log.debug("got spinner as function param")
-    if RESOURCE_ABBREVIATIONS.get(cli.args.resource_type):
-        cli.args.resource_type = RESOURCE_ABBREVIATIONS[cli.args.resource_type].name
-    if cli.args.accept and not MUTABLE_NETWORK_RESOURCES.get(cli.args.resource_type):  # mutable excludes data-centers
+    if RESOURCE_ABBREV.get(cli.args.resource_type):
+        cli.args.resource_type = RESOURCE_ABBREV[cli.args.resource_type].name
+    if cli.args.accept and not MUTABLE_NET_RESOURCES.get(cli.args.resource_type):  # mutable excludes data-centers
         cli.log.warn("the --as=ACCEPT param is not applicable to resources outside the network domain")
     if cli.args.query and cli.args.query.get('id'):
         cli.log.warn("try 'get' command to get by id")
@@ -555,7 +555,7 @@ def list(cli, spinner: object = None):
         cli.log.setLevel(logging.WARN)
     query_keys = [*cli.args.query]
     if cli.args.query:
-        spinner.text = f"Finding {cli.args.resource_type} {'by' if query_keys else '...'} {','.join(query_keys)}"
+        spinner.text = f"Finding {cli.args.resource_type} {'by' if query_keys else '...'} {', '.join(query_keys)}"
     else:
         spinner.text = f"Finding all {cli.args.resource_type}"
     with spinner:
@@ -601,10 +601,10 @@ def list(cli, spinner: object = None):
                 matches = network.find_resources(type=cli.args.resource_type, accept=cli.args.accept, **cli.args.query)
 
     if len(matches) == 0:
-        spinner.fail(f"Found no {cli.args.resource_type} by '{','.join(query_keys)}'")
+        spinner.fail(f"Found no {cli.args.resource_type} by '{', '.join(query_keys)}'")
         sysexit(0)
     else:
-        cli.log.debug(f"found at least one {cli.args.resource_type} by '{','.join(query_keys)}'")
+        cli.log.debug(f"found at least one {cli.args.resource_type} by '{', '.join(query_keys)}'")
 
     valid_keys = set()
     if cli.args.keys:
@@ -671,11 +671,11 @@ def delete(cli):
     """Delete a resource in the network domain."""
     spinner = get_spinner("working")
     query_keys = [*cli.args.query]
-    if MUTABLE_RESOURCE_ABBREVIATIONS.get(cli.args.resource_type):
-        cli.args['resource_type'] = singular(MUTABLE_RESOURCE_ABBREVIATIONS[cli.args.resource_type].name)
+    if MUTABLE_RESOURCE_ABBREV.get(cli.args.resource_type):
+        cli.args['resource_type'] = singular(MUTABLE_RESOURCE_ABBREV[cli.args.resource_type].name)
     cli.args['accept'] = None
     cli.config.general['wait'] = 0
-    spinner.text = f"Finding {cli.args.resource_type} {'by' if query_keys else '...'} {','.join(query_keys)}"
+    spinner.text = f"Finding {cli.args.resource_type} {'by' if query_keys else '...'} {', '.join(query_keys)}"
     with spinner:
         match, network, network_group, organization = get(cli, echo=False, embed=None, spinner=spinner)
     if cli.args.resource_type == 'network':
@@ -855,18 +855,18 @@ def demo(cli):
                 if er['status'] in RESOURCES["edge-routers"].status_symbols["error"] + RESOURCES["edge-routers"].status_symbols["deleting"] + RESOURCES["edge-routers"].status_symbols["deleted"]:
                     raise RuntimeError(f"hosted router '{er_name}' has unexpected status '{er['status']}'")
 
-    try:
-        assert(len(hosted_edge_routers) > 0)
-    except AssertionError:
-        raise RuntimeError("unexpected error with router placements, found zero hosted routers")
+    if not len(hosted_edge_routers) > 0:
+        raise RuntimeError("unexpected problem with router placements, found zero hosted routers")
 
     spinner.text = f"Waiting for {len(hosted_edge_routers)} hosted router(s) to provision"
     with spinner:
-        for router_id in [r['id'] for r in hosted_edge_routers]:
-            try:
-                network.wait_for_statuses(expected_statuses=RESOURCES["edge-routers"].status_symbols["complete"], id=router_id, type="edge-router", wait=2222, progress=False)
-            except Exception as e:
-                raise RuntimeError(f"error while waiting for router status, got {e}")
+        for router in hosted_edge_routers:
+            network.wait_for_statuses(expected_statuses=RESOURCES["edge-routers"].status_symbols["complete"], id=router['id'], type="edge-router", wait=2222, progress=False)
+            # ensure the router tunneler is available
+            network.wait_for_entity_name_exists(entity_name=router['name'], entity_type='endpoint')
+            router_tunneler = network.find_resources(type='endpoint', name=router['name'])[0]
+            router_tunneler['attributes'] = ['#demo_exits']
+            network.patch_resource(router_tunneler)
     spinner.succeed("All hosted routers online")
 
     # create a simple global router policy unless one exists with the same name
@@ -897,7 +897,7 @@ def demo(cli):
     exits = ['Exit Tunneler']
     for exit in exits:
         endpoints[exit] = {
-            "attributes": ["#exits"]
+            "attributes": ["#demo_exits"]
         }
     for end in endpoints.keys():
         spinner.text = f"Finding endpoint '{end}'"

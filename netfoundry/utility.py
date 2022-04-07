@@ -262,7 +262,7 @@ def get_generic_resource(url: str, headers: dict, proxies: dict = dict(), verify
         raise
     else:
         logging.debug(f"detected resource type {resource_type.name}")
-        if resource_type.name in ["edge-routers", "network-controllers"]:
+        if resource_type.name in HOSTABLE_NET_RESOURCES.keys():
             params['embed'] = "host"
         elif resource_type.name in ["process-executions"]:
             params['beta'] = None
@@ -445,11 +445,13 @@ class Utility:
         return snake2camel(snake_str)
 
 
-NETWORK_RESOURCES = dict()
-MUTABLE_NETWORK_RESOURCES = dict()
-MUTABLE_RESOURCE_ABBREVIATIONS = dict()
-EMBEDDABLE_NETWORK_RESOURCES = dict()
-RESOURCE_ABBREVIATIONS = dict()
+NET_RESOURCES = dict()             # resources in network domain
+MUTABLE_NET_RESOURCES = dict()     # network resources that can be updated
+MUTABLE_RESOURCE_ABBREV = dict()   # unique abbreviations for ^
+EMBED_NET_RESOURCES = dict()       # network resources that may be fetched as embedded collections
+HOSTABLE_NET_RESOURCES = dict()    # network resources that may be attached to a managed host
+HOSTABLE_RESOURCE_ABBREV = dict()  # unique abbreviations for ^
+RESOURCE_ABBREV = dict()           # unique abbreviations for all resource types
 
 PROCESS_STATUS_SYMBOLS = {
     "complete": ("FINISHED", "SUCCESS"),
@@ -511,6 +513,7 @@ class ResourceType(ResourceTypeParent):
     })                                                      # object to load when creating from scratch in nfctl
     abbreviation: str = field(default='default')
     status_symbols: dict = field(default_factory=lambda: RESOURCE_STATUS_SYMBOLS)  # dictionary with three predictable keys: complete, progress, error, each a tuple associating status symbols with a state
+    host: bool = field(default=False)                       # may have a managed host in NF cloud
 
     def __post_init__(self):
         """Compute and assign _embedded if not supplied and then check types in parent class."""
@@ -522,17 +525,20 @@ class ResourceType(ResourceTypeParent):
             setattr(self, '_embedded', camel_name)
         if self.abbreviation == 'default':
             setattr(self, 'abbreviation', abbreviate(self.name))
-        if RESOURCE_ABBREVIATIONS.get(self.abbreviation):
+        if RESOURCE_ABBREV.get(self.abbreviation):
             raise RuntimeError(f"abbreviation collision for {self.name} ({self.abbreviation})")
         else:
-            RESOURCE_ABBREVIATIONS[self.abbreviation] = self
+            RESOURCE_ABBREV[self.abbreviation] = self
         if self.domain == 'network':
-            NETWORK_RESOURCES[self.name] = self
+            NET_RESOURCES[self.name] = self
             if self.embeddable:
-                EMBEDDABLE_NETWORK_RESOURCES[self.name] = self
+                EMBED_NET_RESOURCES[self.name] = self
             if self.mutable:
-                MUTABLE_NETWORK_RESOURCES[self.name] = self
-                MUTABLE_RESOURCE_ABBREVIATIONS[self.abbreviation] = self
+                MUTABLE_NET_RESOURCES[self.name] = self
+                MUTABLE_RESOURCE_ABBREV[self.abbreviation] = self
+            if self.host:
+                HOSTABLE_NET_RESOURCES[self.name] = self
+                HOSTABLE_RESOURCE_ABBREV[self.name] = self
         return super().__post_init__()
 
 
@@ -611,6 +617,7 @@ RESOURCES = {
         domain="network",
         mutable=False,
         embeddable=True,
+        host=True,
     ),
     'identities': ResourceType(
         name='identities',
@@ -637,6 +644,7 @@ RESOURCES = {
         domain='network',
         mutable=False,
         embeddable=True,
+        host=True,
     ),
     'endpoints': ResourceType(
         name='endpoints',
@@ -656,6 +664,7 @@ RESOURCES = {
         embeddable=True,
         no_update_props=['registration'],
         create_responses=["ACCEPTED"],
+        host=True,
     ),
     'edge-router-policies': ResourceType(
         name='edge-router-policies',

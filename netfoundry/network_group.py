@@ -3,7 +3,7 @@
 import json
 import logging
 
-from .utility import (NETWORK_RESOURCES, RESOURCES, STATUS_CODES,
+from .utility import (NET_RESOURCES, RESOURCES, STATUS_CODES,
                       find_generic_resources, get_generic_resource, http, is_uuidv4,
                       normalize_caseless, any_in)
 
@@ -108,7 +108,7 @@ class NetworkGroup:
         headers = {"authorization": "Bearer " + self.token}
         try:
             data_centers = list()
-            for i in find_generic_resources(url=url, headers=headers, embedded=NETWORK_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params):
+            for i in find_generic_resources(url=url, headers=headers, embedded=NET_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params):
                 data_centers.extend(i)
         except Exception as e:
             raise RuntimeError(f"failed to get data-centers from url: '{url}', caught {e}")
@@ -171,7 +171,7 @@ class NetworkGroup:
         """
         my_nc_data_centers_by_location = self.nc_data_centers_by_location()
         if not my_nc_data_centers_by_location.get(location):
-            raise RuntimeError(f"unexpected network location '{location}'. Valid locations include: {','.join(my_nc_data_centers_by_location.keys())}.")
+            raise RuntimeError(f"unexpected network location '{location}'. Valid locations include: {', '.join(my_nc_data_centers_by_location.keys())}.")
 
         # map incongruent api keys from kwargs to function params ("name", "size" are congruent)
         for param, value in kwargs.items():
