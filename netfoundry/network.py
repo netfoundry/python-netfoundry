@@ -2050,19 +2050,28 @@ class Network:
 
         if response_code not in expected_responses:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
+        else:
+            resource = response.json()
 
-        if not wait == 0:
-            try:
-                self.wait_for_property_defined(
-                    property_name="deletedAt",
-                    property_type=str,
-                    entity_type=type,
-                    id=self.id if type == 'network' else id,
-                    wait=wait,
-                    progress=progress
-                )
-            except Exception as e:
-                raise RuntimeError(f"error waiting for deletedAt, caught {e}")
+        if resource.get('_links') and resource['_links'].get('process-executions'):
+            process_id = resource['_links']['process-executions']['href'].split('/')[6]
+            if wait:
+                try:
+                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
+                except Exception as e:
+                    raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
+                else:
+                    return(resource)
+            else:    # only wait for the process to start, not finish, or timeout
+                try:
+                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
+                except Exception as e:
+                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                else:
+                    return(resource)
+        elif wait:
+            logging.warning("unable to wait for async complete because response did not provide a process execution id")
+            return(resource)
 
         return(True)
 
