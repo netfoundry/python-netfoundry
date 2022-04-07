@@ -17,7 +17,7 @@ import inflect  # singular and plural nouns
 import jwt
 from requests import Session  # HTTP user agent will not emit server cert warnings if verify=False
 from requests import status_codes
-from requests.exceptions import RequestException
+from requests.exceptions import HTTPError
 from requests.adapters import HTTPAdapter
 from urllib3 import disable_warnings
 from urllib3.exceptions import InsecureRequestWarning
@@ -256,41 +256,30 @@ def get_generic_resource(url: str, headers: dict, proxies: dict = dict(), verify
         else:
             logging.warn("ignoring invalid value for header 'accept': '{:s}'".format(accept))
 
+    resource_type = get_resource_type_by_url(url)
+    logging.debug(f"detected resource type {resource_type.name}")
+    if resource_type.name in HOSTABLE_NET_RESOURCES.keys():
+        params['embed'] = "host"
+    elif resource_type.name in ["process-executions"]:
+        params['beta'] = str()
+    response = http.get(
+        url,
+        headers=headers,
+        params=params,
+        proxies=proxies,
+        verify=verify,
+    )
+    # Return the HTTP response code symbol. This is useful for functions like
+    # network.get_status() which will fall-back to the HTTP status if a status
+    # property is not available
+    status_symbol = STATUS_CODES._codes[response.status_code][0].upper()
     try:
-        resource_type = get_resource_type_by_url(url)
-    except Exception:
-        raise
-    else:
-        logging.debug(f"detected resource type {resource_type.name}")
-        if resource_type.name in HOSTABLE_NET_RESOURCES.keys():
-            params['embed'] = "host"
-        elif resource_type.name in ["process-executions"]:
-            params['beta'] = None
-    try:
-        response = http.get(
-            url,
-            headers=headers,
-            params=params,
-            proxies=proxies,
-            verify=verify,
-        )
-        status_symbol = STATUS_CODES._codes[response.status_code][0].upper()
         response.raise_for_status()
-    except RequestException as e:
-        logging.error('unexpected HTTP response code {:s} ({:d}) and response {:s}'.format(
-                status_symbol,
-                response.status_code,
-                response.text))
-        raise e
-    else:
-
-        try:
-            resource = response.json()
-        except JSONDecodeError as e:
-            logging.error("caught exception deserializing HTTP response as JSON")
-            raise e
-        else:
-            return resource, status_symbol
+    except HTTPError:
+        if not status_symbol == 'NOT_FOUND':  # tolerate 404 because some functions will conclude that the resource has been deleted as expected
+            raise
+    resource = response.json()
+    return resource, status_symbol
 
 
 def find_generic_resources(url: str, headers: dict, embedded: str = None, proxies: dict = dict(), verify: bool = True, accept: str = None, **kwargs):
@@ -309,22 +298,17 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
     # parse all kwargs as query params
     params = dict()
     # validate and store the resource type
-    try:
-        resource_type = get_resource_type_by_url(url)
-    except Exception:
-        raise
-    else:
-        if resource_type.name in ["edge-routers", "network-controllers"]:
-            params['embed'] = "host"
-        if resource_type.name in ["process-executions"]:
-            params['beta'] = None
+    resource_type = get_resource_type_by_url(url)
+    if resource_type.name in HOSTABLE_NET_RESOURCES.keys():
+        params['embed'] = "host"
+    elif resource_type.name in ["process-executions"]:
+        params['beta'] = str()
+
     for param in kwargs.keys():
         if param == 'name' and resource_type.name == 'networks':  # workaround sort param bug in MOP-17863
             params['findByName'] = param
         elif param == 'networkGroupId' and resource_type.name == 'network-groups':
             params['findByNetworkGroupId'] = param
-        elif param == 'region' and resource_type.name == 'data-center':
-            params['locationCode'] = param
         else:
             params[param] = kwargs[param]
 
@@ -353,81 +337,69 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
         params['page'] = 0
 
     if accept:
-        if accept in ["create", "update"]:
+        if accept in ["create"]:
             headers['accept'] = "application/hal+json;as="+accept
             embedded = accept + embedded[0].upper() + embedded[1:]  # compose "createEndpointList" from "endpointList"
         else:
             logging.warn("ignoring invalid value for header 'accept': '{:s}'".format(accept))
 
-    try:
-        status_symbol = "UNKNOWN"
-        response = http.get(
-            url,
-            headers=headers,
-            params=params,
-            proxies=proxies,
-            verify=verify,
-        )
-        status_symbol = STATUS_CODES._codes[response.status_code][0].upper()
-        response.raise_for_status()
-    except RequestException as e:
-        logging.error(f"unexpected HTTP response code {status_symbol} ({response.status_code}) and response {response.text}")
-        raise e
-    else:
+    response = http.get(
+        url,
+        headers=headers,
+        params=params,
+        proxies=proxies,
+        verify=verify,
+    )
+    response.raise_for_status()
+    resource_page = response.json()
+    if isinstance(resource_page, dict) and resource_page.get('page'):
         try:
-            resource_page = response.json()
-        except JSONDecodeError as e:
-            logging.error("caught exception deserializing HTTP response as JSON")
-            raise e
+            total_pages = resource_page['page']['totalPages']
+            total_elements = resource_page['page']['totalElements']
+        except KeyError as e:
+            raise RuntimeError(f"got 'page' key in HTTP response but missing expected sub-key: {e}")
         else:
-            if isinstance(resource_page, dict) and resource_page.get('page'):
-                try:
-                    total_pages = resource_page['page']['totalPages']
-                    total_elements = resource_page['page']['totalElements']
-                except KeyError as e:
-                    raise RuntimeError(f"got 'page' key in HTTP response but missing expected sub-key: {e}")
-                else:
-                    if total_elements == 0:
-                        yield_page = list()  # delay yielding until end of flow
+            if total_elements == 0:
+                yield_page = list()  # delay yielding until end of flow
+            else:
+                if embedded:         # function param 'embedded' specifies the reference in which the collection of resources should be found
+                    try:
+                        yield_page = resource_page['_embedded'][embedded]
+                    except KeyError as e:
+                        raise RuntimeError(f"failed to find embedded collection in valid JSON response at '_embedded.{embedded}', got: '{e}'")
                     else:
-                        if embedded:         # function param 'embedded' specifies the reference in which the collection of resources should be found
-                            try:
-                                yield_page = resource_page['_embedded'][embedded]
-                            except KeyError as e:
-                                raise RuntimeError(f"failed to find embedded collection in valid JSON response at '_embedded.{embedded}', got: '{e}'")
-                            else:
-                                if accept in ["create", "update"]:
-                                    for i in yield_page:
-                                        del i['_links']
-                        elif resource_page.get('content'):
-                            yield_page = resource_page['content']
-                        else:
-                            yield_page = resource_page
-
-                    # yield first, only, and empty pages
-                    yield yield_page
-
-                    # then yield subsequent pages, if applicable
-                    if get_all_pages:         # this is False if param 'page' or 'size' to stop recursion or get a single page
-                        for next_page in range(1, total_pages):  # first page is 0
-                            params['page'] = next_page
-                            try:
-                                # recurse
-                                yield from find_generic_resources(url=url, headers=headers, embedded=embedded, proxies=proxies, verify=verify, **params)
-                            except Exception as e:
-                                raise RuntimeError(f"failed to get page {next_page} of {total_pages}, caught {e}'")
-            elif embedded:      # function param 'embedded' specifies the reference in which the collection of resources should be found
-                try:
-                    yield_page = resource_page['_embedded'][embedded]
-                except KeyError as e:
-                    raise RuntimeError(f"failed to find embedded collection in valid JSON response at '_embedded.{embedded}', got: '{e}'")
+                        if accept in ["create", "update"]:
+                            for i in yield_page:
+                                del i['_links']
+                elif resource_page.get('content'):
+                    yield_page = resource_page['content']
                 else:
-                    yield yield_page
-            elif isinstance(resource_page, dict) and 'content' in resource_page.keys():  # has the generic embed key 'content'
-                yield_page = resource_page['content']
-                yield yield_page
-            else:  # is a list or a flat dict
-                yield resource_page
+                    yield_page = resource_page
+
+            # yield first, only, and empty pages
+            yield yield_page
+
+            # then yield subsequent pages, if applicable
+            if get_all_pages:         # this is False if param 'page' or 'size' to stop recursion or get a single page
+                for next_page in range(1, total_pages):  # first page is 0
+                    params['page'] = next_page
+                    try:
+                        # recurse
+                        yield from find_generic_resources(url=url, headers=headers, embedded=embedded, proxies=proxies, verify=verify, **params)
+                    except Exception as e:
+                        raise RuntimeError(f"failed to get page {next_page} of {total_pages}, caught {e}'")
+    elif embedded:      # function param 'embedded' specifies the reference in which the collection of resources should be found
+        try:
+            yield_page = resource_page['_embedded'][embedded]
+        except KeyError as e:
+            raise RuntimeError(f"failed to find embedded collection in valid JSON response at '_embedded.{embedded}', caught: '{e}'")
+        else:
+            yield yield_page
+    elif isinstance(resource_page, dict) and 'content' in resource_page.keys():  # has the generic embed key 'content'
+        yield_page = resource_page['content']
+        yield yield_page
+    else:  # is a list or a flat dict
+        yield resource_page
 
 
 class Utility:
@@ -455,17 +427,17 @@ RESOURCE_ABBREV = dict()           # unique abbreviations for all resource types
 
 PROCESS_STATUS_SYMBOLS = {
     "complete": ("FINISHED", "SUCCESS"),
-    "progress": ("STARTED", "RUNNING"),
+    "progress": ("STARTED", "RUNNING", "OK"),
     "error": ("FAILED",),
     "deleting": tuple(),
     "deleted": tuple(),
 }
 RESOURCE_STATUS_SYMBOLS = {
     "complete": ("PROVISIONED"),
-    "progress": ("NEW", "PROVISIONING", "UPDATING", "REPLACING"),
-    "error": ("ERROR", "SUSPENDED"),
+    "progress": ("NEW", "PROVISIONING", "UPDATING", "REPLACING", "OK"),
+    "error": ("ERROR", "SUSPENDED", "NOT_FOUND"),
     "deleting": ("DELETING",),
-    "deleted": ("DELETED",),
+    "deleted": ("DELETED", "NOT_FOUND"),
 }
 RESOURCE_STATUSES = set()
 for k, v in RESOURCE_STATUS_SYMBOLS.items():
@@ -505,7 +477,9 @@ class ResourceType(ResourceTypeParent):
     embeddable: bool                                        # legal to request embedding in a parent resource in same domain
     parent: str = field(default=str())                      # optional parent ResourceType instance name
     status: str = field(default='status')                   # name of property where symbolic status is expressed
-    _embedded: str = field(default='default')               # the key under which lists are found in the API e.g. networkControllerList (computed if not provided as dromedary case singular)
+    _embedded: str = field(default='default')               # the key under which lists are found in the API
+                                                            #  e.g. networkControllerList (computed if not provided as dromedary
+                                                            #  case singular)
     create_responses: list = field(default_factory=list)    # expected HTTP response codes for create operation
     no_update_props: list = field(default_factory=list)     # expected HTTP response codes for create operation
     create_template: dict = field(default_factory=lambda: {

@@ -2034,8 +2034,6 @@ class Network:
                 entity_url = self.audience+'core/v2/'+plural(type)+'/'+id
             logging.debug(f"deleting {entity_url}")
             params = dict()
-            # if type == "service":
-            #     params["beta"] = ''
 
             response = http.delete(
                 entity_url,
@@ -2057,14 +2055,14 @@ class Network:
             process_id = resource['_links']['process-executions']['href'].split('/')[6]
             if wait:
                 try:
-                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
+                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, progress=progress)
                 except Exception as e:
                     raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
                 else:
                     return(resource)
             else:    # only wait for the process to start, not finish, or timeout
                 try:
-                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
+                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, progress=progress)
                 except Exception as e:
                     raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
                 else:
