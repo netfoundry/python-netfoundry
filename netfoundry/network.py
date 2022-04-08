@@ -517,7 +517,7 @@ class Network:
                         try:
                             self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
                         except Exception as e:
-                            raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                            raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
                         else:
                             return(resource)
                 elif wait:
@@ -590,7 +590,7 @@ class Network:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
                 else:
                     return(resource)
         elif wait:
@@ -643,7 +643,7 @@ class Network:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
                 else:
                     return(resource)
         elif wait:
@@ -712,7 +712,7 @@ class Network:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
                 else:
                     return(resource)
         elif wait:
@@ -811,7 +811,7 @@ class Network:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
                 else:
                     return(resource)
         elif wait:
@@ -1016,7 +1016,7 @@ class Network:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
                 else:
                     return(resource)
         elif wait:
@@ -1099,7 +1099,7 @@ class Network:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
                 else:
                     return(resource)
         elif wait:
@@ -1173,7 +1173,7 @@ class Network:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
                 else:
                     return(resource)
         elif wait:
@@ -1264,7 +1264,7 @@ class Network:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
                 else:
                     return(resource)
         elif wait:
@@ -1569,7 +1569,7 @@ class Network:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
                 else:
                     return(resource)
         elif wait:
@@ -1993,7 +1993,11 @@ class Network:
             resource = response.json()
 
         if resource.get('_links') and resource['_links'].get('process-executions'):
-            process_id = resource['_links']['process-executions']['href'].split('/')[6]
+            _links = resource['_links'].get('process-executions')
+            if isinstance(_links, list):
+                process_id = _links[0]['href'].split('/')[6]
+            else:
+                process_id = _links['href'].split('/')[6]
             if wait:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, progress=progress)
@@ -2005,7 +2009,7 @@ class Network:
                 try:
                     self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, progress=progress)
                 except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'])}, caught {e}")
+                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
                 else:
                     return(resource)
         elif wait:
