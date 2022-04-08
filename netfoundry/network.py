@@ -3,13 +3,12 @@
 import json
 import logging
 import re
-import sys
 import time
 
 from netfoundry.exceptions import UnknownResourceType
 
-from .utility import (DC_PROVIDERS, MUTABLE_NET_RESOURCES, NET_RESOURCES, RESOURCES, STATUS_CODES, VALID_SEPARATORS, VALID_SERVICE_PROTOCOLS, any_in, docstring_parameters, find_generic_resources,
-                      get_generic_resource, http, is_uuidv4, normalize_caseless, plural, singular)
+from .utility import (DC_PROVIDERS, MUTABLE_NET_RESOURCES, NET_RESOURCES, PROCESS_STATUS_SYMBOLS, RESOURCES, STATUS_CODES, VALID_SEPARATORS, VALID_SERVICE_PROTOCOLS, any_in, docstring_parameters, find_generic_resources, get_generic_resource, http,
+                      is_uuidv4, normalize_caseless, plural, singular)
 
 
 class Network:
@@ -2035,3 +2034,36 @@ class Networks:
         headers = {"authorization": "Bearer " + self.token}
         resource = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params)
         return(resource)
+
+    def wait_for_process(self, process_id: str, expected_statuses: list, wait: int = 300, sleep: int = 3, id: str = None):
+        """Continuously poll for the expected statuses until expiry.
+
+        :param expected_statuses: list of strings as expected status symbol(s) e.g. ["PROVISIONING","PROVISIONED"]
+        :param wait: optional SECONDS after which to raise an exception defaults to five minutes (300)
+        :param sleep: SECONDS polling interval
+        """
+        now = time.time()
+        if not wait >= sleep:
+            raise RuntimeError(f"wait duration ({wait}) must be greater than or equal to polling interval ({sleep})")
+        unexpected_statuses = PROCESS_STATUS_SYMBOLS['error']
+        logging.debug(f"waiting for any status in {expected_statuses} for {type} with id {id} or until {time.ctime(now+wait)}.")
+        status = 'NEW'
+        url = f"{self.audience}core/v2/process-executions/{process_id}"
+        headers = {"authorization": "Bearer " + self.token}
+        time.sleep(sleep)                          # allow minimal time for the resource status to become available
+        while time.time() < now+wait and status not in expected_statuses:
+            entity_status, status_symbol = get_generic_resource(url, headers, self.proxies, self.verify)
+            if entity_status['status']:            # attribute is not None if HTTP OK
+                status = entity_status['status']
+                logging.debug(f"{entity_status['name']} has status {entity_status['status']}")
+            if status in unexpected_statuses:
+                raise RuntimeError(f"got status {status} while waiting for {expected_statuses}")
+            elif status not in expected_statuses:
+                time.sleep(sleep)
+
+        if status in expected_statuses:
+            return True
+        elif not status:
+            raise RuntimeError(f"failed to read status while waiting for any status in {expected_statuses}; got {entity_status['http_status']} ({entity_status['response_code']})")
+        else:
+            raise RuntimeError(f"timed out with status {status} while waiting for any status in {expected_statuses}")

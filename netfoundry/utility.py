@@ -282,7 +282,10 @@ def get_generic_resource(url: str, headers: dict, proxies: dict = dict(), verify
             if len(resources) == 1:
                 resource = resources[0]
             else:
-                resource = {"status": "NEW"}
+                resource = {
+                    "status": "NEW",
+                    "name": "NONAME"
+                }
         elif not status_symbol == 'NOT_FOUND':  # tolerate 404 because some functions will conclude that the resource has been deleted as expected
             raise
     else:

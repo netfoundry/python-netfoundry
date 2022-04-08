@@ -805,7 +805,8 @@ def demo(cli):
             network_created = network_group.create_network(
                 name=network_name,
                 size=cli.config.demo.size,
-                version=cli.config.demo.product_version)
+                version=cli.config.demo.product_version,
+                wait=600)
             network, network_group = use_network(
                 organization=organization,
                 group=cli.config.general.network_group,
