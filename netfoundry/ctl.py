@@ -92,7 +92,7 @@ class StoreListKeys(argparse.Action):
 @cli.argument('-N', '--network', help='caseless name of the network to manage')
 @cli.argument('-G', '--network-group', help="shortname or ID of a network group to search for network_name")
 @cli.argument('-o', '--output', arg_only=True, help="format the output", default="text", choices=['text', 'yaml', 'json'])
-@cli.argument('-S', '--style', help="highlighting style", metavar='STYLE', default='material', choices=["bw", "rrt", "arduino", "monokai", "material", "emacs", "vim", "one-dark"])
+@cli.argument('-S', '--style', help="highlighting style", default='material', choices=["bw", "rrt", "arduino", "monokai", "material", "emacs", "vim", "one-dark"])
 @cli.argument('-B', '--borders', default=True, action='store_boolean', help='print cell borders in text tables')
 @cli.argument('-H', '--headers', default=True, action='store_boolean', help='print column headers in text tables')
 @cli.argument('-Y', '--yes', action='store_true', arg_only=True, help='answer yes to potentially-destructive operations')
@@ -363,6 +363,9 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
         cli.args.resource_type = singular(RESOURCE_ABBREV[cli.args.resource_type].name)
     if not cli.config.general.verbose and cli.args.output in ["yaml", "json"]:    # don't change level if output=text
         cli.log.setLevel(logging.WARN)                                            # don't emit INFO messages to stdout because they will break deserialization
+    if cli.args.accept and not MUTABLE_NET_RESOURCES.get(cli.args.resource_type):
+        logging.warning("ignoring --as=create becuase it is applicable only to mutable resources in the network domain")
+        cli.args['accept'] = None
     match = {}
     matches = []
     query_keys = [*cli.args.query]
@@ -465,8 +468,6 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
                 cli.log.error("need --network=ACMENet")
                 sysexit(1)
             if cli.args.resource_type == "data-center":
-                if cli.args.accept:
-                    cli.log.warning("'accept' param not applicable to data-centers")
                 if 'id' in query_keys:
                     cli.log.warning("data centers fetched by ID may not support this network's product version, try provider or locationCode params for safety")
                     if len(query_keys) > 1:
