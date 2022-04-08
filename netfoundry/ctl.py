@@ -92,7 +92,7 @@ class StoreListKeys(argparse.Action):
 @cli.argument('-N', '--network', help='caseless name of the network to manage')
 @cli.argument('-G', '--network-group', help="shortname or ID of a network group to search for network_name")
 @cli.argument('-o', '--output', arg_only=True, help="format the output", default="text", choices=['text', 'yaml', 'json'])
-@cli.argument('-S', '--style', help="highlighting style", metavar='STYLE', default='material', choices=["bw", "rrt", "arduino", "monokai", "material", "one-dark", "emacs", "vim", "one-dark"])
+@cli.argument('-S', '--style', help="highlighting style", metavar='STYLE', default='material', choices=["bw", "rrt", "arduino", "monokai", "material", "emacs", "vim", "one-dark"])
 @cli.argument('-B', '--borders', default=True, action='store_boolean', help='print cell borders in text tables')
 @cli.argument('-H', '--headers', default=True, action='store_boolean', help='print column headers in text tables')
 @cli.argument('-Y', '--yes', action='store_true', arg_only=True, help='answer yes to potentially-destructive operations')

@@ -505,21 +505,17 @@ class Network:
                     raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[after_response_code][0].upper()} ({after_response_code}) for patch: {json.dumps(patch, indent=2)}")
 
                 if resource.get('_links') and resource['_links'].get('process-executions'):
-                    process_id = resource['_links']['process-executions']['href'].split('/')[6]
+                    _links = resource['_links'].get('process-executions')
+                    if isinstance(_links, list):
+                        process_id = _links[0]['href'].split('/')[6]
+                    else:
+                        process_id = _links['href'].split('/')[6]
                     if wait:
-                        try:
-                            self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
-                        except Exception as e:
-                            raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
-                        else:
-                            return(resource)
+                        self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep)
+                        return(resource)
                     else:    # only wait for the process to start, not finish, or timeout
-                        try:
-                            self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
-                        except Exception as e:
-                            raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
-                        else:
-                            return(resource)
+                        self.wait_for_statuses(expected_statuses=RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'], type="process-executions", id=process_id, wait=9, sleep=2)
+                        return(resource)
                 elif wait:
                     logging.warning("unable to wait for async complete because response did not provide a process execution id")
                     return(resource)
@@ -550,49 +546,36 @@ class Network:
                 else:
                     logging.error('missing id of {type} to update, need put object with "self" link, "id" property, or need "id" param'.format(type=type))
                     raise Exception('missing id of {type} to update, need put object with "self" link, "id" property, or need "id" param'.format(type=type))
-            try:
-                self_link = self.audience+'core/v2/'+type+'/'+id
-            except NameError as e:
-                raise(e)
+            self_link = self.audience+'core/v2/'+type+'/'+id
         else:
             type = plural(self_link.split('/')[5])  # e.g. endpoints, app-wans, edge-routers, etc...
-        try:
-            headers = {"authorization": "Bearer " + self.token}
-            response = http.put(
-                self_link,
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers,
-                json=put
-            )
-            response_code = response.status_code
-        except Exception as e:
-            raise RuntimeError(f"error with PUT to {self_link}, caught {e}")
 
+        headers = {"authorization": "Bearer " + self.token}
+        response = http.put(
+            self_link,
+            proxies=self.proxies,
+            verify=self.verify,
+            headers=headers,
+            json=put
+        )
+        response_code = response.status_code
         if response_code in [STATUS_CODES.codes.OK, STATUS_CODES.codes.ACCEPTED]:  # HTTP 202
-            try:
-                resource = response.json()
-            except ValueError as e:
-                raise RuntimeError(f"failed to load JSON from POST response, caught {e}")
+            resource = response.json()
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) for put: {json.dumps(put, indent=2)}")
 
         if resource.get('_links') and resource['_links'].get('process-executions'):
-            process_id = resource['_links']['process-executions']['href'].split('/')[6]
+            _links = resource['_links'].get('process-executions')
+            if isinstance(_links, list):
+                process_id = _links[0]['href'].split('/')[6]
+            else:
+                process_id = _links['href'].split('/')[6]
             if wait:
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
-                else:
-                    return(resource)
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep)
+                return(resource)
             else:    # only wait for the process to start, not finish, or timeout
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
-                else:
-                    return(resource)
+                self.wait_for_statuses(expected_statuses=RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'], type="process-executions", id=process_id, wait=9, sleep=2)
+                return(resource)
         elif wait:
             logging.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
@@ -630,22 +613,18 @@ class Network:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) for post: {json.dumps(post, indent=2)}")
 
         if resource.get('_links') and resource['_links'].get('process-executions'):
-            process_id = resource['_links']['process-executions']['href'].split('/')[6]
+            _links = resource['_links'].get('process-executions')
+            if isinstance(_links, list):
+                process_id = _links[0]['href'].split('/')[6]
+            else:
+                process_id = _links['href'].split('/')[6]
             if wait:
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
-                else:
-                    resource = self.get_resource_by_id(type=singular(type), id=resource['id'])
-                    return(resource)
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep)
+                resource = self.get_resource_by_id(type=type, id=resource['id'])
+                return(resource)
             else:    # only wait for the process to start, not finish, or timeout
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
-                else:
-                    return(resource)
+                self.wait_for_statuses(expected_statuses=RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'], type="process-executions", id=process_id, wait=9, sleep=2)
+                return(resource)
         elif wait:
             logging.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
@@ -699,22 +678,18 @@ class Network:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}")
 
         if resource.get('_links') and resource['_links'].get('process-executions'):
-            process_id = resource['_links']['process-executions']['href'].split('/')[6]
+            _links = resource['_links'].get('process-executions')
+            if isinstance(_links, list):
+                process_id = _links[0]['href'].split('/')[6]
+            else:
+                process_id = _links['href'].split('/')[6]
             if wait:
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
-                else:
-                    resource = self.get_resource_by_id(type='endpoint', id=resource['id'])
-                    return(resource)
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep)
+                resource = self.get_resource_by_id(type='endpoint', id=resource['id'])
+                return(resource)
             else:    # only wait for the process to start, not finish, or timeout
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
-                else:
-                    return(resource)
+                self.wait_for_statuses(expected_statuses=RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'], type="process-executions", id=process_id, wait=9, sleep=2)
+                return(resource)
         elif wait:
             logging.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
@@ -796,24 +771,20 @@ class Network:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
         if resource.get('_links') and resource['_links'].get('process-executions'):
-            process_id = resource['_links']['process-executions']['href'].split('/')[6]
+            _links = resource['_links'].get('process-executions')
+            if isinstance(_links, list):
+                process_id = _links[0]['href'].split('/')[6]
+            else:
+                process_id = _links['href'].split('/')[6]
             if wait:
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
-                else:
-                    if tunneler_enabled:
-                        self.wait_for_entity_name_exists(entity_name=name, entity_type="endpoint", wait=wait)
-                    resource = self.get_resource_by_id(type="edge-router", id=resource['id'])
-                    return(resource)
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep)
+                if tunneler_enabled:
+                    self.wait_for_entity_name_exists(entity_name=name, entity_type="endpoint", wait=wait)
+                resource = self.get_resource_by_id(type="edge-router", id=resource['id'])
+                return(resource)
             else:    # only wait for the process to start, not finish, or timeout
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
-                else:
-                    return(resource)
+                self.wait_for_statuses(expected_statuses=RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'], type="process-executions", id=process_id, wait=9, sleep=2)
+                return(resource)
         elif wait:
             logging.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
@@ -1004,21 +975,17 @@ class Network:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
         if resource.get('_links') and resource['_links'].get('process-executions'):
-            process_id = resource['_links']['process-executions']['href'].split('/')[6]
+            _links = resource['_links'].get('process-executions')
+            if isinstance(_links, list):
+                process_id = _links[0]['href'].split('/')[6]
+            else:
+                process_id = _links['href'].split('/')[6]
             if wait:
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
-                else:
-                    return(resource)
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep)
+                return(resource)
             else:    # only wait for the process to start, not finish, or timeout
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
-                else:
-                    return(resource)
+                self.wait_for_statuses(expected_statuses=RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'], type="process-executions", id=process_id, wait=9, sleep=2)
+                return(resource)
         elif wait:
             logging.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
@@ -1087,21 +1054,17 @@ class Network:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
         if resource.get('_links') and resource['_links'].get('process-executions'):
-            process_id = resource['_links']['process-executions']['href'].split('/')[6]
+            _links = resource['_links'].get('process-executions')
+            if isinstance(_links, list):
+                process_id = _links[0]['href'].split('/')[6]
+            else:
+                process_id = _links['href'].split('/')[6]
             if wait:
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
-                else:
-                    return(resource)
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep)
+                return(resource)
             else:    # only wait for the process to start, not finish, or timeout
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
-                else:
-                    return(resource)
+                self.wait_for_statuses(expected_statuses=RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'], type="process-executions", id=process_id, wait=9, sleep=2)
+                return(resource)
         elif wait:
             logging.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
@@ -1161,21 +1124,17 @@ class Network:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
         if resource.get('_links') and resource['_links'].get('process-executions'):
-            process_id = resource['_links']['process-executions']['href'].split('/')[6]
+            _links = resource['_links'].get('process-executions')
+            if isinstance(_links, list):
+                process_id = _links[0]['href'].split('/')[6]
+            else:
+                process_id = _links['href'].split('/')[6]
             if wait:
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
-                else:
-                    return(resource)
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep)
+                return(resource)
             else:    # only wait for the process to start, not finish, or timeout
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
-                else:
-                    return(resource)
+                self.wait_for_statuses(expected_statuses=RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'], type="process-executions", id=process_id, wait=9, sleep=2)
+                return(resource)
         elif wait:
             logging.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
@@ -1252,21 +1211,17 @@ class Network:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
         if resource.get('_links') and resource['_links'].get('process-executions'):
-            process_id = resource['_links']['process-executions']['href'].split('/')[6]
+            _links = resource['_links'].get('process-executions')
+            if isinstance(_links, list):
+                process_id = _links[0]['href'].split('/')[6]
+            else:
+                process_id = _links['href'].split('/')[6]
             if wait:
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
-                else:
-                    return(resource)
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep)
+                return(resource)
             else:    # only wait for the process to start, not finish, or timeout
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
-                else:
-                    return(resource)
+                self.wait_for_statuses(expected_statuses=RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'], type="process-executions", id=process_id, wait=9, sleep=2)
+                return(resource)
         elif wait:
             logging.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
@@ -1557,21 +1512,17 @@ class Network:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
         if resource.get('_links') and resource['_links'].get('process-executions'):
-            process_id = resource['_links']['process-executions']['href'].split('/')[6]
+            _links = resource['_links'].get('process-executions')
+            if isinstance(_links, list):
+                process_id = _links[0]['href'].split('/')[6]
+            else:
+                process_id = _links['href'].split('/')[6]
             if wait:
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
-                else:
-                    return(resource)
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep)
+                return(resource)
             else:    # only wait for the process to start, not finish, or timeout
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, wait=9, sleep=2, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
-                else:
-                    return(resource)
+                self.wait_for_statuses(expected_statuses=RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'], type="process-executions", id=process_id, wait=9, sleep=2)
+                return(resource)
         elif wait:
             logging.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
@@ -1841,7 +1792,7 @@ class Network:
         else:
             raise RuntimeError(f"timed out with status {status} while waiting for {expect}")
 
-    def wait_for_statuses(self, expected_statuses: list, type: str = "network", wait: int = 300, sleep: int = 10, id: str = None, progress: bool = False):
+    def wait_for_statuses(self, expected_statuses: list, type: str = "network", wait: int = 300, sleep: int = 3, id: str = None, progress: bool = False):
         """Continuously poll for the expected statuses until expiry.
 
         :param expected_statuses: list of strings as expected status symbol(s) e.g. ["PROVISIONING","PROVISIONED"]
@@ -1866,6 +1817,7 @@ class Network:
         logging.debug(f"waiting for any status in {expected_statuses} for {type} with id {id} or until {time.ctime(now+wait)}.")
 
         status = 'NEW'
+#        time.sleep(sleep)  # allow minimal time for the resource status to become available
         while time.time() < now+wait and status not in expected_statuses:
             entity_status = self.get_resource_status(type=type, id=id)
             if entity_status['status']:  # attribute is not None if HTTP OK
@@ -1999,24 +1951,14 @@ class Network:
             else:
                 process_id = _links['href'].split('/')[6]
             if wait:
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"error while waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
-                else:
-                    return(resource)
+                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep)
+                return(True)
             else:    # only wait for the process to start, not finish, or timeout
-                try:
-                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['progress'], type="process-executions", id=process_id, progress=progress)
-                except Exception as e:
-                    raise RuntimeError(f"error waiting for process status in {', '.join(RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'])}, caught {e}")
-                else:
-                    return(resource)
+                self.wait_for_statuses(expected_statuses=RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'], type="process-executions", id=process_id, wait=9, sleep=2)
+                return(True)
         elif wait:
             logging.warning("unable to wait for async complete because response did not provide a process execution id")
-            return(resource)
-
-        return(True)
+            return(False)
 
 
 class Networks:

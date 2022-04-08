@@ -279,7 +279,10 @@ def get_generic_resource(url: str, headers: dict, proxies: dict = dict(), verify
             url = f"https://{url_parts.netloc}{'/'.join(path_parts[:-1])}"  # everything but the id
             params['processId'] = process_id
             resources = next(find_generic_resources(url, headers=headers, embedded=RESOURCES['process-executions']._embedded, proxies=proxies, verify=verify, accept=accept, **params))
-            resource = resources[0]
+            if len(resources) == 1:
+                resource = resources[0]
+            else:
+                resource = {"status": "NEW"}
         elif not status_symbol == 'NOT_FOUND':  # tolerate 404 because some functions will conclude that the resource has been deleted as expected
             raise
     else:
