@@ -842,7 +842,7 @@ def demo(cli):
                     ],
                     provider=cli.config.demo.provider,
                     location_code=region,
-                    tunneler_enabled=True,
+                    tunneler_enabled=False,  # workaround for MOP-18098 (missing tunneler binding in ziti-router config)
                 )
                 hosted_edge_routers.extend([er])
                 spinner.succeed(f"Created {cli.config.demo.provider} router in {region}")
@@ -863,10 +863,10 @@ def demo(cli):
         for router in hosted_edge_routers:
             network.wait_for_statuses(expected_statuses=RESOURCES["edge-routers"].status_symbols["complete"], id=router['id'], type="edge-router", wait=2222, progress=False)
             # ensure the router tunneler is available
-            network.wait_for_entity_name_exists(entity_name=router['name'], entity_type='endpoint')
-            router_tunneler = network.find_resources(type='endpoint', name=router['name'])[0]
-            router_tunneler['attributes'] = ['#demo_exits']
-            network.patch_resource(router_tunneler)
+            # network.wait_for_entity_name_exists(entity_name=router['name'], entity_type='endpoint')
+            # router_tunneler = network.find_resources(type='endpoint', name=router['name'])[0]
+            # router_tunneler['attributes'] = ['#demo_exits']
+            # network.patch_resource(router_tunneler)
     spinner.succeed("All hosted routers online")
 
     # create a simple global router policy unless one exists with the same name
@@ -916,7 +916,7 @@ def demo(cli):
             "client_attributes": ["#welcome_wagon"],
             "tcp_port": "80",
             "client_domain": "fireworks.netfoundry",
-            "exit_attributes": ["#demo_exits"],
+            "exit_attributes": choice(hosted_edge_routers)['id'],
             "exit_domain": "fireworks-load-balancer-1246256380.us-east-1.elb.amazonaws.com",
         },
         # "Weather Service": {
@@ -930,7 +930,7 @@ def demo(cli):
             "client_attributes": ["#welcome_wagon"],
             "tcp_port": "80",
             "client_domain": "echo.netfoundry",
-            "exit_attributes": ["#demo_exits"],
+            "exit_attributes": choice(hosted_edge_routers)['id'],
             "exit_domain": "eth0.me",
         },
     }
@@ -942,7 +942,7 @@ def demo(cli):
                 services[svc]['properties'] = network.create_service(
                     name=svc,
                     attributes=services[svc]['client_attributes'],
-                    endpoints=services[svc]['exit_attributes'],
+                    egress_router_id=services[svc]['exit_attributes'],
                     client_host_name=services[svc]['client_domain'],
                     server_host_name=services[svc]['exit_domain'],
                     client_port=services[svc]['tcp_port'],
