@@ -50,10 +50,14 @@ class UnknownResourceType(NFAPIError):
     def __str__(self):
         """Report the invalid type if provided, finally report valid types."""
         if self.resource_type is not None:
-            return f"Not a valid resource type: '{self.resource_type}'. Try one of: {','.join(self.valid_types)}"
+            return f"Not a valid resource type: '{self.resource_type}'. Try one of: {', '.join(self.valid_types)}"
         else:
-            return f"Not a valid resource type. Try one of: {','.join(self.valid_types)}"
+            return f"Not a valid resource type. Try one of: {', '.join(self.valid_types)}"
 
 
 class NeedUserInput(NFAPIError):
     """Need user input to confirm action."""
+
+
+class NetworkBoundaryViolation(NFAPIError):
+    """Network domain resource accessed across a network boundary."""
