@@ -11,7 +11,7 @@ from stat import S_IRUSR, S_IWUSR, S_IXUSR, filemode
 from platformdirs import user_cache_path, user_config_path
 
 from .exceptions import NFAPINoCredentials
-from .utility import (DEFAULT_TOKEN_EXPIRY, EMBEDDABLE_NETWORK_RESOURCES, ENVIRONMENTS, NETWORK_RESOURCES, RESOURCES, STATUS_CODES, find_generic_resources, get_generic_resource, get_token_cache, http, is_uuidv4, jwt_environment, jwt_expiry,
+from .utility import (DEFAULT_TOKEN_EXPIRY, EMBED_NET_RESOURCES, ENVIRONMENTS, NET_RESOURCES, RESOURCES, STATUS_CODES, find_generic_resources, get_generic_resource, get_token_cache, http, is_uuidv4, jwt_environment, jwt_expiry,
                       normalize_caseless, plural)
 
 
@@ -358,7 +358,7 @@ path to credentials file.
             if self.organizations_by_label.get(organization_label):
                 self.describe = self.get_organization(id=self.organizations_by_label[organization_label])
             else:
-                raise RuntimeError(f"failed to find org label {organization_label} in the list of orgs {','.join(self.organizations_by_label.keys())}")
+                raise RuntimeError(f"failed to find org label {organization_label} in the list of orgs {', '.join(self.organizations_by_label.keys())}")
         else:
             self.describe = self.get_organization(id=self.caller['organizationId'])
 
@@ -560,14 +560,14 @@ path to credentials file.
         headers["authorization"] = "Bearer " + self.token
         params = dict()
         if embed == "all":
-            params['embed'] = ','.join(EMBEDDABLE_NETWORK_RESOURCES)
+            params['embed'] = ', '.join(EMBED_NET_RESOURCES)
             logging.debug(f"requesting embed all resource types in network domain: {params['embed']}")
         elif embed:
             valid_types = [plural(type) for type in embed.split(',') if RESOURCES[plural(type)]['domain'] == "network"]
-            params['embed'] = ','.join(valid_types)
+            params['embed'] = ', '.join(valid_types)
             logging.debug(f"requesting embed some resource types in network domain: {valid_types}")
             for type in embed.split(','):
-                if not NETWORK_RESOURCES.get(type):
+                if not NET_RESOURCES.get(type):
                     logging.warning(f"not requesting '{type}', not a resource type in the network domain")
 
         url = self.audience+'core/v2/networks/'+network_id

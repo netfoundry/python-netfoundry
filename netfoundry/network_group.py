@@ -3,9 +3,10 @@
 import json
 import logging
 
-from .utility import (NETWORK_RESOURCES, RESOURCES, STATUS_CODES,
+from .utility import (NET_RESOURCES, RESOURCES, STATUS_CODES,
                       find_generic_resources, get_generic_resource, http, is_uuidv4,
                       normalize_caseless, any_in)
+from .network import Networks
 
 
 class NetworkGroup:
@@ -16,6 +17,7 @@ class NetworkGroup:
 
     def __init__(self, Organization: object, network_group_id: str = None, network_group_name: str = None, group: str = None):
         """Initialize the network group class with a group name or ID."""
+        self.Networks = Networks(Organization)
         self.network_groups = Organization.get_network_groups_by_organization()
         if (not network_group_id and not network_group_name) and group:
             if is_uuidv4(group):
@@ -108,7 +110,7 @@ class NetworkGroup:
         headers = {"authorization": "Bearer " + self.token}
         try:
             data_centers = list()
-            for i in find_generic_resources(url=url, headers=headers, embedded=NETWORK_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params):
+            for i in find_generic_resources(url=url, headers=headers, embedded=NET_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params):
                 data_centers.extend(i)
         except Exception as e:
             raise RuntimeError(f"failed to get data-centers from url: '{url}', caught {e}")
@@ -159,7 +161,7 @@ class NetworkGroup:
         from distutils.version import LooseVersion
         return sorted(product_versions, key=LooseVersion)[-1]
 
-    def create_network(self, name: str, network_group_id: str = None, location: str = "us-east-1", version: str = None, size: str = "small", **kwargs):
+    def create_network(self, name: str, network_group_id: str = None, location: str = "us-east-1", version: str = None, size: str = "small", wait: int = 0, sleep: int = 10, **kwargs):
         """
         Create a network in this network group.
 
@@ -171,7 +173,7 @@ class NetworkGroup:
         """
         my_nc_data_centers_by_location = self.nc_data_centers_by_location()
         if not my_nc_data_centers_by_location.get(location):
-            raise RuntimeError(f"unexpected network location '{location}'. Valid locations include: {','.join(my_nc_data_centers_by_location.keys())}.")
+            raise RuntimeError(f"unexpected network location '{location}'. Valid locations include: {', '.join(my_nc_data_centers_by_location.keys())}.")
 
         # map incongruent api keys from kwargs to function params ("name", "size" are congruent)
         for param, value in kwargs.items():
@@ -228,16 +230,30 @@ class NetworkGroup:
         except Exception as e:
             raise RuntimeError(f"problem creating network, caught {e}")
 
+        # the HTTP response code is one of the expected responses for creating a network
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['networks'].create_responses):
-            try:
-                network = json.loads(response.text)
-            except ValueError as e:
-                raise e(f'ERROR: failed to load created network JSON, got HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) with body {response.text}')
-            else:
-                return(network)
+            resource = response.json()
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
+
+        if resource.get('_links') and resource['_links'].get('process-executions'):
+            _links = resource['_links'].get('process-executions')
+            if isinstance(_links, list):
+                process_id = _links[0]['href'].split('/')[6]
+            else:
+                process_id = _links['href'].split('/')[6]
+            if wait:
+                self.Networks.wait_for_process(process_id, RESOURCES["process-executions"].status_symbols['complete'], wait=wait, sleep=sleep)
+                resource = self.get_resource_by_id(type="network", id=resource['id'])
+                return(resource)
+            else:    # only wait for the process to start, not finish, or timeout
+                # FIXME: commented to allow create to succeed to workaround MOP-18095
+                # self.Networks.wait_for_process(process_id, RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'], wait=9, sleep=3)
+                return(resource)
+        elif wait:
+            logging.warning("unable to wait for async complete because response did not provide a process execution id")
+            return(resource)
 
     def delete_network(self, network_id=None, network_name=None):
         """
