@@ -806,7 +806,7 @@ def demo(cli):
                 name=network_name,
                 size=cli.config.demo.size,
                 version=cli.config.demo.product_version,
-                wait=600)
+                wait=0)  # don't use wait > 0 until process-executions beta is launched, until then poll for status
             network, network_group = use_network(
                 organization=organization,
                 group=cli.config.general.network_group,

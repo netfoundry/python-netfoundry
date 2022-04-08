@@ -459,66 +459,64 @@ class Network:
 
         if not MUTABLE_NET_RESOURCES.get(type):  # prune properties that can't be patched
             raise RuntimeError(f"got unexpected type {type} for patch request to {self_link}")
-        try:
-            before_resource, status_symbol = get_generic_resource(url=self_link, headers=headers, proxies=self.proxies, verify=self.verify, accept='update')
-        except Exception as e:
-            raise RuntimeError(f"failed to get {type} for patching: '{e}'")
-        else:
-            # compare the patch to the discovered, current state, adding new or updated keys to pruned_patch
-            pruned_patch = dict()
-            for k in patch.keys():
-                if k not in RESOURCES[plural(type)].no_update_props and before_resource.get(k):
-                    if isinstance(patch[k], list):
-                        if not set(before_resource[k]) == set(patch[k]):
-                            pruned_patch[k] = list(set(patch[k]))
-                    else:
-                        if not before_resource[k] == patch[k]:
-                            pruned_patch[k] = patch[k]
-
-            # attempt to update if there's at least one difference between the current resource and the submitted patch
-            if len(pruned_patch.keys()) > 0:
-                if not pruned_patch.get('name'):
-                    pruned_patch["name"] = before_resource["name"]
-                # if entity is a service and "model" is patched then always include "modelType"
-                if type == "services" and not pruned_patch.get('modelType') and pruned_patch.get('model'):
-                    pruned_patch["modelType"] = before_resource["modelType"]
-                try:
-                    after_response = http.patch(
-                        self_link,
-                        proxies=self.proxies,
-                        verify=self.verify,
-                        headers=headers,
-                        json=pruned_patch
-                    )
-                    after_response_code = after_response.status_code
-                except Exception as e:
-                    raise RuntimeError(f"error with PATCH request to {self_link}, caught {e}")
-                if after_response_code in [STATUS_CODES.codes.OK, STATUS_CODES.codes.ACCEPTED]:
-                    try:
-                        resource = after_response.json()
-                    except ValueError as e:
-                        raise RuntimeError(f"failed to load {type} object from PATCH response, caught {e}")
+        before_resource, status_symbol = get_generic_resource(url=self_link, headers=headers, proxies=self.proxies, verify=self.verify, accept='update')
+        # compare the patch to the discovered, current state, adding new or updated keys to pruned_patch
+        pruned_patch = dict()
+        for k in patch.keys():
+            if k not in RESOURCES[plural(type)].no_update_props and before_resource.get(k):
+                if isinstance(patch[k], list):
+                    if not set(before_resource[k]) == set(patch[k]):
+                        pruned_patch[k] = list(set(patch[k]))
                 else:
-                    raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[after_response_code][0].upper()} ({after_response_code}) for patch: {json.dumps(patch, indent=2)}")
+                    if not before_resource[k] == patch[k]:
+                        pruned_patch[k] = patch[k]
 
-                if resource.get('_links') and resource['_links'].get('process-executions'):
-                    _links = resource['_links'].get('process-executions')
-                    if isinstance(_links, list):
-                        process_id = _links[0]['href'].split('/')[6]
-                    else:
-                        process_id = _links['href'].split('/')[6]
-                    if wait:
-                        self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep)
-                        return(resource)
-                    else:    # only wait for the process to start, not finish, or timeout
-                        self.wait_for_statuses(expected_statuses=RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'], type="process-executions", id=process_id, wait=9, sleep=2)
-                        return(resource)
-                elif wait:
-                    logging.warning("unable to wait for async complete because response did not provide a process execution id")
-                    return(resource)
+        # attempt to update if there's at least one difference between the current resource and the submitted patch
+        if len(pruned_patch.keys()) > 0:
+            if not pruned_patch.get('name'):
+                pruned_patch["name"] = before_resource["name"]
+            # if entity is a service and "model" is patched then always include "modelType"
+            if type == "services" and not pruned_patch.get('modelType') and pruned_patch.get('model'):
+                pruned_patch["modelType"] = before_resource["modelType"]
+            try:
+                after_response = http.patch(
+                    self_link,
+                    proxies=self.proxies,
+                    verify=self.verify,
+                    headers=headers,
+                    json=pruned_patch
+                )
+                after_response_code = after_response.status_code
+            except Exception as e:
+                raise RuntimeError(f"error with PATCH request to {self_link}, caught {e}")
+            if after_response_code in [STATUS_CODES.codes.OK, STATUS_CODES.codes.ACCEPTED]:
+                try:
+                    resource = after_response.json()
+                except ValueError as e:
+                    raise RuntimeError(f"failed to load {type} object from PATCH response, caught {e}")
             else:
-                # no change, return the existing unmodified entity
-                return(before_resource)
+                raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[after_response_code][0].upper()} ({after_response_code}) for patch: {json.dumps(patch, indent=2)}")
+
+            if resource.get('_links') and resource['_links'].get('process-executions'):
+                _links = resource['_links'].get('process-executions')
+                if isinstance(_links, list):
+                    process_id = _links[0]['href'].split('/')[6]
+                else:
+                    process_id = _links['href'].split('/')[6]
+                if wait:
+                    self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep)
+                    return(resource)
+                else:    # only wait for the process to start, not finish, or timeout
+                    self.wait_for_statuses(expected_statuses=RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'], type="process-executions", id=process_id, wait=9, sleep=2)
+                    return(resource)
+            elif wait:
+                logging.warning("unable to wait for async complete because response did not provide a process execution id")
+                return(resource)
+            else:
+                return(resource)
+        else:
+            # no change, return the existing unmodified entity
+            return(before_resource)
 
     def put_resource(self, put: dict, type: str = None, id: str = None, wait: int = 0, sleep: int = 2, progress: bool = False):
         """Update a resource with a complete set of properties.
@@ -576,6 +574,8 @@ class Network:
         elif wait:
             logging.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
+        else:
+            return(resource)
 
     def create_resource(self, type: str, post: dict, wait: int = 30, sleep: int = 2, progress: bool = False):
         """
@@ -624,6 +624,8 @@ class Network:
                 return(resource)
         elif wait:
             logging.warning("unable to wait for async complete because response did not provide a process execution id")
+            return(resource)
+        else:
             return(resource)
 
     def create_endpoint(self, name: str, attributes: list = [], session_identity: str = None, wait: int = 30, sleep: int = 2, progress: bool = False):
@@ -689,6 +691,8 @@ class Network:
                 return(resource)
         elif wait:
             logging.warning("unable to wait for async complete because response did not provide a process execution id")
+            return(resource)
+        else:
             return(resource)
 
     @docstring_parameters(providers=str(DC_PROVIDERS))
@@ -784,6 +788,8 @@ class Network:
                 return(resource)
         elif wait:
             logging.warning("unable to wait for async complete because response did not provide a process execution id")
+            return(resource)
+        else:
             return(resource)
 
     def create_edge_router_policy(self, name: str, endpoint_attributes: list = [], edge_router_attributes: list = [], wait: int = 30):
@@ -986,6 +992,8 @@ class Network:
         elif wait:
             logging.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
+        else:
+            return(resource)
 
     # the above method was renamed to follow the development of PSM-based services (platform service models)
     create_service = create_service_simple
@@ -1065,6 +1073,8 @@ class Network:
         elif wait:
             logging.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
+        else:
+            return(resource)
 
     def create_service_edge_router_policy(self, name: str, services: list, edge_routers: list, semantic: str = "AnyOf",
                                           dry_run: bool = False, wait: int = 30, sleep: int = 10, progress: bool = False):
@@ -1134,6 +1144,8 @@ class Network:
                 return(resource)
         elif wait:
             logging.warning("unable to wait for async complete because response did not provide a process execution id")
+            return(resource)
+        else:
             return(resource)
 
     def create_service_with_configs(self, name: str, intercept_config_data: dict, host_config_data: dict, attributes: list = [],
@@ -1221,6 +1233,8 @@ class Network:
                 return(resource)
         elif wait:
             logging.warning("unable to wait for async complete because response did not provide a process execution id")
+            return(resource)
+        else:
             return(resource)
 
     @docstring_parameters(valid_service_protocols=VALID_SERVICE_PROTOCOLS)
@@ -1522,6 +1536,8 @@ class Network:
                 return(resource)
         elif wait:
             logging.warning("unable to wait for async complete because response did not provide a process execution id")
+            return(resource)
+        else:
             return(resource)
 
     # the above method was renamed to follow the development of PSM-based services (platform service models)
@@ -1956,6 +1972,8 @@ class Network:
         elif wait:
             logging.warning("unable to wait for async complete because response did not provide a process execution id")
             return(False)
+        else:
+            return(True)
 
 
 class Networks:
