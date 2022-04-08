@@ -1705,7 +1705,7 @@ class Network:
                 raise e
             return(session)
 
-    def wait_for_property_defined(self, property_name: str, property_type: object = str, entity_type: str = "network", wait: int = 60, sleep: int = 3, id: str = None, progress: bool = False):
+    def wait_for_property_defined(self, property_name: str, property_type: object = str, entity_type: str = "network", id: str = None, wait: int = 60, sleep: int = 3, progress: bool = False):
         """Poll until expiry for the expected property to become defined with the any value of the expected type.
 
         :param: property_name a top-level property to wait for e.g. `zitiId`
@@ -1724,16 +1724,12 @@ class Network:
         if not wait >= sleep:
             raise RuntimeError(f"wait duration ({wait}) must be greater than or equal to polling interval ({sleep})")
 
-        # poll for status until expiry
         if progress:
-            sys.stdout.write(f"\twaiting for property {property_name} ({str(property_type)}) or until {time.ctime(now+wait)}.")
+            logging.warning("progress meters are decommissioned and superseded by nfctl")
+        logging.debug(f"waiting for {str(property_type)} property {property_name} in {entity_type} with id {id} or until {time.ctime(now+wait)}.")
 
-#        response_code = int()
         property_value = None
         while time.time() < now+wait:
-            if progress:
-                sys.stdout.write('.')  # print a stop each iteration to imply progress
-                sys.stdout.flush()
 
             try:
                 entity = self.get_resource_by_id(type=entity_type, id=id)
@@ -1745,21 +1741,11 @@ class Network:
                 property_value = entity[property_name]
                 # if expected type then return, else sleep
                 if isinstance(property_value, property_type):
-                    if progress:
-                        print()        # newline terminates progress meter
                     return(entity)
                 else:
-                    if progress:
-                        sys.stdout.write(f"\n{entity['name']:^19s}:{property_name:^19s} ({str(property_type)}):")
                     time.sleep(sleep)
             else:
-                if progress:
-                    sys.stdout.write(f"\n{'fetching':^19s}:{property_name:^19s} ({str(property_type)}):")
                 time.sleep(sleep)
-
-        #
-        if progress:
-            print()                     # newline terminates progress meter
 
         if not property_value:
             raise RuntimeError(f"failed to find any value for property '{property_name}'")
@@ -1784,16 +1770,12 @@ class Network:
         if not NET_RESOURCES.get(plural(entity_type)):
             raise Exception(f"ERROR: unknown type '{entity_type}'. Choices: {', '.join(NET_RESOURCES.keys())}")
 
-        # poll for status until expiry
         if progress:
-            sys.stdout.write(f"\twaiting for entity {entity_name} ({str(entity_type)}) or until {time.ctime(now+wait)}.")
+            logging.warning("progress meters are decommissioned and superseded by nfctl")
+        logging.debug(f"waiting for {entity_type} with name {entity_name} to appear or until {time.ctime(now+wait)}.")
 
         found_entities = []
         while time.time() < now+wait:
-            if progress:
-                sys.stdout.write('.')  # print a stop each iteration to imply progress
-                sys.stdout.flush()
-
             try:
                 found_entities = self.find_resources(type=plural(entity_type), name=entity_name)
             except Exception as e:
@@ -1801,20 +1783,11 @@ class Network:
 
             # if expected entity exists then verify name, else sleep
             if len(found_entities) > 1:
-                if progress:
-                    print()            # newline terminates progress meter
                 raise RuntimeError(f"found more than one {singular(entity_type)} named '{entity_name}'.")
             elif len(found_entities) == 1:
-                if progress:
-                    print()            # newline terminates progress meter
                 return(found_entities[0])
             else:
-                if progress:
-                    sys.stdout.write(f"\n{'fetching':^19s}:{entity_name:^19s} ({str(entity_type)}):")
                 time.sleep(sleep)
-
-        if progress:
-            print()                    # newline terminates progress meter
 
         raise RuntimeError(f"failed to find one {singular(entity_type)} named '{entity_name}'")
 
@@ -1839,27 +1812,18 @@ class Network:
         if expect == "ERROR":
             raise RuntimeError("need expect status other than 'ERROR' because it's used internally to notice failures while waiting for valid statuses")
 
-        # poll for status until expiry
         if progress:
-            sys.stdout.write(f"\twaiting for status {expect} or until {time.ctime(now+wait)}.")
+            logging.warning("progress meters are decommissioned and superseded by nfctl")
+        logging.warning(f"waiting for {type} to have status {expect} or until {time.ctime(now+wait)}")
 
         status = str()
         while time.time() < now+wait and not status == expect:
-            if progress:
-                sys.stdout.write('.')        # print a stop each iteration to imply progress
-                sys.stdout.flush()
-
             try:
                 entity_status = self.get_resource_status(type=type, id=id)
             except Exception as e:
                 raise RuntimeError(f"unknown error getting status for type={type}, id={id}, caught {e}")
 
             if entity_status.get('status'):                           # attribute is not None if HTTP OK
-                if not status or (                                    # print the starting status
-                    status and not entity_status['status'] == status  # print on subsequent changes
-                ):
-                    if progress:
-                        sys.stdout.write(f"\n{entity_status['name']:^19s}:{entity_status['status']:^19s}:")
                 status = entity_status['status']
                 logging.debug(f"got status {status} and still waiting for {expect}")
             else:
@@ -1870,9 +1834,6 @@ class Network:
             elif not expect == status:
                 time.sleep(sleep)
             # loop until wait seconds
-
-        if progress:
-            print()                                                   # newline terminates progress meter
 
         # we're done waiting, it's now or never
         if status == expect:
@@ -1900,21 +1861,16 @@ class Network:
 
         unexpected_statuses = RESOURCES[plural(type)].status_symbols['error']
 
-        # poll for status until expiry
         if progress:
             logging.warning("progress meters are decommissioned and superseded by nfctl")
-        logging.debug(f"waiting for any status in {expected_statuses} or until {time.ctime(now+wait)}.")
+        logging.debug(f"waiting for any status in {expected_statuses} for {type} with id {id} or until {time.ctime(now+wait)}.")
 
         status = 'NEW'
         while time.time() < now+wait and status not in expected_statuses:
             entity_status = self.get_resource_status(type=type, id=id)
             if entity_status['status']:  # attribute is not None if HTTP OK
-                if not status or (       # print the starting status
-                    status and not entity_status['status'] == status   # print on subsequent changes
-                ):
-                    logging.debug(f"{entity_status['name']} has status {entity_status['status']}")
                 status = entity_status['status']
-            # import epdb; epdb.serve()
+                logging.debug(f"{entity_status['name']} has status {entity_status['status']}")
             if status in unexpected_statuses:
                 raise RuntimeError(f"got status {status} while waiting for {expected_statuses}")
             elif status not in expected_statuses:
