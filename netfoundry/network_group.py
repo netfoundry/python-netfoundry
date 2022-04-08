@@ -248,7 +248,8 @@ class NetworkGroup:
                 resource = self.get_resource_by_id(type="network", id=resource['id'])
                 return(resource)
             else:    # only wait for the process to start, not finish, or timeout
-                self.Networks.wait_for_process(process_id, RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'], type="process-executions", wait=9, sleep=3)
+                # FIXME: commented to allow create to succeed to workaround MOP-18095
+                # self.Networks.wait_for_process(process_id, RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'], wait=9, sleep=3)
                 return(resource)
         elif wait:
             logging.warning("unable to wait for async complete because response did not provide a process execution id")

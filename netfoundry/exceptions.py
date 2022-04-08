@@ -57,3 +57,7 @@ class UnknownResourceType(NFAPIError):
 
 class NeedUserInput(NFAPIError):
     """Need user input to confirm action."""
+
+
+class NetworkBoundaryViolation(NFAPIError):
+    """Network domain resource accessed across a network boundary."""

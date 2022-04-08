@@ -5,7 +5,7 @@ import logging
 import re
 import time
 
-from netfoundry.exceptions import UnknownResourceType
+from netfoundry.exceptions import UnknownResourceType, NetworkBoundaryViolation
 
 from .utility import (DC_PROVIDERS, MUTABLE_NET_RESOURCES, NET_RESOURCES, PROCESS_STATUS_SYMBOLS, RESOURCES, STATUS_CODES, VALID_SEPARATORS, VALID_SERVICE_PROTOCOLS, any_in, docstring_parameters, find_generic_resources, get_generic_resource, http,
                       is_uuidv4, normalize_caseless, plural, singular)
@@ -375,12 +375,10 @@ class Network:
 
         headers = {"authorization": "Bearer " + self.token}
         url = self.audience+'core/v2/'+plural(type)+'/'+id
-        try:
-            resource, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
-        except Exception as e:
-            raise RuntimeError(f"failed to get resource from url: '{url}', caught {e}")
-        else:
-            return(resource)
+        resource, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+        if not resource['networkId'] == self.id:
+            raise NetworkBoundaryViolation("resource ID is from another network")
+        return(resource)
     get_resource = get_resource_by_id
 
     def find_resources(self, type: str, accept: str = None, deleted: bool = False, **kwargs):

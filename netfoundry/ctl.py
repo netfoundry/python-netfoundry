@@ -1034,7 +1034,7 @@ def use_organization(prompt: bool = True, spinner: object = None):
                 sysexit(1)
 
             try:
-                spinner.text = "Trying token for profile '{:s}'".format(cli.config.general.profile)
+                spinner.text = f"Trying token for profile '{cli.config.general.profile}'"
                 with spinner:
                     organization = Organization(
                         token=token_from_prompt,
