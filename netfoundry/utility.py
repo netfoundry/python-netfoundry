@@ -517,7 +517,7 @@ class ResourceType(ResourceTypeParent):
                 MUTABLE_RESOURCE_ABBREV[self.abbreviation] = self
             if self.host:
                 HOSTABLE_NET_RESOURCES[self.name] = self
-                HOSTABLE_RESOURCE_ABBREV[self.name] = self
+                HOSTABLE_RESOURCE_ABBREV[self.abbreviation] = self
         return super().__post_init__()
 
 
