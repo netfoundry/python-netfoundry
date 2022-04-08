@@ -228,14 +228,11 @@ class NetworkGroup:
         except Exception as e:
             raise RuntimeError(f"problem creating network, caught {e}")
 
+        # the HTTP response code is one of the expected responses for creating a network
         response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
         if any_in(response_code_symbols, RESOURCES['networks'].create_responses):
-            try:
-                network = json.loads(response.text)
-            except ValueError as e:
-                raise e(f'ERROR: failed to load created network JSON, got HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) with body {response.text}')
-            else:
-                return(network)
+            network = response.json()
+            return(network)
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 

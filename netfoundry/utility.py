@@ -222,15 +222,11 @@ def eprint(*args, **kwargs):
 
 def get_resource_type_by_url(url: str):
     """Get the resource type definition from a resource URL."""
-    try:
-        url_parts = urlparse(url)
-        url_path = url_parts.path
-        resource_type = sub(r'/(core|rest|identity|auth|product-metadata)/v\d+/([^/]+)/?.*', r'\2', url_path)
-    except Exception as e:
-        raise(f"error parsing url path, caught {e}")
-    else:
-        if resource_type == "download-urls.json":
-            resource_type = "download-urls"
+    url_parts = urlparse(url)
+    url_path = url_parts.path
+    resource_type = sub(r'/(core|rest|identity|auth|product-metadata)/v\d+/([^/]+)/?.*', r'\2', url_path)
+    if resource_type == "download-urls.json":
+        resource_type = "download-urls"
     if RESOURCES.get(resource_type):
         return RESOURCES.get(resource_type)
     else:
@@ -276,9 +272,18 @@ def get_generic_resource(url: str, headers: dict, proxies: dict = dict(), verify
     try:
         response.raise_for_status()
     except HTTPError:
-        if not status_symbol == 'NOT_FOUND':  # tolerate 404 because some functions will conclude that the resource has been deleted as expected
+        if resource_type.name in ["process-executions"] and status_symbol == "FORBIDDEN":  # FIXME: MOP-18095 workaround the create network process ID mismatch bug
+            url_parts = urlparse(url)
+            path_parts = url_parts.path.split('/')
+            process_id = path_parts[-1]                                      # the UUID is the last part of the expected URL to get_generic_resource()
+            url = f"https://{url_parts.netloc}{'/'.join(path_parts[:-1])}"  # everything but the id
+            params['processId'] = process_id
+            resources = next(find_generic_resources(url, headers=headers, embedded=RESOURCES['process-executions']._embedded, proxies=proxies, verify=verify, accept=accept, **params))
+            resource = resources[0]
+        elif not status_symbol == 'NOT_FOUND':  # tolerate 404 because some functions will conclude that the resource has been deleted as expected
             raise
-    resource = response.json()
+    else:
+        resource = response.json()
     return resource, status_symbol
 
 
@@ -532,7 +537,6 @@ RESOURCES = {
         embeddable=False,
         status="state",
         status_symbols=PROCESS_STATUS_SYMBOLS,
-        _embedded='process-executions',
     ),
     'regions': ResourceType(
         name='regions',

@@ -1880,7 +1880,7 @@ class Network:
         else:
             raise RuntimeError(f"timed out with status {status} while waiting for {expect}")
 
-    def wait_for_statuses(self, expected_statuses: list, type: str = "network", wait: int = 300, sleep: int = 20, id: str = None, progress: bool = False):
+    def wait_for_statuses(self, expected_statuses: list, type: str = "network", wait: int = 300, sleep: int = 10, id: str = None, progress: bool = False):
         """Continuously poll for the expected statuses until expiry.
 
         :param expected_statuses: list of strings as expected status symbol(s) e.g. ["PROVISIONING","PROVISIONED"]
@@ -1902,37 +1902,23 @@ class Network:
 
         # poll for status until expiry
         if progress:
-            sys.stdout.write(f"\twaiting for any status in {expected_statuses} or until {time.ctime(now+wait)}.")
-        else:
-            logging.debug(f"waiting for any status in {expected_statuses} or until {time.ctime(now+wait)}.")
+            logging.warning("progress meters are decommissioned and superseded by nfctl")
+        logging.debug(f"waiting for any status in {expected_statuses} or until {time.ctime(now+wait)}.")
 
         status = 'NEW'
         while time.time() < now+wait and status not in expected_statuses:
-            if progress:
-                sys.stdout.write('.')    # print a stop each iteration to imply progress
-                sys.stdout.flush()
-
-            try:
-                entity_status = self.get_resource_status(type=type, id=id)
-            except Exception as e:
-                raise RuntimeError(f"error getting resource to get status, caught {e}")
-
+            entity_status = self.get_resource_status(type=type, id=id)
             if entity_status['status']:  # attribute is not None if HTTP OK
                 if not status or (       # print the starting status
                     status and not entity_status['status'] == status   # print on subsequent changes
                 ):
-                    if progress:
-                        sys.stdout.write(f"\n{entity_status['name']:^19s}:{entity_status['status']:^19s}:")
-                    else:
-                        logging.debug(f"{entity_status['name']} has status {entity_status['status']}")
+                    logging.debug(f"{entity_status['name']} has status {entity_status['status']}")
                 status = entity_status['status']
             # import epdb; epdb.serve()
             if status in unexpected_statuses:
                 raise RuntimeError(f"got status {status} while waiting for {expected_statuses}")
             elif status not in expected_statuses:
                 time.sleep(sleep)
-        if progress:
-            print()  # newline terminates progress meter
 
         if status in expected_statuses:
             return True
@@ -1963,26 +1949,25 @@ class Network:
             entity_url += f"{plural(type)}/{id}"
 
         headers = {"authorization": "Bearer " + self.token}
-        try:
-            resource, status_symbol = get_generic_resource(url=entity_url, headers=headers, proxies=self.proxies, verify=self.verify)
-        except Exception as e:
-            raise RuntimeError(f"failed to get resource from url: '{entity_url}', caught {e}")
+        resource, status_symbol = get_generic_resource(url=entity_url, headers=headers, proxies=self.proxies, verify=self.verify)
 
+        if resource.get(RESOURCES[plural(type)].status):
+            status = resource[RESOURCES[plural(type)].status]
         else:
-            if resource.get(RESOURCES[plural(type)].status):
-                status = resource[RESOURCES[plural(type)].status]
-            else:
-                status = status_symbol
+            status = status_symbol
 
-            if resource.get('name'):
-                name = resource['name']
-            elif resource.get('processorName'):
-                name = resource['processorName']
-            logging.debug(f"found {name or entity_url} with status {status}")
-            return {
-                "status": status,
-                "name": name or None,
-            }
+        name = "NONAME"
+        if resource.get('name'):
+            name = resource['name']
+        elif resource.get('processorName'):
+            name = resource['processorName']
+
+        logging.debug(f"found {name or entity_url} with status {status}")
+
+        return {
+            "status": status,
+            "name": name,
+        }
 
     def rotate_edge_router_registration(self, id: str):
         """Rotate and return the registration key like {"registrationKey": str, "expiresAt": date}.
