@@ -254,7 +254,8 @@ def get_generic_resource(url: str, headers: dict, proxies: dict = dict(), verify
 
     resource_type = get_resource_type_by_url(url)
     logging.debug(f"detected resource type {resource_type.name}")
-    if resource_type.name in HOSTABLE_NET_RESOURCES.keys():
+    # always embed the host record if getting the base resource (not leaf operations like /session or /rotatekey)
+    if resource_type.name in HOSTABLE_NET_RESOURCES.keys() and url.endswith(resource_type.name):
         params['embed'] = "host"
     elif resource_type.name in ["process-executions"]:
         params['beta'] = str()
