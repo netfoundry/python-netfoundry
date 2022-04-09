@@ -12,23 +12,17 @@ import platform
 import re
 import signal
 import tempfile
-# from getpass import getuser
 from json import dumps as json_dumps
 from json import load as json_load
 from json import loads as json_loads
 from os import environ, path  # , stat
-# from pathlib import Path
 from random import choice, sample, shuffle
 from re import sub
-# from shlex import split as shplit
-# from shutil import which
-from stat import S_IRUSR, S_IWUSR, S_IXUSR, filemode
 from subprocess import CalledProcessError
 from sys import exit as sysexit
 from sys import stdin, stdout, stderr
 from xml.sax.xmlreader import InputSource
 
-# importing this causes the 'config' subcommand to be available
 from jwt.exceptions import PyJWTError
 from pygments import highlight
 from pygments.formatters import Terminal256Formatter
