@@ -799,13 +799,11 @@ def demo(cli):
         else:
             cli.log.debug(f"creating network named '{network_name}'")
             spinner.text = f"Creating network '{network_name}'"
-            # FIXME: don't use wait > 0 until process-executions beta is launched, until then poll for status
-            cli.config.general['wait'] = 0
             network_created = network_group.create_network(
                 name=network_name,
                 size=cli.config.demo.size,
                 version=cli.config.demo.product_version,
-                wait=cli.config.general.wait)
+                wait=0)  # FIXME: don't use wait > 0 until process-executions beta is launched, until then poll for status
             network, network_group = use_network(
                 organization=organization,
                 group=cli.config.general.network_group,
