@@ -31,10 +31,10 @@ jobs:
     - name: Install dependencies
       run: |
         python3 -m pip install --upgrade pip
-        pip3 install build
+        pip install build
 
     - name: Build Package
-      run: python3 -m build
+      run: python setup.py bdist_wheel
 
     - name: Upload Wheel Artifact
       uses: actions/upload-artifact@v3
@@ -44,8 +44,7 @@ jobs:
         if-no-files-found: error
 
     - name: Install Wheel
-      run: |
-        pip3 install ./dist/netfoundry-*.whl
+      run: pip install dist/netfoundry-*.whl
 
     - name: Read version string
       id: read_version
