@@ -175,13 +175,14 @@ def login(cli):
                     cli.echo(json_dumps(summary_object, indent=4))
         else:             # if eval
             token_env = f"""
-# $ source <(nfctl --credentials=credentials.json login --eval)
+# $ eval "$({cli.prog_name} --credentials=credentials.json login --eval)"
 export NETFOUNDRY_API_TOKEN="{organization.token}"
 export NETFOUNDRY_API_ACCOUNT="{organization.credentials if hasattr(organization, 'credentials') else ''}"
 export NETFOUNDRY_ORGANIZATION="{organization.id}"
 {'export NETFOUNDRY_NETWORK="'+network.id+'"' if network else ''}
 {'export NETFOUNDRY_NETWORK_GROUP="'+network_group.id+'"' if network_group else ''}
 {'export MOPENV="'+organization.environment+'"' if organization.environment else ''}
+eval "$(register-python-argcomplete {cli.prog_name})"
 """
             if cli.config.general.color:
                 highlighted = highlight(token_env, bash_lexer, Terminal256Formatter(style=cli.config.general.style))
