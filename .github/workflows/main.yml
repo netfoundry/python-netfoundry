@@ -36,9 +36,16 @@ jobs:
     - name: Build Package
       run: python3 -m build
 
-    - name: Install NetFoundry from build tarball
+    - name: Upload Wheel Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: netfoundry-wheel-${{ github.run_id }}
+        path: dist/netfoundry-*.whl
+        if-no-files-found: error
+
+    - name: Install Wheel
       run: |
-        pip3 install ./dist/netfoundry-*.tar.gz
+        pip3 install ./dist/netfoundry-*.whl
 
     - name: Read version string
       id: read_version
@@ -96,13 +103,6 @@ jobs:
         user: __token__
         password: ${{ secrets.TEST_PYPI_API_TOKEN }}
         repository_url: https://test.pypi.org/legacy/
-
-    - name: Temporarily Store the Python Package in GitHub # for convenient reference, troubleshooting, investigation, etc...
-      uses: actions/upload-artifact@v3
-      with:
-        name: netfoundry-pypi-${{ github.run_id }}
-        path: dist/netfoundry-*.tar.gz
-        if-no-files-found: error
 
     - name: Append 'latest' tag if release
       env:
