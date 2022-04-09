@@ -12,23 +12,17 @@ import platform
 import re
 import signal
 import tempfile
-# from getpass import getuser
 from json import dumps as json_dumps
 from json import load as json_load
 from json import loads as json_loads
 from os import environ, path  # , stat
-# from pathlib import Path
 from random import choice, sample, shuffle
 from re import sub
-# from shlex import split as shplit
-# from shutil import which
-from stat import S_IRUSR, S_IWUSR, S_IXUSR, filemode
 from subprocess import CalledProcessError
 from sys import exit as sysexit
 from sys import stdin, stdout, stderr
 from xml.sax.xmlreader import InputSource
 
-# importing this causes the 'config' subcommand to be available
 from jwt.exceptions import PyJWTError
 from pygments import highlight
 from pygments.formatters import Terminal256Formatter
@@ -181,13 +175,14 @@ def login(cli):
                     cli.echo(json_dumps(summary_object, indent=4))
         else:             # if eval
             token_env = f"""
-# $ source <(nfctl --credentials=credentials.json login --eval)
+# $ eval "$({cli.prog_name} --credentials=credentials.json login --eval)"
 export NETFOUNDRY_API_TOKEN="{organization.token}"
 export NETFOUNDRY_API_ACCOUNT="{organization.credentials if hasattr(organization, 'credentials') else ''}"
 export NETFOUNDRY_ORGANIZATION="{organization.id}"
 {'export NETFOUNDRY_NETWORK="'+network.id+'"' if network else ''}
 {'export NETFOUNDRY_NETWORK_GROUP="'+network_group.id+'"' if network_group else ''}
 {'export MOPENV="'+organization.environment+'"' if organization.environment else ''}
+eval "$(register-python-argcomplete {cli.prog_name})"
 """
             if cli.config.general.color:
                 highlighted = highlight(token_env, bash_lexer, Terminal256Formatter(style=cli.config.general.style))
@@ -550,7 +545,7 @@ def list(cli, spinner: object = None):
         cli.log.warn("try 'get' command to get by id")
     if cli.args.output == "text":
         if not stdout.isatty():
-            cli.log.warning("use --output=yaml or json for scripting nfctl")
+            cli.log.warning(f"use --output=yaml or json for scripting {cli.prog_name}")
     else:             # output is YAML or JSON
         # don't emit INFO messages to stdout because they will break deserialization
         cli.log.setLevel(logging.WARN)
@@ -751,11 +746,12 @@ def delete(cli):
             sysexit(1)
 
 
+@cli.argument("-p", "--prefix", default=f"{cli.prog_name}-demo", help="choose a network name prefix to identify all of your demos")
 @cli.argument("-j", "--jwt",  action="store_boolean", default=True, help="save the one-time enroll token for each demo identity in the current directory")
 @cli.argument("-s", "--size", default="small", help=argparse.SUPPRESS)   # troubleshoot scale-up instance size factor
 @cli.argument("-v", "--product-version", default="default", help="network product version: 'default', 'latest', or any active semver")
-@cli.argument("--provider", default="AWS", required=False, help="cloud provider to host edge routers", choices=DC_PROVIDERS)
-@cli.argument("--regions", dest="regions", default=["us-west-1"], nargs="+", help="cloud location codes in which to host edge routers")
+@cli.argument("--provider", default="AWS", help="cloud provider for hosted edge routers", choices=DC_PROVIDERS)
+@cli.argument("--regions", dest="regions", default=["us-west-1"], nargs="+", help="provider regions for hosted edge routers")
 @cli.subcommand('create a functioning demo network')
 def demo(cli):
     """Create a demo network or add demo resources to existing network."""
@@ -769,7 +765,7 @@ def demo(cli):
         friendly_words_filename = path.join(resources_dir, "friendly-words/generated/words.json")
         with open(friendly_words_filename, 'r') as friendly_words_path:
             friendly_words = json_load(friendly_words_path)
-        network_name = f"nfctl-demo-{choice(friendly_words['predicates'])}-{choice(friendly_words['objects'])}"
+        network_name = f"{cli.config.demo.prefix}-{choice(friendly_words['predicates'])}-{choice(friendly_words['objects'])}"
     demo_confirmed = False
     if cli.config.general.yes:
         demo_confirmed = True

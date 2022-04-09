@@ -495,7 +495,10 @@ class ResourceType(ResourceTypeParent):
     create_responses: list = field(default_factory=list)    # expected HTTP response codes for create operation
     no_update_props: list = field(default_factory=list)     # expected HTTP response codes for create operation
     create_template: dict = field(default_factory=lambda: {
-        'hint': "No template was found for this resource type. Replace the contents of this buffer with the request body as YAML or JSON to create a resource. networkId will be added automatically."
+        'hint': "No template was found for this resource type. "
+                " Replace the contents of this buffer with the "
+                " request body as YAML or JSON to create a resource."
+                " networkId will be added automatically."
     })                                                      # object to load when creating from scratch in nfctl
     abbreviation: str = field(default='default')
     status_symbols: dict = field(default_factory=lambda: RESOURCE_STATUS_SYMBOLS)  # dictionary with three predictable keys: complete, progress, error, each a tuple associating status symbols with a state
