@@ -545,7 +545,7 @@ def list(cli, spinner: object = None):
         cli.log.warn("try 'get' command to get by id")
     if cli.args.output == "text":
         if not stdout.isatty():
-            cli.log.warning("use --output=yaml or json for scripting nfctl")
+            cli.log.warning(f"use --output=yaml or json for scripting {cli.prog_name}")
     else:             # output is YAML or JSON
         # don't emit INFO messages to stdout because they will break deserialization
         cli.log.setLevel(logging.WARN)
@@ -746,11 +746,12 @@ def delete(cli):
             sysexit(1)
 
 
+@cli.argument("-p", "--prefix", default=f"{cli.prog_name}-demo", help="choose a network name prefix to identify all of your demos")
 @cli.argument("-j", "--jwt",  action="store_boolean", default=True, help="save the one-time enroll token for each demo identity in the current directory")
 @cli.argument("-s", "--size", default="small", help=argparse.SUPPRESS)   # troubleshoot scale-up instance size factor
 @cli.argument("-v", "--product-version", default="default", help="network product version: 'default', 'latest', or any active semver")
-@cli.argument("--provider", default="AWS", required=False, help="cloud provider to host edge routers", choices=DC_PROVIDERS)
-@cli.argument("--regions", dest="regions", default=["us-west-1"], nargs="+", help="cloud location codes in which to host edge routers")
+@cli.argument("--provider", default="AWS", help="cloud provider for hosted edge routers", choices=DC_PROVIDERS)
+@cli.argument("--regions", dest="regions", default=["us-west-1"], nargs="+", help="provider regions for hosted edge routers")
 @cli.subcommand('create a functioning demo network')
 def demo(cli):
     """Create a demo network or add demo resources to existing network."""
@@ -764,7 +765,7 @@ def demo(cli):
         friendly_words_filename = path.join(resources_dir, "friendly-words/generated/words.json")
         with open(friendly_words_filename, 'r') as friendly_words_path:
             friendly_words = json_load(friendly_words_path)
-        network_name = f"nfctl-demo-{choice(friendly_words['predicates'])}-{choice(friendly_words['objects'])}"
+        network_name = f"{cli.config.demo.prefix}-{choice(friendly_words['predicates'])}-{choice(friendly_words['objects'])}"
     demo_confirmed = False
     if cli.config.general.yes:
         demo_confirmed = True
