@@ -532,7 +532,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
-@cli.argument('-m', '--mine', arg_only=True, action='store_true', help="filter roles by caller identity")
+@cli.argument('-m', '--my-roles', arg_only=True, action='store_true', help="filter roles by caller identity")
 @cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create'], help="request the as=create alternative form of the resources")
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[type, RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
 @cli.subcommand(description='find resources as lists')
@@ -570,9 +570,9 @@ def list(cli, spinner: object = None):
         elif cli.args.resource_type in ["identities", "user-identities", "api-account-identities"]:
             matches = organization.find_identities(type=cli.args.resource_type, **cli.args.query)
         elif cli.args.resource_type == "roles":
-            if cli.args.mine:
+            if cli.args.my_roles:
                 if cli.args.query.get('identityId'):
-                    cli.log.warning("got --mine, ignoring param 'identityId'")
+                    cli.log.warning("got --my-roles, ignoring param 'identityId'")
                 cli.args.query['identityId'] = organization.caller['id']
                 matches = organization.find_roles(**cli.args.query)
             else:
@@ -751,6 +751,7 @@ def delete(cli):
             sysexit(1)
 
 
+@cli.argument("-j", "--jwt",  action="store_boolean", default=True, help="save the one-time enroll token for each demo identity in the current directory")
 @cli.argument("-s", "--size", default="small", help=argparse.SUPPRESS)   # troubleshoot scale-up instance size factor
 @cli.argument("-v", "--product-version", default="default", help="network product version: 'default', 'latest', or any active semver")
 @cli.argument("--provider", default="AWS", required=False, help="cloud provider to host edge routers", choices=DC_PROVIDERS)
@@ -802,11 +803,13 @@ def demo(cli):
         else:
             cli.log.debug(f"creating network named '{network_name}'")
             spinner.text = f"Creating network '{network_name}'"
+            # FIXME: don't use wait > 0 until process-executions beta is launched, until then poll for status
+            cli.config.general['wait'] = 0
             network_created = network_group.create_network(
                 name=network_name,
                 size=cli.config.demo.size,
                 version=cli.config.demo.product_version,
-                wait=0)  # don't use wait > 0 until process-executions beta is launched, until then poll for status
+                wait=cli.config.general.wait)
             network, network_group = use_network(
                 organization=organization,
                 group=cli.config.general.network_group,
@@ -901,17 +904,22 @@ def demo(cli):
         endpoints[exit] = {
             "attributes": ["#demo_exits"]
         }
-    for end in endpoints.keys():
+    for end, spec in endpoints.items():
         spinner.text = f"Finding endpoint '{end}'"
         with spinner:
             if not network.endpoint_exists(name=end):
                 # create an endpoint for the dialing device that will access services
                 spinner.text = f"Creating endpoint '{end}'"
-                endpoints[end]['properties'] = network.create_endpoint(name=end, attributes=endpoints[end]['attributes'])
+                endpoints[end]['properties'] = network.create_endpoint(name=end, attributes=spec['attributes'])
                 spinner.succeed(sub('Creating', 'Created', spinner.text))
             else:
-                endpoints[end]['properties'] = network.endpoints(name=end)[0]
+                spec['properties'] = network.endpoints(name=end)[0]
                 spinner.succeed(sub('Finding', 'Found', spinner.text))
+            if cli.args.jwt and spec['properties'].get('jwt'):  # save if --jwt, token is absent if already enrolled
+                jwt = spec['properties']['jwt']
+                with open(end+'.jwt', 'wt') as tf:
+                    tf.write(jwt)
+                    cli.log.info(f"Saved enrollment token in {tf.name}")
 
     services = {
         "Fireworks Service": {
