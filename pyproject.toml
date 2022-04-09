@@ -1,4 +1,4 @@
 # pyproject.toml
 [build-system]
-requires = ["setuptools>=45", "wheel", "versioneer>=0.21"]
+requires = ["setuptools>=61", "wheel>=37", "versioneer>=0.22"]
 

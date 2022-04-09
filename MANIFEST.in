@@ -1,5 +1,5 @@
 exclude docker/
 exclude .gitignore
-exclude .github/workflows/*include versioneer.py
+exclude .github/workflows/*
 include versioneer.py
-include src/netfoundry/_version.py
+include netfoundry/_version.py

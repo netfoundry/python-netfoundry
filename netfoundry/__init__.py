@@ -11,3 +11,6 @@ except Exception as e:
     exit(1)
 
 __version__ = _version.get_versions()['version']
+
+from . import _version
+__version__ = _version.get_versions()['version']
