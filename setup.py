@@ -17,7 +17,9 @@ setuptools.setup(
     license='MIT',
     author='Kenneth Bingham',
     author_email='support@netfoundry.io',
-    packages=setuptools.find_packages(),
+    packages=['netfoundry'],
+    package_dir={'netfoundry': 'src/netfoundry'},
+    package_data={'netfoundry': ['friendly-words/generated/words.json']},
     python_requires='>=3.7',
     classifiers=[
         "Programming Language :: Python :: 3",
