@@ -762,8 +762,8 @@ def demo(cli):
     if cli.config.general.network:
         network_name = cli.config.general.network
     else:
-        resources_dir = path.join(path.dirname(__file__), 'resources')
-        friendly_words_filename = path.join(resources_dir, "friendly-words/generated/words.json")
+        friendly_words_dir = path.join(path.dirname(__file__), 'friendly-words')
+        friendly_words_filename = path.join(friendly_words_dir, "generated/words.json")
         with open(friendly_words_filename, 'r') as friendly_words_path:
             friendly_words = json_load(friendly_words_path)
         network_name = f"{cli.config.demo.prefix}-{choice(friendly_words['predicates'])}-{choice(friendly_words['objects'])}"
