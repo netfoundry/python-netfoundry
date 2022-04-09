@@ -747,7 +747,8 @@ def delete(cli):
 
 
 @cli.argument("-p", "--prefix", default=f"{cli.prog_name}-demo", help="choose a network name prefix to identify all of your demos")
-@cli.argument("-j", "--jwt",  action="store_boolean", default=True, help="save the one-time enroll token for each demo identity in the current directory")
+@cli.argument("-j", "--jwt", action="store_boolean", default=True, help="save the one-time enroll token for each demo identity in the current directory")
+@cli.argument("-e", "--echo-name", arg_only=True, action="store_true", default=False, help="only echo a friendly network name then exit")
 @cli.argument("-s", "--size", default="small", help=argparse.SUPPRESS)   # troubleshoot scale-up instance size factor
 @cli.argument("-v", "--product-version", default="default", help="network product version: 'default', 'latest', or any active semver")
 @cli.argument("--provider", default="AWS", help="cloud provider for hosted edge routers", choices=DC_PROVIDERS)
@@ -766,6 +767,9 @@ def demo(cli):
         with open(friendly_words_filename, 'r') as friendly_words_path:
             friendly_words = json_load(friendly_words_path)
         network_name = f"{cli.config.demo.prefix}-{choice(friendly_words['predicates'])}-{choice(friendly_words['objects'])}"
+        if cli.args.echo_name:
+            cli.echo(network_name)
+            sysexit(0)
     demo_confirmed = False
     if cli.config.general.yes:
         demo_confirmed = True

@@ -65,18 +65,17 @@ jobs:
       run: |
         register-python-argcomplete nfctl
 
-    - name: Run the demo script and NF CLI to smoke test installed version
+    - name: Run the NF CLI demo to  test installed version
       env:
-        NETWORK_NAME: github_smoketest_run${{ github.run_id }}
         NETFOUNDRY_CLIENT_ID: ${{ secrets.NETFOUNDRY_CLIENT_ID }}
         NETFOUNDRY_PASSWORD: ${{ secrets.NETFOUNDRY_PASSWORD }}
         NETFOUNDRY_OAUTH_URL: ${{ secrets.NETFOUNDRY_OAUTH_URL }}
       run: |
         set -x
         nfctl config \
-          general.network=${NETWORK_NAME} \
+          general.network=$(nfctl demo --echo-name --prefix 'gh-${{ github.run_id }}') \
           general.yes=True \
-          general.verbose=yes || true # workaround https://github.com/netfoundry/python-netfoundry/issues/29
+          general.verbose=yes
         nfctl demo \
           --regions us-west-2 us-east-2 \
           --provider AWS
