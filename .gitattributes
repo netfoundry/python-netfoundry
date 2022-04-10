@@ -1,1 +1,2 @@
 netfoundry/_version.py export-subst
+src/netfoundry/_version.py export-subst
