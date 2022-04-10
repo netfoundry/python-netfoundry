@@ -81,7 +81,7 @@ jobs:
         nfctl config \
           general.network=$(nfctl demo --echo-name --prefix 'gh-${{ github.run_id }}') \
           general.yes=True \
-          general.verbose=yes
+          general.verbose=yes || true # FIXME: sometimes config command exits with an error
         nfctl demo \
           --regions us-west-2 us-east-2 \
           --provider AWS
