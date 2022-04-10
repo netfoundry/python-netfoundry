@@ -101,6 +101,7 @@ def main(cli):
     login(cli)
 
 
+@cli.argument('-a', '--autocomplete', action='store_boolean', default=True, help="include tab autocomplete configuration in shell eval")
 @cli.argument('-e', '--eval', help="source or eval output to configure shell environment with a login token", arg_only=True, action="store_true", default=False)
 @cli.subcommand('login to NetFoundry with a user token or API account credentials')
 def login(cli):
@@ -191,6 +192,7 @@ function noaws(){
             AWS_REGION AWS_DEFAULT_REGION AWS_SHARED_CREDENTIALS_FILE
 }
 """
+            autocomplete = f'eval "$(register-python-argcomplete {cli.prog_name})"'
             token_env = f"""
 # $ eval "$({cli.prog_name} --credentials={organization.credentials} login --eval)"
 export NETFOUNDRY_API_TOKEN="{organization.token}"
@@ -200,9 +202,9 @@ export NETFOUNDRY_ORGANIZATION="{organization.id}"
 {'export NETFOUNDRY_NETWORK_GROUP="'+network_group.id+'"' if network_group else '# NETFOUNDRY_NETWORK_GROUP'}
 export MOPENV="{organization.environment}"
 export MOPURL="{organization.audience}"
-eval "$(register-python-argcomplete {cli.prog_name})"
+{autocomplete if cli.config.login.autocomplete else '# autocomplete skipped'}
 {nonf}
-{noaws}
+{noaws if cli.prog_name == 'nfsupport' else ''}
 """
             if cli.config.general.color:
                 highlighted = highlight(token_env, bash_lexer, Terminal256Formatter(style=cli.config.general.style))
