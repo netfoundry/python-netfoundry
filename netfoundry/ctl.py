@@ -102,7 +102,7 @@ def main(cli):
 
 
 @cli.argument('-e', '--eval', help="source or eval output to configure shell environment with a login token", arg_only=True, action="store_true", default=False)
-@cli.subcommand('login to a management API')
+@cli.subcommand('login to NetFoundry with a user token or API account credentials')
 def login(cli):
     """Login to an API and cache the expiring token."""
     # if logging in to a NF org (default)
@@ -174,15 +174,35 @@ def login(cli):
                 else:
                     cli.echo(json_dumps(summary_object, indent=4))
         else:             # if eval
+            nonf = """
+# helper function logs out from NetFoundry
+function nonf(){
+    unset   NETFOUNDRY_API_ACCOUNT NETFOUNDRY_API_TOKEN \
+            NETFOUNDRY_CLIENT_ID NETFOUNDRY_PASSWORD NETFOUNDRY_OAUTH_URL \
+            NETFOUNDRY_ORGANIZATION NETFOUNDRY_NETWORK NETFOUNDRY_NETWORK_GROUP \
+            MOPENV MOPURL
+}
+"""
+            noaws = """
+# helper function logs out from AWS
+function noaws(){
+    unset   AWS_SECURITY_TOKEN AWS_SESSION_TOKEN \
+            AWS_ACCESS_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY \
+            AWS_REGION AWS_DEFAULT_REGION AWS_SHARED_CREDENTIALS_FILE
+}
+"""
             token_env = f"""
-# $ eval "$({cli.prog_name} --credentials=credentials.json login --eval)"
+# $ eval "$({cli.prog_name} --credentials={organization.credentials} login --eval)"
 export NETFOUNDRY_API_TOKEN="{organization.token}"
 export NETFOUNDRY_API_ACCOUNT="{organization.credentials if hasattr(organization, 'credentials') else ''}"
 export NETFOUNDRY_ORGANIZATION="{organization.id}"
-{'export NETFOUNDRY_NETWORK="'+network.id+'"' if network else ''}
-{'export NETFOUNDRY_NETWORK_GROUP="'+network_group.id+'"' if network_group else ''}
-{'export MOPENV="'+organization.environment+'"' if organization.environment else ''}
+{'export NETFOUNDRY_NETWORK="'+network.id+'"' if network else '# NETFOUNDRY_NETWORK'}
+{'export NETFOUNDRY_NETWORK_GROUP="'+network_group.id+'"' if network_group else '# NETFOUNDRY_NETWORK_GROUP'}
+export MOPENV="{organization.environment}"
+export MOPURL="{organization.audience}"
 eval "$(register-python-argcomplete {cli.prog_name})"
+{nonf}
+{noaws}
 """
             if cli.config.general.color:
                 highlighted = highlight(token_env, bash_lexer, Terminal256Formatter(style=cli.config.general.style))
@@ -191,7 +211,7 @@ eval "$(register-python-argcomplete {cli.prog_name})"
                 cli.echo(token_env)
 
 
-@cli.subcommand('logout current profile from an organization')
+@cli.subcommand('logout your identity for the current current profile')
 def logout(cli):
     """Logout by deleting the cached token."""
     spinner = get_spinner("working")
@@ -346,7 +366,7 @@ def edit(cli):
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
 @cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create'], help="request the as=create alternative form of the resource")
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
-@cli.subcommand('get a single resource by query')
+@cli.subcommand('get a single resource by type and query')
 def get(cli, echo: bool = True, embed='all', spinner: object = None):
     """
     Get a single resource as YAML or JSON.
@@ -358,7 +378,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
         cli.args.resource_type = singular(RESOURCE_ABBREV[cli.args.resource_type].name)
     if not cli.config.general.verbose and cli.args.output in ["yaml", "json"]:    # don't change level if output=text
         cli.log.setLevel(logging.WARN)                                            # don't emit INFO messages to stdout because they will break deserialization
-    if cli.args.accept and not MUTABLE_NET_RESOURCES.get(cli.args.resource_type):
+    if cli.args.accept and not MUTABLE_NET_RESOURCES.get(plural(cli.args.resource_type)):
         logging.warning("ignoring --as=create becuase it is applicable only to mutable resources in the network domain")
         cli.args['accept'] = None
     match = {}
@@ -530,7 +550,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
 @cli.argument('-m', '--my-roles', arg_only=True, action='store_true', help="filter roles by caller identity")
 @cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create'], help="request the as=create alternative form of the resources")
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[type, RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
-@cli.subcommand(description='find resources as lists')
+@cli.subcommand(description='find a collection of resources by type and query')
 def list(cli, spinner: object = None):
     """Find resources as lists."""
     if not spinner:
@@ -662,7 +682,7 @@ def list(cli, spinner: object = None):
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
 @cli.argument('resource_type', arg_only=True, help='type of resource', choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
-@cli.subcommand('delete a resource in the network domain')
+@cli.subcommand('delete a single resource by type and query')
 def delete(cli):
     """Delete a resource in the network domain."""
     spinner = get_spinner("working")
