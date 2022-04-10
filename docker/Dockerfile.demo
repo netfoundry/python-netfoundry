@@ -1,4 +1,2 @@
 FROM netfoundry/python
-ARG network_name=BibbidiBobbidiBoo
-ENV NETWORK_NAME=${network_name}
-CMD nfdemo --network ${NETWORK_NAME}
+CMD nfctl --yes demo
