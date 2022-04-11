@@ -43,7 +43,7 @@ from .utility import DC_PROVIDERS, MUTABLE_NET_RESOURCES, MUTABLE_RESOURCE_ABBRE
 from milc import set_metadata  # this function needed to set metadata immediately below
 set_metadata(version=f"v{netfoundry_version}", author="NetFoundry", name="nfctl")  # must precend import milc.cli
 from milc import cli, questions  # this uses metadata set above
-import milc.subcommand.config  # this creates the config subcommand
+from milc.subcommand import config  # this creates the config subcommand
 
 if platform.system() == 'Linux':
     # this allows the app the terminate gracefully when piped to a truncating consumer like `head`
