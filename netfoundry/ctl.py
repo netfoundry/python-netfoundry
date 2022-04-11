@@ -95,35 +95,40 @@ class StoreListKeys(argparse.Action):
 @cli.entrypoint('configure the CLI to manage a network')
 def main(cli):
     """Configure the CLI to manage a network."""
-    cli.args['login_target'] = 'organization'
-    cli.args['report'] = False
+    # assign the default values for options that are evaluted by login() since they're not set by main()'s options
+    cli.args['autocomplete'] = True
     cli.args['eval'] = False
     login(cli)
+    cli.log.info(f"try running '{cli.prog_name} list networks'")
 
 
+@cli.argument('-a', '--autocomplete', action='store_boolean', default=True, help="include tab autocomplete configuration in shell eval")
 @cli.argument('-e', '--eval', help="source or eval output to configure shell environment with a login token", arg_only=True, action="store_true", default=False)
 @cli.subcommand('login to NetFoundry with a user token or API account credentials')
 def login(cli):
     """Login to an API and cache the expiring token."""
     # if logging in to a NF org (default)
-    spinner = get_spinner("working")
+    spinner = get_spinner(cli, "working")
     spinner.text = f"Logging in profile '{cli.config.general.profile}'"
     with spinner:
-        organization, networks = use_organization(spinner=spinner)
+        organization, networks = use_organization(cli, spinner)
         if cli.config.general.network_group and cli.config.general.network:
             cli.log.debug(f"configuring network {cli.config.general.network} in group {cli.config.general.network_group}")
             network, network_group = use_network(
+                cli,
                 organization=organization,
                 group=cli.config.general.network_group,
                 network_name=cli.config.general.network)
         elif cli.config.general.network:
             cli.log.debug(f"configuring network {cli.config.general.network} and local group if unique name for this organization")
             network, network_group = use_network(
+                cli,
                 organization=organization,
                 network_name=cli.config.general.network)
         elif cli.config.general.network_group:
             cli.log.debug(f"configuring network group {cli.config.general.network_group}")
             network_group = use_network_group(
+                cli,
                 organization,
                 group=cli.config.general.network_group)
             network = None
@@ -191,6 +196,7 @@ function noaws(){
             AWS_REGION AWS_DEFAULT_REGION AWS_SHARED_CREDENTIALS_FILE
 }
 """
+            autocomplete = f'eval "$(register-python-argcomplete {cli.prog_name})"'
             token_env = f"""
 # $ eval "$({cli.prog_name} --credentials={organization.credentials} login --eval)"
 export NETFOUNDRY_API_TOKEN="{organization.token}"
@@ -200,9 +206,9 @@ export NETFOUNDRY_ORGANIZATION="{organization.id}"
 {'export NETFOUNDRY_NETWORK_GROUP="'+network_group.id+'"' if network_group else '# NETFOUNDRY_NETWORK_GROUP'}
 export MOPENV="{organization.environment}"
 export MOPURL="{organization.audience}"
-eval "$(register-python-argcomplete {cli.prog_name})"
+{autocomplete if cli.config.login.autocomplete else '# autocomplete skipped'}
 {nonf}
-{noaws}
+{noaws if cli.prog_name == 'nfsupport' else ''}
 """
             if cli.config.general.color:
                 highlighted = highlight(token_env, bash_lexer, Terminal256Formatter(style=cli.config.general.style))
@@ -214,7 +220,7 @@ eval "$(register-python-argcomplete {cli.prog_name})"
 @cli.subcommand('logout your identity for the current current profile')
 def logout(cli):
     """Logout by deleting the cached token."""
-    spinner = get_spinner("working")
+    spinner = get_spinner(cli, "working")
     spinner.text = f"Logging out profile '{cli.config.general.profile}'"
     # use the session with some organization, default is to use the first and there's typically only one
     try:
@@ -242,7 +248,7 @@ def copy(cli):
     accepts a file to edit as first positional parameter and waits for exit to
     return e.g. "code --wait".
     """
-    spinner = get_spinner("working")
+    spinner = get_spinner(cli, "working")
     if MUTABLE_RESOURCE_ABBREV.get(cli.args.resource_type):
         cli.args.resource_type = singular(MUTABLE_RESOURCE_ABBREV[cli.args.resource_type].name)
     spinner.text = f"Getting {cli.args.resource_type} for copying"
@@ -251,7 +257,7 @@ def copy(cli):
     with spinner:
         edit_resource_object, network, network_group, organization = get(cli, echo=False, spinner=spinner)
     cli.log.debug(f"opening {cli.args.resource_type} '{edit_resource_object['name']}' for copying")
-    copy_request_object = edit_object_as_yaml(edit_resource_object)
+    copy_request_object = edit_object_as_yaml(cli, edit_resource_object)
     if not copy_request_object:       # is False if editing cancelled by empty buffer
         return True
     else:
@@ -271,7 +277,7 @@ def create(cli):
     send create request upon EDITOR exit. If not interactive then send input
     object as create request immediately.
     """
-    spinner = get_spinner("working")
+    spinner = get_spinner(cli, "working")
     if MUTABLE_RESOURCE_ABBREV.get(cli.args.resource_type):
         cli.args.resource_type = singular(MUTABLE_RESOURCE_ABBREV[cli.args.resource_type].name)
     # get the input object if available, else get the lines (serialized YAML or JSON) and try to deserialize
@@ -300,17 +306,17 @@ def create(cli):
         cli.log.error("failed to parse input lines as an object (deserialized JSON or YAML)")
         sysexit(1)
 
-    create_object = edit_object_as_yaml(create_input_object)
+    create_object = edit_object_as_yaml(cli, create_input_object)
     if not create_object:              # False if editing cancelled by empty buffer
         cli.log.debug = f"Creating {cli.args.resource_type} cancelled"
         return True
     else:
         spinner.text = f"Creating {cli.args.resource_type}"
     with spinner:
-        organization, networks = use_organization(spinner=spinner)
+        organization, networks = use_organization(cli, spinner)
         if cli.args.resource_type == "network":
             if cli.config.general.network_group:
-                network_group = use_network_group(organization=organization, )
+                network_group = use_network_group(cli, organization=organization, )
             else:
                 org_count = len(organization.find_network_groups_by_organization())
                 if org_count > 1:
@@ -319,11 +325,13 @@ def create(cli):
                 else:                   # use the only available group
                     network_group_id = organization.find_network_groups_by_organization()[0]['id']
                     network_group = use_network_group(
+                        cli,
                         organization=organization,
                         group=network_group_id)
             resource = network_group.create_network(**create_object)
         else:
             network, network_group = use_network(
+                cli,
                 organization=organization,
                 group=cli.config.general.network_group,
                 network_name=cli.config.general.network)
@@ -342,7 +350,7 @@ def edit(cli):
     accepts a file to edit as first positional parameter and waits for exit to
     return e.g. "code --wait".
     """
-    spinner = get_spinner("working")
+    spinner = get_spinner(cli, "working")
     if MUTABLE_RESOURCE_ABBREV.get(cli.args.resource_type):
         cli.args.resource_type = singular(MUTABLE_RESOURCE_ABBREV[cli.args.resource_type].name)
     cli.args['accept'] = None
@@ -350,7 +358,7 @@ def edit(cli):
     cli.log.debug(f"opening {cli.args.resource_type} for editing")
     with spinner:
         edit_resource_object, network, network_group, organization = get(cli, echo=False, spinner=spinner)
-    update_request_object = edit_object_as_yaml(edit_resource_object)
+    update_request_object = edit_object_as_yaml(cli, edit_resource_object)
     with spinner:
         if not update_request_object:          # is False if editing cancelled by empty buffer
             spinner.text = f"Editing {cli.args.resource_type} cancelled"
@@ -385,14 +393,14 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
     matches = []
     query_keys = [*cli.args.query]
     if not spinner:
-        spinner = get_spinner("working")
+        spinner = get_spinner(cli, "working")
     else:
         cli.log.debug("got spinner as function param")
     spinner.text = f"Getting {cli.args.resource_type}"
     if not echo:
         spinner.enabled = False
     with spinner:
-        organization, networks = use_organization(spinner=spinner)
+        organization, networks = use_organization(cli, spinner)
         if cli.args.resource_type == "organization":
             if 'id' in query_keys:
                 if len(query_keys) > 1:
@@ -454,12 +462,14 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
             else:
                 if cli.config.general.network_group and not cli.config.general.network:
                     network_group = use_network_group(
+                        cli,
                         organization,
                         group=cli.config.general.network_group,
                         )
                     matches = organization.find_networks_by_group(network_group.id, **cli.args.query)
                 elif cli.config.general.network:
                     network, network_group = use_network(
+                        cli,
                         organization=organization,
                         network_name=cli.config.general.network,
                         )
@@ -468,6 +478,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
                     matches = organization.find_networks_by_organization(**cli.args.query)
                 if len(matches) == 1:
                     network, network_group = use_network(
+                        cli,
                         organization=organization,
                         network_name=matches[0]['name'],
                         )
@@ -475,6 +486,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
         else:                                                 # is a resource in the network domain
             if cli.config.general.network:
                 network, network_group = use_network(
+                    cli,
                     organization=organization,
                     group=cli.config.general.network_group,   # None unless configured
                     network_name=cli.config.general.network,
@@ -554,7 +566,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
 def list(cli, spinner: object = None):
     """Find resources as lists."""
     if not spinner:
-        spinner = get_spinner("working")
+        spinner = get_spinner(cli, "working")
     else:
         cli.log.debug("got spinner as function param")
     if RESOURCE_ABBREV.get(cli.args.resource_type):
@@ -575,7 +587,7 @@ def list(cli, spinner: object = None):
     else:
         spinner.text = f"Finding all {cli.args.resource_type}"
     with spinner:
-        organization, networks = use_organization(spinner=spinner)
+        organization, networks = use_organization(cli, spinner)
         if cli.args.resource_type == "organizations":
             matches = organization.find_organizations(**cli.args.query)
         elif cli.args.resource_type in ["network-versions"]:
@@ -595,6 +607,7 @@ def list(cli, spinner: object = None):
         elif cli.args.resource_type == "networks":
             if cli.config.general.network_group:
                 network_group = use_network_group(
+                    cli,
                     organization=organization,
                     group=cli.config.general.network_group,
                     spinner=spinner)
@@ -604,6 +617,7 @@ def list(cli, spinner: object = None):
         else:
             if cli.config.general.network:
                 network, network_group = use_network(
+                    cli,
                     organization=organization,
                     group=cli.config.general.network_group,       # None unless configured
                     network_name=cli.config.general.network,
@@ -685,7 +699,7 @@ def list(cli, spinner: object = None):
 @cli.subcommand('delete a single resource by type and query')
 def delete(cli):
     """Delete a resource in the network domain."""
-    spinner = get_spinner("working")
+    spinner = get_spinner(cli, "working")
     query_keys = [*cli.args.query]
     if MUTABLE_RESOURCE_ABBREV.get(cli.args.resource_type):
         cli.args['resource_type'] = singular(MUTABLE_RESOURCE_ABBREV[cli.args.resource_type].name)
@@ -776,9 +790,9 @@ def delete(cli):
 @cli.subcommand('create a functioning demo network')
 def demo(cli):
     """Create a demo network or add demo resources to existing network."""
-    spinner = get_spinner("working")
+    spinner = get_spinner(cli, "working")
     with spinner:
-        organization, networks = use_organization(spinner=spinner)
+        organization, networks = use_organization(cli, spinner)
     if cli.config.general.network:
         network_name = cli.config.general.network
     else:
@@ -810,11 +824,13 @@ def demo(cli):
         # create network unless exists
         cli.log.setLevel(logging.WARN)   # FIXME: hack to silence redundant spinners
         network_group = use_network_group(
+            cli,
             organization,
             cli.config.general.network_group)
         cli.log.setLevel(logging.INFO)   # FIXME: hack to silence redundant spinners
         if network_group.network_exists(network_name):
             network, network_group = use_network(
+                cli,
                 organization=organization,
                 group=network_group.id,
                 network_name=network_name,
@@ -829,6 +845,7 @@ def demo(cli):
                 version=cli.config.demo.product_version,
                 wait=0)  # FIXME: don't use wait > 0 until process-executions beta is launched, until then poll for status
             network, network_group = use_network(
+                cli,
                 organization=organization,
                 group=cli.config.general.network_group,
                 network_name=network_created['name'],
@@ -1029,10 +1046,10 @@ def demo(cli):
     cli.log.info("Demo Guide: https://developer.netfoundry.io/guides/demo/")
 
 
-def use_organization(prompt: bool = True, spinner: object = None):
+def use_organization(cli, prompt: bool = True, spinner: object = None):
     """Cache an expiring token for an identity and configure access to the network domain."""
     if not spinner:
-        spinner = get_spinner("working")
+        spinner = get_spinner(cli, "working")
     else:
         cli.log.debug("got spinner as function param")
     spinner.text = f"Loading profile '{cli.config.general.profile}'"
@@ -1083,7 +1100,7 @@ def use_organization(prompt: bool = True, spinner: object = None):
     return organization, networks
 
 
-def use_network_group(organization: object, group: str = None, spinner: object = None):
+def use_network_group(cli, organization: object, group: str = None, spinner: object = None):
     """
     Use a network group.
 
@@ -1092,7 +1109,7 @@ def use_network_group(organization: object, group: str = None, spinner: object =
     :param str group: name or UUIDv4 of group to use
     """
     if not spinner:
-        spinner = get_spinner("working")
+        spinner = get_spinner(cli, "working")
     else:
         cli.log.debug("got spinner as function param")
     # module will use first available group if not specified, and typically there is only one
@@ -1107,7 +1124,7 @@ def use_network_group(organization: object, group: str = None, spinner: object =
     return network_group
 
 
-def use_network(organization: object, network_name: str = None, group: str = None, spinner: object = None):
+def use_network(cli, organization: object, network_name: str = None, group: str = None, spinner: object = None):
     """
     Use a network.
 
@@ -1117,13 +1134,14 @@ def use_network(organization: object, network_name: str = None, group: str = Non
     :param group: a network group name or UUID, optional if network name is unique across all available groups
     """
     if not spinner:
-        spinner = get_spinner("working")
+        spinner = get_spinner(cli, "working")
     else:
         cli.log.debug("got spinner as function param")
     if not network_name:
         spinner.text = "Finding networks"
         if group:
             network_group = use_network_group(
+                cli,
                 organization=organization,
                 group=group,
                 spinner=spinner)
@@ -1139,6 +1157,7 @@ def use_network(organization: object, network_name: str = None, group: str = Non
             sysexit(1)
     elif group:
         network_group = use_network_group(
+            cli,
             organization=organization,
             group=group,
             spinner=spinner)
@@ -1152,6 +1171,7 @@ def use_network(organization: object, network_name: str = None, group: str = Non
             existing_networks = organization.find_networks_by_organization(name=network_name)
             existing_network = existing_networks[0]
             network_group = use_network_group(
+                cli,
                 organization,
                 group=existing_network['networkGroupId'],
                 spinner=spinner)
@@ -1183,7 +1203,7 @@ def use_network(organization: object, network_name: str = None, group: str = Non
     return network, network_group
 
 
-def edit_object_as_yaml(edit: object):
+def edit_object_as_yaml(cli, edit: object):
     """Edit a resource object as YAML and return as object upon exit.
 
     :param obj input: a deserialized (object) to edit and return as yaml
@@ -1232,7 +1252,7 @@ def edit_object_as_yaml(edit: object):
         sysexit(1)
 
 
-def get_spinner(text):
+def get_spinner(cli, text):
     """
     Get a spinner.
 
