@@ -254,11 +254,14 @@ def get_generic_resource(url: str, headers: dict, proxies: dict = dict(), verify
 
     resource_type = get_resource_type_by_url(url)
     logging.debug(f"detected resource type {resource_type.name}")
-    # always embed the host record if getting the base resource (not leaf operations like /session or /rotatekey)
-    if resource_type.name in HOSTABLE_NET_RESOURCES.keys() and url.endswith(resource_type.name):
+    # always embed the host record if getting the base resource by ID i.e. /{resource_type}/{uuid}, not leaf operations like /session or /rotatekey
+    pattern = re.compile(f".*/{resource_type.name}/"+r'[a-f0-9]{8}-?[a-f0-9]{4}-?4[a-f0-9]{3}-?[89ab][a-f0-9]{3}-?[a-f0-9]{12}\Z', re.I)
+    if resource_type.name in HOSTABLE_NET_RESOURCES.keys() and re.match(pattern, url):
         params['embed'] = "host"
     elif resource_type.name in ["process-executions"]:
         params['beta'] = str()
+    else:
+        logging.debug(f"no handlers specified for url '{url}'")
     response = http.get(
         url,
         headers=headers,
@@ -311,7 +314,7 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
     params = dict()
     # validate and store the resource type
     resource_type = get_resource_type_by_url(url)
-    if resource_type.name in HOSTABLE_NET_RESOURCES.keys():
+    if HOSTABLE_NET_RESOURCES.get(resource_type.name):
         params['embed'] = "host"
     elif resource_type.name in ["process-executions"]:
         params['beta'] = str()

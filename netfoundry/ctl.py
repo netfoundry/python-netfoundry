@@ -1046,7 +1046,7 @@ def demo(cli):
     cli.log.info("Demo Guide: https://developer.netfoundry.io/guides/demo/")
 
 
-def use_organization(cli, prompt: bool = True, spinner: object = None):
+def use_organization(cli, spinner: object = None, prompt: bool = True):
     """Cache an expiring token for an identity and configure access to the network domain."""
     if not spinner:
         spinner = get_spinner(cli, "working")
