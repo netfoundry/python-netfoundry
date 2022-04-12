@@ -314,7 +314,7 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
     params = dict()
     # validate and store the resource type
     resource_type = get_resource_type_by_url(url)
-    if resource_type.name in HOSTABLE_NET_RESOURCES.keys():
+    if HOSTABLE_NET_RESOURCES.get(resource_type.name):
         params['embed'] = "host"
     elif resource_type.name in ["process-executions"]:
         params['beta'] = str()
