@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import time
+from requests.exceptions import HTTPError
 
 from netfoundry.exceptions import UnknownResourceType, NetworkBoundaryViolation
 
@@ -597,17 +598,12 @@ class Network:
                 headers=headers,
                 json=post
             )
-            response_code = response.status_code
-        except Exception as e:
-            raise RuntimeError(f"error POST to {self.audience}core/v2/{type}, caught {e}")
-
-        if response_code in [STATUS_CODES.codes.OK, STATUS_CODES.codes.ACCEPTED]:
-            try:
-                resource = response.json()
-            except ValueError as e:
-                raise RuntimeError(f"failed to load JSON from POST response, caught {e}")
+            response.raise_for_status()
+        except HTTPError as e:
+            logging.error(f"failed POST to create resource, caught {e.response.text}")
+            exit(1)
         else:
-            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) for post: {json.dumps(post, indent=2)}")
+            resource = response.json()
 
         if resource.get('_links') and resource['_links'].get('process-executions'):
             _links = resource['_links'].get('process-executions')
