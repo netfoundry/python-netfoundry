@@ -144,8 +144,8 @@ jobs:
     - name: Build & Push Multi-Platform Container
       uses: docker/build-push-action@v2
       with:
-        context: "{{defaultContext}}" # build context is workspace so we can copy artifacts from ./dist/
-        file: docker/Dockerfile
+        context: ${{ github.workspace }} # build context is workspace so we can copy artifacts from ./dist/
+        file: ${{ github.workspace }}/docker/Dockerfile
         builder: ${{ steps.buildx.outputs.name }}
         platforms: linux/amd64,linux/arm64
         push: true

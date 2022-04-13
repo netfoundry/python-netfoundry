@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import time
+from requests.exceptions import HTTPError, JSONDecodeError
 
 from netfoundry.exceptions import UnknownResourceType, NetworkBoundaryViolation
 
@@ -597,17 +598,12 @@ class Network:
                 headers=headers,
                 json=post
             )
-            response_code = response.status_code
-        except Exception as e:
-            raise RuntimeError(f"error POST to {self.audience}core/v2/{type}, caught {e}")
-
-        if response_code in [STATUS_CODES.codes.OK, STATUS_CODES.codes.ACCEPTED]:
-            try:
-                resource = response.json()
-            except ValueError as e:
-                raise RuntimeError(f"failed to load JSON from POST response, caught {e}")
+            response.raise_for_status()
+        except HTTPError as e:
+            logging.error(f"failed POST to create resource, caught {e.response.text}")
+            exit(1)
         else:
-            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) for post: {json.dumps(post, indent=2)}")
+            resource = response.json()
 
         if resource.get('_links') and resource['_links'].get('process-executions'):
             _links = resource['_links'].get('process-executions')
@@ -1955,25 +1951,29 @@ class Network:
         if response_code not in expected_responses:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
         else:
-            resource = response.json()
-
-        if resource.get('_links') and resource['_links'].get('process-executions'):
-            _links = resource['_links'].get('process-executions')
-            if isinstance(_links, list):
-                process_id = _links[0]['href'].split('/')[6]
+            try:
+                resource = response.json()
+            except JSONDecodeError as e:
+                logging.debug("ignoring {e}")
+                return(True)
             else:
-                process_id = _links['href'].split('/')[6]
-            if wait:
-                self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep)
-                return(True)
-            else:    # only wait for the process to start, not finish, or timeout
-                self.wait_for_statuses(expected_statuses=RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'], type="process-executions", id=process_id, wait=9, sleep=2)
-                return(True)
-        elif wait:
-            logging.warning("unable to wait for async complete because response did not provide a process execution id")
-            return(False)
-        else:
-            return(True)
+                if resource.get('_links') and resource['_links'].get('process-executions'):
+                    _links = resource['_links'].get('process-executions')
+                    if isinstance(_links, list):
+                        process_id = _links[0]['href'].split('/')[6]
+                    else:
+                        process_id = _links['href'].split('/')[6]
+                    if wait:
+                        self.wait_for_statuses(expected_statuses=RESOURCES["process-executions"].status_symbols['complete'], type="process-executions", id=process_id, wait=wait, sleep=sleep)
+                        return(True)
+                    else:    # only wait for the process to start, not finish, or timeout
+                        self.wait_for_statuses(expected_statuses=RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'], type="process-executions", id=process_id, wait=9, sleep=2)
+                        return(True)
+                elif wait:
+                    logging.warning("unable to wait for async complete because response did not provide a process execution id")
+                    return(False)
+                else:
+                    return(True)
 
 
 class Networks:
