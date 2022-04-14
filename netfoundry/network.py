@@ -3,9 +3,10 @@
 import json
 import re
 import time
+
 from requests.exceptions import HTTPError, JSONDecodeError
 
-from netfoundry.exceptions import UnknownResourceType, NetworkBoundaryViolation
+from netfoundry.exceptions import NetworkBoundaryViolation, UnknownResourceType
 
 from .utility import (DC_PROVIDERS, MUTABLE_NET_RESOURCES, NET_RESOURCES, PROCESS_STATUS_SYMBOLS, RESOURCES, STATUS_CODES, VALID_SEPARATORS, VALID_SERVICE_PROTOCOLS, any_in, docstring_parameters, find_generic_resources, get_generic_resource, http,
                       is_uuidv4, normalize_caseless, plural, singular)
