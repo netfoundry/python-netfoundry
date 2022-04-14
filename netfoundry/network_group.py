@@ -1,6 +1,6 @@
 """Use a network group and find its networks."""
 
-import json
+from ast import Or
 import logging
 
 from .utility import (NET_RESOURCES, RESOURCES, STATUS_CODES,
@@ -17,6 +17,7 @@ class NetworkGroup:
 
     def __init__(self, Organization: object, network_group_id: str = None, network_group_name: str = None, group: str = None):
         """Initialize the network group class with a group name or ID."""
+        self.logger = Organization.logger
         self.Networks = Networks(Organization)
         self.network_groups = Organization.get_network_groups_by_organization()
         if (not network_group_id and not network_group_name) and group:
@@ -41,9 +42,9 @@ class NetworkGroup:
             self.network_group_name = self.network_groups[0]['organizationShortName']
             # warn if there are other groups
             if len(self.network_groups) > 1:
-                logging.warn(f"using first network group {self.network_group_name} and ignoring {len(self.network_groups) - 1} other(s) e.g. {self.network_groups[1]['organizationShortName']}, etc...")
+                self.logger.warning(f"using first network group {self.network_group_name} and ignoring {len(self.network_groups) - 1} other(s) e.g. {self.network_groups[1]['organizationShortName']}, etc...")
             elif len(self.network_groups) == 1:
-                logging.debug(f"using the only available network group: {self.network_group_name}")
+                self.logger.debug(f"using the only available network group: {self.network_group_name}")
         else:
             raise RuntimeError("need at least one network group in organization")
 
@@ -179,18 +180,18 @@ class NetworkGroup:
         for param, value in kwargs.items():
             if param == 'networkGroupId':
                 if network_group_id:
-                    logging.debug("clobbering param 'network_group_id' with kwarg 'networkGroupId'")
+                    self.logger.debug("clobbering param 'network_group_id' with kwarg 'networkGroupId'")
                 network_group_id = value
             elif param == 'locationCode':
                 if location:
-                    logging.debug("clobbering param 'location' with kwarg 'locationCode'")
+                    self.logger.debug("clobbering param 'location' with kwarg 'locationCode'")
                 location = value
             elif param == 'productVersion':
                 if version:
-                    logging.debug("clobbering param 'version' with kwarg 'productVersion'")
+                    self.logger.debug("clobbering param 'version' with kwarg 'productVersion'")
                 version == value
             else:
-                logging.warn(f"ignoring unexpected keyword argument '{param}'")
+                self.logger.warn(f"ignoring unexpected keyword argument '{param}'")
 
         request = {
             "name": name.strip('"'),
@@ -252,7 +253,7 @@ class NetworkGroup:
                 # self.Networks.wait_for_process(process_id, RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'], wait=9, sleep=3)
                 return(resource)
         elif wait:
-            logging.warning("unable to wait for async complete because response did not provide a process execution id")
+            self.logger.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
 
     def delete_network(self, network_id=None, network_name=None):
@@ -267,7 +268,7 @@ class NetworkGroup:
                 try:
                     network_name = next(name for name, uuid in self.network_ids_by_normal_name.items() if uuid == network_id)
                 except StopIteration:
-                    logging.debug(f"failed to resolve {network_id} to a network name")
+                    self.logger.debug(f"failed to resolve {network_id} to a network name")
                     network_name = "NONAME"
             elif network_name and self.network_ids_by_normal_name.get(normalize_caseless(network_name)):
                 network_id = self.network_ids_by_normal_name[normalize_caseless(network_name)]
