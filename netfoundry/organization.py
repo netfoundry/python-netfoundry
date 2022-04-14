@@ -2,17 +2,17 @@
 
 import json
 import logging
+import logging.config
 import os
-import re  # regex
-import time  # enforce a timeout; sleep
+import re
+import time
 from pathlib import Path
 from stat import S_IRUSR, S_IWUSR, S_IXUSR, filemode
 
 from platformdirs import user_cache_path, user_config_path
 
 from .exceptions import NFAPINoCredentials
-from .utility import (DEFAULT_TOKEN_EXPIRY, EMBED_NET_RESOURCES, ENVIRONMENTS, NET_RESOURCES, RESOURCES, STATUS_CODES, find_generic_resources, get_generic_resource, get_token_cache, http, is_uuidv4, jwt_environment, jwt_expiry,
-                      normalize_caseless, plural)
+from .utility import DEFAULT_TOKEN_EXPIRY, EMBED_NET_RESOURCES, ENVIRONMENTS, NET_RESOURCES, RESOURCES, STATUS_CODES, find_generic_resources, get_generic_resource, get_token_cache, http, is_uuidv4, jwt_environment, jwt_expiry, normalize_caseless, plural
 
 
 class Organization:
@@ -41,8 +41,32 @@ class Organization:
                  expiry_minimum: int = 600,
                  environment: str = None,
                  logout: bool = False,
+                 log_file: str = None,
+                 debug: bool = False,
+                 logger: logging.Logger = None,
                  proxy: str = None):
         """Initialize an instance of organization."""
+        # set debug and file if specified and let the calling application dictate logging handlers
+        if logger:
+            # print(f"using logger '{logger}' from param")
+            self.logger = logger
+        else:
+            # print("initializing null logger")
+            self.logger = logging.getLogger(__name__)
+#        self.logger = logger or logging.getLogger(__name__)
+            self.logger.addHandler(logging.NullHandler())
+
+        if debug:
+            self.debug = debug
+            self.logger.setLevel(logging.DEBUG)
+        if log_file:
+            self.log_file = log_file
+            file_handler = logging.FileHandler(log_file, encoding='utf-8')
+            formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+            formatter.converter = time.gmtime
+            file_handler.setFormatter(formatter)
+            self.logger.addHandler(file_handler)
+
         # verify auth endpoint's server certificate if proxy is type SOCKS or None
         self.proxy = proxy
         if proxy is None:
@@ -91,16 +115,16 @@ class Organization:
             raise RuntimeError(f"failed to create cache dir '{str(cache_dir_path.resolve())}', caught {e}")
         else:
             cache_dir_stats = os.stat(cache_dir_path)
-            logging.debug(f"token cache dir exists with mode {filemode(cache_dir_stats.st_mode)}")
+            self.logger.debug(f"token cache dir exists with mode {filemode(cache_dir_stats.st_mode)}")
         self.token_cache_file_path = Path(cache_dir_path / token_cache_file_name)
-        logging.debug(f"cache file path is computed '{str(self.token_cache_file_path.resolve())}'")
+        self.logger.debug(f"cache file path is computed '{str(self.token_cache_file_path.resolve())}'")
 
         # short circuit if logout only
         if logout:
             try:
                 self.logout()
             except Exception as e:
-                logging.error(f"unexpected error while logging out: {e}")
+                self.logger.error(f"unexpected error while logging out: {e}")
             else:
                 return None
 
@@ -109,12 +133,12 @@ class Organization:
             self.token = token
             self.expiry = None
             self.audience = None
-            logging.debug("got token as param to Organization")
+            self.logger.debug("got token as param to Organization")
         elif 'NETFOUNDRY_API_TOKEN' in os.environ:
             self.token = os.environ['NETFOUNDRY_API_TOKEN']
             self.expiry = None
             self.audience = None
-            logging.debug(f"got token from env NETFOUNDRY_API_TOKEN as {len(self.token)}B")
+            self.logger.debug(f"got token from env NETFOUNDRY_API_TOKEN as {len(self.token)}B")
         else:
             try:
                 token_cache = get_token_cache(self.token_cache_file_path)
@@ -122,7 +146,7 @@ class Organization:
                 self.token = None
                 self.expiry = None
                 self.audience = None
-                logging.debug(f"ignoring exception while checking for token cache, caught {e}")
+                self.logger.debug(f"ignoring exception while checking for token cache, caught {e}")
             else:
                 self.token = token_cache['token']
                 self.expiry = token_cache['expiry']
@@ -136,21 +160,21 @@ class Organization:
             except Exception as e:
                 self.expiry = round(epoch + DEFAULT_TOKEN_EXPIRY)
                 self.expiry_seconds = DEFAULT_TOKEN_EXPIRY
-                logging.debug(f"failed to parse token as JWT, estimating expiry in {DEFAULT_TOKEN_EXPIRY}s, caught {e}")
+                self.logger.debug(f"failed to parse token as JWT, estimating expiry in {DEFAULT_TOKEN_EXPIRY}s, caught {e}")
             else:
                 self.expiry_seconds = round(self.expiry - epoch)
-                logging.debug(f"bearer token expiry in {self.expiry_seconds}s")
+                self.logger.debug(f"bearer token expiry in {self.expiry_seconds}s")
         elif not self.token:
-            logging.debug("no bearer token found")
+            self.logger.debug("no bearer token found")
 
         # find credentials from param or env so we can renew the token later
         if credentials is not None:
             self.credentials = credentials
             os.environ['NETFOUNDRY_API_ACCOUNT'] = self.credentials
-            logging.debug(f"got Organization(credentials={self.credentials})")
+            self.logger.debug(f"got Organization(credentials={self.credentials})")
         elif 'NETFOUNDRY_API_ACCOUNT' in os.environ:
             self.credentials = os.environ['NETFOUNDRY_API_ACCOUNT']
-            logging.debug(f"got path to credentials file from env NETFOUNDRY_API_ACCOUNT={self.credentials}")
+            self.logger.debug(f"got path to credentials file from env NETFOUNDRY_API_ACCOUNT={self.credentials}")
         # if any credentials var then require all credentials vars
         elif ('NETFOUNDRY_CLIENT_ID' in os.environ or 'NETFOUNDRY_PASSWORD' in os.environ or 'NETFOUNDRY_OAUTH_URL' in os.environ):
             if ('NETFOUNDRY_CLIENT_ID' in os.environ and 'NETFOUNDRY_PASSWORD' in os.environ and 'NETFOUNDRY_OAUTH_URL' in os.environ):
@@ -158,7 +182,7 @@ class Organization:
                 password = os.environ['NETFOUNDRY_PASSWORD']
                 token_endpoint = os.environ['NETFOUNDRY_OAUTH_URL']
                 credentials_configured = True
-                logging.debug("configured API account credentials from env NETFOUNDRY_CLIENT_ID, NETFOUNDRY_PASSWORD, NETFOUNDRY_OAUTH_URL")
+                self.logger.debug("configured API account credentials from env NETFOUNDRY_CLIENT_ID, NETFOUNDRY_PASSWORD, NETFOUNDRY_OAUTH_URL")
             else:
                 raise RuntimeError("""
 some but not all credentials vars present. Need NETFOUNDRY_CLIENT_ID, NETFOUNDRY_PASSWORD, and
@@ -167,13 +191,13 @@ path to credentials file.
 """)
         else:
             self.credentials = "credentials.json"
-            logging.debug("token renewal will look for default credentials file name 'credentials.json' in project (cwd), user, and device default paths")
+            self.logger.debug("token renewal will look for default credentials file name 'credentials.json' in project (cwd), user, and device default paths")
 
         # continue if we already found the credentials in env
         if not credentials_configured:
             # if valid relative or absolute path to creds file, else search the default dirs
             if os.path.exists(self.credentials):
-                logging.debug(f"found credentials file '{self.credentials}'")
+                self.logger.debug(f"found credentials file '{self.credentials}'")
             else:
                 default_creds_scopes = [
                     {
@@ -196,16 +220,16 @@ path to credentials file.
                 for scope in default_creds_scopes:
                     candidate = scope['path'] / self.credentials
                     if candidate.exists():
-                        logging.debug(f"found credentials file {str(candidate.resolve())} in {scope['scope']}-default directory")
+                        self.logger.debug(f"found credentials file {str(candidate.resolve())} in {scope['scope']}-default directory")
                         self.credentials = str(candidate.resolve())
                         break
                     else:
-                        logging.debug(f"no credentials file {str(candidate.resolve())} in {scope['scope']}-default directory")
+                        self.logger.debug(f"no credentials file {str(candidate.resolve())} in {scope['scope']}-default directory")
 
             try:
                 file = open(self.credentials, 'r')
             except FileNotFoundError:
-                logging.debug(f"credentials file '{self.credentials}' does not exist")
+                self.logger.debug(f"credentials file '{self.credentials}' does not exist")
                 # this means we can't renew the token, but it's not fatal
             else:
                 account = json.load(file)
@@ -213,10 +237,10 @@ path to credentials file.
                 client_id = account['clientId']
                 password = account['password']
                 credentials_configured = True
-                logging.debug(f"configured credentials from file '{self.credentials}'")
+                self.logger.debug(f"configured credentials from file '{self.credentials}'")
 
         if not credentials_configured:
-            logging.debug("token renewal impossible because API account credentials are not configured")
+            self.logger.debug("token renewal impossible because API account credentials are not configured")
 
         # The purpose of this flow is to compose the audience URL. The mode of
         # the try-except block is to soft-fail all attempts to parse the JWT,
@@ -230,17 +254,17 @@ path to credentials file.
                 # token can't be parsed
                 raise RuntimeError(f"unexpected error extracting environment from JWT, caught {e}")
             else:
-                logging.debug(f"parsed token as JWT and found environment {self.environment}")
+                self.logger.debug(f"parsed token as JWT and found environment {self.environment}")
             finally:
                 if self.environment not in ENVIRONMENTS:
-                    logging.warn(f"unexpected environment '{self.environment}'")
+                    self.logger.warn(f"unexpected environment '{self.environment}'")
 
         if self.environment and not self.audience:
             self.audience = f'https://gateway.{self.environment}.netfoundry.io/'
 
         if self.environment and self.audience:
             if not re.search(self.environment, self.audience):
-                logging.error(f"mismatched audience URL '{self.audience}' and environment '{self.environment}'")
+                self.logger.error(f"mismatched audience URL '{self.audience}' and environment '{self.environment}'")
                 exit(1)
 
         # the purpose of this try-except block is to soft-fail all attempts
@@ -253,7 +277,7 @@ path to credentials file.
                 raise RuntimeError(f"unexpected error getting expiry from token, caught {e}")
             else:
                 self.expiry_seconds = round(self.expiry - epoch)
-                logging.debug(f"bearer token expiry in {self.expiry_seconds}s")
+                self.logger.debug(f"bearer token expiry in {self.expiry_seconds}s")
 
         # renew token if not existing or imminent expiry, else continue
         if not self.token or self.expiry_seconds < expiry_minimum:
@@ -262,23 +286,23 @@ path to credentials file.
             self.expiry = None
             self.audience = None
             if self.token and self.expiry_seconds < expiry_minimum:
-                logging.debug(f"token expiry {self.expiry_seconds}s is less than configured minimum {expiry_minimum}s")
+                self.logger.debug(f"token expiry {self.expiry_seconds}s is less than configured minimum {expiry_minimum}s")
             if not credentials_configured:
                 raise NFAPINoCredentials("unable to renew because credentials are not configured")
             else:
-                logging.debug("renewing token with credentials")
+                self.logger.debug("renewing token with credentials")
 
             # extract the environment name from the authorization URL aka token API endpoint
             if self.environment is None:
                 self.environment = re.sub(r'https://netfoundry-([^-]+)-.*', r'\1', token_endpoint, re.IGNORECASE)
-                logging.debug(f"using environment parsed from token_endpoint URL {self.environment}")
+                self.logger.debug(f"using environment parsed from token_endpoint URL {self.environment}")
             # re: scope: we're not using scopes with Cognito, but a non-empty value is required;
             #  hence "/ignore-scope"
             scope = "https://gateway."+self.environment+".netfoundry.io//ignore-scope"
             # we can gather the URL of the API from the first part of the scope string by
             #  dropping the scope suffix
             self.audience = scope.replace(r'/ignore-scope', '')
-            logging.debug(f"using audience parsed from token_endpoint URL {self.audience}")
+            self.logger.debug(f"using audience parsed from token_endpoint URL {self.audience}")
             # e.g. https://gateway.production.netfoundry.io/
             assertion = {
                 "scope": scope,
@@ -301,16 +325,16 @@ path to credentials file.
                     token_text = json.loads(response.text)
                     self.token = token_text['access_token']
                     self.expiry = round(token_text['expires_in'] + epoch)
-                    logging.debug(f"computed expiry epoch {self.expiry} from 'expires_in={token_text['expires_in']}'")
+                    self.logger.debug(f"computed expiry epoch {self.expiry} from 'expires_in={token_text['expires_in']}'")
                 except Exception as e:
                     raise RuntimeError(f"failed to find an access_token in the response and instead got: {response.text}, {e}")
                 else:
                     self.expiry_seconds = round(self.expiry - epoch)
-                    logging.debug(f"bearer token expiry in {self.expiry_seconds}s")
+                    self.logger.debug(f"bearer token expiry in {self.expiry_seconds}s")
             else:
                 raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
         elif credentials_configured:
-            logging.debug(f"ignoring configured credentials, already logged in with {self.expiry_seconds}s until token expiry")
+            self.logger.debug(f"ignoring configured credentials, already logged in with {self.expiry_seconds}s until token expiry")
 
         # write to the token cache if we have all three things: the token,
         # expiry, and audience URL, unless it matches the token cache, which
@@ -329,13 +353,13 @@ path to credentials file.
                     }
                     self.token_cache_file_path.write_text(json.dumps(token_cache_out, indent=4))
                 except Exception as e:
-                    logging.warn(f"failed to cache token in '{str(self.token_cache_file_path.resolve())}', caught {e}")
+                    self.logger.warn(f"failed to cache token in '{str(self.token_cache_file_path.resolve())}', caught {e}")
                 else:
-                    logging.debug(f"cached token in '{str(self.token_cache_file_path.resolve())}'")
+                    self.logger.debug(f"cached token in '{str(self.token_cache_file_path.resolve())}'")
             else:
-                logging.debug("not caching token because it exactly matches the existing cache")
+                self.logger.debug("not caching token because it exactly matches the existing cache")
         else:
-            logging.debug("not caching token because not all of token, expiry, audience were found")
+            self.logger.debug("not caching token because not all of token, expiry, audience were found")
 
         # Obtain a session token and find own `.caller` identity and `.organizations`
         self.caller = self.get_caller_identity()
@@ -379,13 +403,13 @@ path to credentials file.
             try:
                 os.remove(self.token_cache_file_path)
             except Exception as e:
-                logging.error(f"failed to remove cached token file '{str(self.token_cache_file_path.resolve())}', caught {e}")
+                self.logger.error(f"failed to remove cached token file '{str(self.token_cache_file_path.resolve())}', caught {e}")
                 return False
             else:
-                logging.debug(f"removed cached token file '{str(self.token_cache_file_path.resolve())}'")
+                self.logger.debug(f"removed cached token file '{str(self.token_cache_file_path.resolve())}'")
                 return True
         else:
-            logging.debug(f"cached token file '{str(self.token_cache_file_path.resolve())}' does not exist")
+            self.logger.debug(f"cached token file '{str(self.token_cache_file_path.resolve())}' does not exist")
             return True
 
     def get_caller_identity(self):
@@ -401,7 +425,7 @@ path to credentials file.
             try:
                 caller, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
             except Exception as e:
-                logging.debug(f"failed to get caller identity from url: '{url}', trying next until last, caught {e}")
+                self.logger.debug(f"failed to get caller identity from url: '{url}', trying next until last, caught {e}")
             else:
                 return(caller)
         raise RuntimeError("failed to get caller identity from any url")
@@ -431,7 +455,7 @@ path to credentials file.
             params[param] = kwargs[param]
         for noop in ['sort', 'size', 'page']:
             if params.get(noop):
-                logging.warn(f"query param '{noop}' is not supported by Identity Service")
+                self.logger.warn(f"query param '{noop}' is not supported by Identity Service")
         if type in ["UserIdentity", "user-identities"]:
             url = self.audience+'identity/v1/user-identities'
         elif type in ["ApiAccountIdentity", "api-account-identities"]:
@@ -462,13 +486,13 @@ path to credentials file.
             elif k == 'identityId':
                 identity_id = self.get_identity(identity_id=v)
                 if identity_id['type'] == 'ApiAccountIdentity':
-                    logging.warning("Auth Service may not report roles for identityId type ApiAccountIdentity")
+                    self.logger.warning("Auth Service may not report roles for identityId type ApiAccountIdentity")
                 params[k] = v
             else:
                 params[k] = v
         for noop in ['size', 'page']:
             if params.get(noop):
-                logging.warn(f"query param '{noop}' is not implemented for Authorization Service in this application")
+                self.logger.warn(f"query param '{noop}' is not implemented for Authorization Service in this application")
 
         url = self.audience+'auth/v1/roles'
         headers = {"authorization": "Bearer " + self.token}
@@ -503,7 +527,7 @@ path to credentials file.
             params[param] = kwargs[param]
         for noop in ['sort', 'size', 'page']:
             if params.get(noop):
-                logging.warn(f"query param '{noop}' is not supported by Identity Service")
+                self.logger.warn(f"query param '{noop}' is not supported by Identity Service")
 
         url = self.audience+'identity/v1/organizations'
         headers = {"authorization": "Bearer " + self.token}
@@ -561,14 +585,14 @@ path to credentials file.
         params = dict()
         if embed == "all":
             params['embed'] = ', '.join(EMBED_NET_RESOURCES)
-            logging.debug(f"requesting embed all resource types in network domain: {params['embed']}")
+            self.logger.debug(f"requesting embed all resource types in network domain: {params['embed']}")
         elif embed:
             valid_types = [plural(type) for type in embed.split(',') if RESOURCES[plural(type)]['domain'] == "network"]
             params['embed'] = ', '.join(valid_types)
-            logging.debug(f"requesting embed some resource types in network domain: {valid_types}")
+            self.logger.debug(f"requesting embed some resource types in network domain: {valid_types}")
             for type in embed.split(','):
                 if not NET_RESOURCES.get(type):
-                    logging.warning(f"not requesting '{type}', not a resource type in the network domain")
+                    self.logger.warn(f"not requesting '{type}', not a resource type in the network domain")
 
         url = self.audience+'core/v2/networks/'+network_id
         network, status_symbol = get_generic_resource(url=url, headers=headers, accept=accept, proxies=self.proxies, verify=self.verify, **params)

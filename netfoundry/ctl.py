@@ -405,7 +405,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warning(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
+                    cli.log.warn(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
                 match = organization.get_organization(id=cli.args.query['id'])
             else:
                 matches = organization.find_organizations(**cli.args.query)
@@ -415,7 +415,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warning(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
+                    cli.log.warn(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
                 match = networks.get_network_domain_resource(resource_type=cli.args.resource_type, id=cli.args.query['id'])
             else:
                 matches = networks.find_network_domain_resources(resource_type=cli.args.resource_type, **cli.args.query)
@@ -425,7 +425,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warning(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
+                    cli.log.warn(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
                 match = organization.get_network_group(network_group_id=cli.args.query['id'])
             else:
                 matches = organization.find_network_groups_by_organization(**cli.args.query)
@@ -435,7 +435,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warning(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
+                    cli.log.warn(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
                 match = organization.get_identity(identity_id=cli.args.query['id'])
             elif not query_keys:  # return caller identity if not filtering
                 match = organization.caller
@@ -447,7 +447,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warning(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
+                    cli.log.warn(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
                 match = organization.get_role(role_id=cli.args.query['id'])
             else:
                 matches = organization.find_roles(**cli.args.query)
@@ -457,7 +457,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
             if 'id' in query_keys:
                 if len(query_keys) > 1:
                     query_keys.remove('id')
-                    cli.log.warning(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
+                    cli.log.warn(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
                 match = organization.get_network(network_id=cli.args.query['id'], embed=embed, accept=cli.args.accept)
             else:
                 if cli.config.general.network_group and not cli.config.general.network:
@@ -496,10 +496,10 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
                 sysexit(1)
             if cli.args.resource_type == "data-center":
                 if 'id' in query_keys:
-                    cli.log.warning("data centers fetched by ID may not support this network's product version, try provider or locationCode params for safety")
+                    cli.log.warn("data centers fetched by ID may not support this network's product version, try provider or locationCode params for safety")
                     if len(query_keys) > 1:
                         query_keys.remove('id')
-                        cli.log.warning(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
+                        cli.log.warn(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
                     match = network.get_data_center_by_id(id=cli.args.query['id'])
                 else:
                     matches = network.find_edge_router_data_centers(**cli.args.query)
@@ -509,7 +509,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
                 if 'id' in query_keys:
                     if len(query_keys) > 1:
                         query_keys.remove('id')
-                        cli.log.warning(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
+                        cli.log.warn(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
                     match = network.get_resource_by_id(type=cli.args.resource_type, id=cli.args.query['id'], accept=cli.args.accept)
                 else:
                     matches = network.find_resources(type=cli.args.resource_type, accept=cli.args.accept, **cli.args.query)
@@ -547,7 +547,7 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
                 else:
                     cli.echo(json_dumps(filtered_match, indent=4))
     elif len(matches) == 0:
-        cli.log.warning(f"found no {cli.args.resource_type} by '{', '.join(query_keys)}'")
+        cli.log.warn(f"found no {cli.args.resource_type} by '{', '.join(query_keys)}'")
         sysexit(1)
     else:                   # len(matches) > 1:
         if cli.args.query:
@@ -577,7 +577,7 @@ def list(cli, spinner: object = None):
         cli.log.warn("try 'get' command to get by id")
     if cli.args.output == "text":
         if not stdout.isatty():
-            cli.log.warning(f"use --output=yaml or json for scripting {cli.prog_name}")
+            cli.log.warn(f"use --output=yaml or json for scripting {cli.prog_name}")
     else:             # output is YAML or JSON
         # don't emit INFO messages to stdout because they will break deserialization
         cli.log.setLevel(logging.WARN)
@@ -599,7 +599,7 @@ def list(cli, spinner: object = None):
         elif cli.args.resource_type == "roles":
             if cli.args.my_roles:
                 if cli.args.query.get('identityId'):
-                    cli.log.warning("got --my-roles, ignoring param 'identityId'")
+                    cli.log.warn("got --my-roles, ignoring param 'identityId'")
                 cli.args.query['identityId'] = organization.caller['id']
                 matches = organization.find_roles(**cli.args.query)
             else:
@@ -1061,7 +1061,8 @@ def use_organization(cli, spinner: object = None, prompt: bool = True):
                 organization=cli.config.general.organization if cli.config.general.organization else None,
                 profile=cli.config.general.profile,
                 expiry_minimum=0,
-                proxy=cli.config.general.proxy
+                proxy=cli.config.general.proxy,
+                logger=cli.log,
             )
     except NFAPINoCredentials:
         if prompt:
@@ -1084,7 +1085,8 @@ def use_organization(cli, spinner: object = None, prompt: bool = True):
                         organization=cli.config.general.organization if cli.config.general.organization else None,
                         profile=cli.config.general.profile,
                         expiry_minimum=0,
-                        proxy=cli.config.general.proxy
+                        proxy=cli.config.general.proxy,
+                        logger=cli.log,
                     )
             except PyJWTError:
                 spinner.fail("Not a valid token")
