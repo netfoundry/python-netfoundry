@@ -1,8 +1,5 @@
 """Use a network group and find its networks."""
 
-from ast import Or
-import logging
-
 from .utility import (NET_RESOURCES, RESOURCES, STATUS_CODES,
                       find_generic_resources, get_generic_resource, http, is_uuidv4,
                       normalize_caseless, any_in)

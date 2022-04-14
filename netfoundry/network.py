@@ -1,7 +1,6 @@
 """Use a network and find and manage its resources."""
 
 import json
-import logging
 import re
 import time
 from requests.exceptions import HTTPError, JSONDecodeError
