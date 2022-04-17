@@ -253,6 +253,7 @@ def copy(cli):
         cli.args.resource_type = singular(MUTABLE_RESOURCE_ABBREV[cli.args.resource_type].name)
     spinner.text = f"Getting {cli.args.resource_type} for copying"
     cli.args['accept'] = 'create'
+    cli.args['embed'] = None
     cli.args['output'] = 'text'       # implies tty which allows INFO messages
     with spinner:
         edit_resource_object, network, network_group, organization = get(cli, echo=False, spinner=spinner)
@@ -354,6 +355,7 @@ def edit(cli):
     if MUTABLE_RESOURCE_ABBREV.get(cli.args.resource_type):
         cli.args.resource_type = singular(MUTABLE_RESOURCE_ABBREV[cli.args.resource_type].name)
     cli.args['accept'] = None
+    cli.args['embed'] = None
     spinner.text = f"Getting {cli.args.resource_type} for editing"
     cli.log.debug(f"opening {cli.args.resource_type} for editing")
     with spinner:
@@ -700,6 +702,7 @@ def delete(cli):
     if MUTABLE_RESOURCE_ABBREV.get(cli.args.resource_type):
         cli.args['resource_type'] = singular(MUTABLE_RESOURCE_ABBREV[cli.args.resource_type].name)
     cli.args['accept'] = None
+    cli.args['embed'] = None
     cli.config.general['wait'] = 0
     spinner.text = f"Finding {cli.args.resource_type} {'by' if query_keys else '...'} {', '.join(query_keys)}"
     with spinner:
