@@ -47,6 +47,8 @@ class Organization:
                  proxy: str = None):
         """Initialize an instance of organization."""
         # set debug and file if specified and let the calling application dictate logging handlers
+        self.log_file = log_file
+        self.debug = debug
         if logger:
             # print(f"using logger '{logger}' from param")
             self.logger = logger
@@ -56,11 +58,10 @@ class Organization:
 #        self.logger = logger or logging.getLogger(__name__)
             self.logger.addHandler(logging.NullHandler())
 
-        if debug:
-            self.debug = debug
+        if self.debug:
             self.logger.setLevel(logging.DEBUG)
-        if log_file:
-            self.log_file = log_file
+
+        if self.log_file:
             file_handler = logging.FileHandler(log_file, encoding='utf-8')
             formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
             formatter.converter = time.gmtime
