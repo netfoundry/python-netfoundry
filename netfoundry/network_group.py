@@ -1,9 +1,7 @@
 """Use a network group and find its networks."""
 
-from .utility import (NET_RESOURCES, RESOURCES, STATUS_CODES,
-                      find_generic_resources, get_generic_resource, http, is_uuidv4,
-                      normalize_caseless, any_in)
 from .network import Networks
+from .utility import NET_RESOURCES, RESOURCES, STATUS_CODES, any_in, find_generic_resources, get_generic_resource, http, is_uuidv4, normalize_caseless
 
 
 class NetworkGroup:
