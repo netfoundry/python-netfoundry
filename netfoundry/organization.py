@@ -572,7 +572,7 @@ path to credentials file.
         else:
             return(network_group)
 
-    def get_network(self, network_id: str, embed: str = None, accept: str = None):
+    def get_network(self, network_id: str, embed: object = None, accept: str = None):
         """Describe a Network by ID.
 
         :param str network_id: UUIDv4 of the network to get
@@ -584,16 +584,18 @@ path to credentials file.
         headers = dict()
         headers["authorization"] = "Bearer " + self.token
         params = dict()
-        if embed == "all":
-            params['embed'] = ', '.join(EMBED_NET_RESOURCES)
-            self.logger.debug(f"requesting embed all resource types in network domain: {params['embed']}")
-        elif embed:
-            valid_types = [plural(type) for type in embed.split(',') if RESOURCES[plural(type)]['domain'] == "network"]
-            params['embed'] = ', '.join(valid_types)
-            self.logger.debug(f"requesting embed some resource types in network domain: {valid_types}")
-            for type in embed.split(','):
-                if not NET_RESOURCES.get(type):
-                    self.logger.warn(f"not requesting '{type}', not a resource type in the network domain")
+        requested_types = list()
+        valid_types = set()
+        if embed:
+            if isinstance(embed, list):
+                requested_types.extend(embed)
+            else:
+                requested_types.extend(embed.split(','))
+            if 'all' in requested_types:
+                requested_types.extend(EMBED_NET_RESOURCES.keys())
+            valid_types = [plural(type) for type in requested_types if EMBED_NET_RESOURCES.get(plural(type))]
+            params['embed'] = ','.join(valid_types)
+            self.logger.debug(f"requesting embed of: '{valid_types}'")
 
         url = self.audience+'core/v2/networks/'+network_id
         network, status_symbol = get_generic_resource(url=url, headers=headers, accept=accept, proxies=self.proxies, verify=self.verify, **params)
