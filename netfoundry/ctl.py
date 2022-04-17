@@ -20,10 +20,11 @@ from random import choice, sample, shuffle
 from re import sub
 from subprocess import CalledProcessError
 from sys import exit as sysexit
-from sys import stdin, stdout, stderr
+from sys import stderr, stdin, stdout
 from xml.sax.xmlreader import InputSource
 
 from jwt.exceptions import PyJWTError
+from milc import set_metadata  # this function needed to set metadata immediately below
 from pygments import highlight
 from pygments.formatters import Terminal256Formatter
 from pygments.lexers import get_lexer_by_name, load_lexer_from_file
@@ -35,12 +36,11 @@ from yaml import parser
 from netfoundry import __version__ as netfoundry_version
 
 from .exceptions import NeedUserInput, NFAPINoCredentials
-from .network import Networks, Network
+from .network import Network, Networks
 from .network_group import NetworkGroup
 from .organization import Organization
-from .utility import DC_PROVIDERS, MUTABLE_NET_RESOURCES, MUTABLE_RESOURCE_ABBREV, RESOURCE_ABBREV, RESOURCES, is_jwt, normalize_caseless, plural, singular
+from .utility import DC_PROVIDERS, EMBED_NET_RESOURCES, MUTABLE_NET_RESOURCES, MUTABLE_RESOURCE_ABBREV, RESOURCE_ABBREV, RESOURCES, is_jwt, normalize_caseless, plural, singular
 
-from milc import set_metadata  # this function needed to set metadata immediately below
 set_metadata(version=f"v{netfoundry_version}", author="NetFoundry", name="nfctl")  # must precend import milc.cli
 from milc import cli, questions  # this uses metadata set above
 from milc.subcommand import config  # this creates the config subcommand
@@ -373,21 +373,21 @@ def edit(cli):
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
 @cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create'], help="request the as=create alternative form of the resource")
+@cli.argument('-e', '--embed', arg_only=True, action=StoreListKeys, default=None, help="applies to 'get network': optionally embed comma-sep list of resource types or 'all' of a network's resource collections", choices=[plural(type) for type in EMBED_NET_RESOURCES.keys()])
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
 @cli.subcommand('get a single resource by type and query')
-def get(cli, echo: bool = True, embed='all', spinner: object = None):
+def get(cli, echo: bool = True, spinner: object = None):
     """
     Get a single resource as YAML or JSON.
 
-    :param echo: False allows capture instead of print the match
-    :param embed: False avoids expensive operations when we just need a shallow view
+    :param echo: False allows the caller to capture the return instead of printing the match
     """
     if RESOURCE_ABBREV.get(cli.args.resource_type):
         cli.args.resource_type = singular(RESOURCE_ABBREV[cli.args.resource_type].name)
     if not cli.config.general.verbose and cli.args.output in ["yaml", "json"]:    # don't change level if output=text
         cli.log.setLevel(logging.WARN)                                            # don't emit INFO messages to stdout because they will break deserialization
     if cli.args.accept and not MUTABLE_NET_RESOURCES.get(plural(cli.args.resource_type)):
-        logging.warning("ignoring --as=create becuase it is applicable only to mutable resources in the network domain")
+        logging.warning("ignoring --as=create because it is applicable only to mutable resources in the network domain")
         cli.args['accept'] = None
     match = {}
     matches = []
@@ -458,39 +458,35 @@ def get(cli, echo: bool = True, embed='all', spinner: object = None):
                 if len(query_keys) > 1:
                     query_keys.remove('id')
                     cli.log.warn(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
-                match = organization.get_network(network_id=cli.args.query['id'], embed=embed, accept=cli.args.accept)
+                match = organization.get_network(network_id=cli.args.query['id'], embed=cli.args.embed, accept=cli.args.accept)
             else:
                 if cli.config.general.network_group and not cli.config.general.network:
                     network_group = use_network_group(
                         cli,
                         organization,
-                        group=cli.config.general.network_group,
-                        )
+                        group=cli.config.general.network_group)
                     matches = organization.find_networks_by_group(network_group.id, **cli.args.query)
                 elif cli.config.general.network:
                     network, network_group = use_network(
                         cli,
                         organization=organization,
-                        network_name=cli.config.general.network,
-                        )
-                    match = organization.get_network(network_id=network.id, embed=embed, accept=cli.args.accept)
+                        network_name=cli.config.general.network)
+                    match = organization.get_network(network_id=network.id, embed=cli.args.embed, accept=cli.args.accept)
                 else:
                     matches = organization.find_networks_by_organization(**cli.args.query)
                 if len(matches) == 1:
                     network, network_group = use_network(
                         cli,
                         organization=organization,
-                        network_name=matches[0]['name'],
-                        )
-                    match = organization.get_network(network_id=network.id, embed=embed, accept=cli.args.accept)
+                        network_name=matches[0]['name'])
+                    match = organization.get_network(network_id=network.id, embed=cli.args.embed, accept=cli.args.accept)
         else:                                                 # is a resource in the network domain
             if cli.config.general.network:
                 network, network_group = use_network(
                     cli,
                     organization=organization,
                     group=cli.config.general.network_group,   # None unless configured
-                    network_name=cli.config.general.network,
-                    )
+                    network_name=cli.config.general.network)
             else:
                 cli.log.error("need --network=ACMENet")
                 sysexit(1)
@@ -707,7 +703,7 @@ def delete(cli):
     cli.config.general['wait'] = 0
     spinner.text = f"Finding {cli.args.resource_type} {'by' if query_keys else '...'} {', '.join(query_keys)}"
     with spinner:
-        match, network, network_group, organization = get(cli, echo=False, embed=None, spinner=spinner)
+        match, network, network_group, organization = get(cli, echo=False, spinner=spinner)
     if cli.args.resource_type == 'network':
         try:
             delete_confirmed = False
