@@ -238,7 +238,8 @@ def logout(cli):
 
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
-@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type), MUTABLE_NET_RESOURCES[type].abbreviation] for type in MUTABLE_NET_RESOURCES.keys()] for choice in group])
+@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE",
+              choices=[choice for group in [[singular(type), MUTABLE_NET_RESOURCES[type].abbreviation] for type in MUTABLE_NET_RESOURCES.keys()] for choice in group])
 # this allows us to pass the edit subcommand's cli object to function get without further modifying that functions params
 @cli.subcommand('duplicate a resource')
 def copy(cli):
@@ -269,7 +270,8 @@ def copy(cli):
 
 
 @cli.argument('-f', '--file', help='JSON or YAML file', type=argparse.FileType('r', encoding='UTF-8'))
-@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in MUTABLE_NET_RESOURCES.keys()] for choice in group])
+@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE",
+              choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in MUTABLE_NET_RESOURCES.keys()] for choice in group])
 @cli.subcommand('create a resource from a file')
 def create(cli):
     """Create a resource.
@@ -341,7 +343,8 @@ def create(cli):
 
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
-@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in MUTABLE_NET_RESOURCES.keys()] for choice in group])
+@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE",
+              choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in MUTABLE_NET_RESOURCES.keys()] for choice in group])
 # this allows us to pass the edit subcommand's cli object to function get without further modifying that functions params
 @cli.subcommand('edit a resource with EDITOR')
 def edit(cli):
@@ -375,8 +378,11 @@ def edit(cli):
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="id=UUIDv4 or query params as k=v,k=v comma-separated pairs")
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
 @cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create'], help="request the as=create alternative form of the resource")
-@cli.argument('-e', '--embed', arg_only=True, action=StoreListKeys, default=None, help="applies to 'get network': optionally embed comma-sep list of resource types or 'all' of a network's resource collections", choices=[plural(type) for type in EMBED_NET_RESOURCES.keys()])
-@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
+@cli.argument('-e', '--embed', arg_only=True, nargs='+',
+              help="applies to 'get network': optionally embed space-sep list of resource types or 'all' of a network's resource collections",
+              choices=[plural(type) for type in EMBED_NET_RESOURCES.keys()].extend('all'))
+@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE",
+              choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
 @cli.subcommand('get a single resource by type and query')
 def get(cli, echo: bool = True, spinner: object = None):
     """
@@ -559,7 +565,8 @@ def get(cli, echo: bool = True, spinner: object = None):
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
 @cli.argument('-m', '--my-roles', arg_only=True, action='store_true', help="filter roles by caller identity")
 @cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create'], help="request the as=create alternative form of the resources")
-@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE", choices=[choice for group in [[type, RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
+@cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE",
+              choices=[choice for group in [[type, RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
 @cli.subcommand(description='find a collection of resources by type and query')
 def list(cli, spinner: object = None):
     """Find resources as lists."""
@@ -693,7 +700,8 @@ def list(cli, spinner: object = None):
 
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
-@cli.argument('resource_type', arg_only=True, help='type of resource', choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
+@cli.argument('resource_type', arg_only=True, help='type of resource',
+              choices=[choice for group in [[singular(type), RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
 @cli.subcommand('delete a single resource by type and query')
 def delete(cli):
     """Delete a resource in the network domain."""
