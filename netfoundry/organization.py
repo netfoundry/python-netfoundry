@@ -592,8 +592,9 @@ path to credentials file.
             else:
                 requested_types.extend(embed.split(','))
             if 'all' in requested_types:
-                requested_types.extend(EMBED_NET_RESOURCES.keys())
-            valid_types = [plural(type) for type in requested_types if EMBED_NET_RESOURCES.get(plural(type))]
+                valid_types = ['all']
+            else:
+                valid_types = [plural(type) for type in requested_types if EMBED_NET_RESOURCES.get(plural(type))]
             params['embed'] = ','.join(valid_types)
             self.logger.debug(f"requesting embed of: '{valid_types}'")
 
