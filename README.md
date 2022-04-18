@@ -1,3 +1,6 @@
+# NetFoundry Python Module
+
+This module has a general-purpose library for using the NetFoundry API and installs the CLI `nfctl`.
 
 ## User Guide
 
@@ -6,18 +9,19 @@
 ## Find the Version
 
 ```bash
-$ python3 -m netfoundry.version
+ $ python3 -m netfoundry.version
+v5.2.0
+ # or
+ $ nfctl version
 v5.2.0
 ```
 
 ## Play the demo
 
-This creates a demo network named "BibbidiBobbidiBoo" with your API account stored in ~/.netfoundry/credentials.json
-
-Learn about getting an API account by reading the [Authentication Guide](https://developer.netfoundry.io/v2/guides/authentication/)
+This creates a demo network with your API account file named `credentials.json` stored in the current directory or the XDG config directory e.g. `~/.config/netfoundry/`. Learn how to obtain and use an API account for your NetFoundry organization in [the Authentication Guide](https://developer.netfoundry.io/guides/authentication/)
 
 ```bash
-python3 -m netfoundry.demo --network=BibbidiBobbidiBoo
+nfctl demo
 ```
 
 ## Create network snippet from demo.py
@@ -29,19 +33,19 @@ import netfoundry
 # user-default path is ~/.netfoundry/
 organization = netfoundry.Organization(credentials="credentials.json")
 
-# use some Network Group, default is to use the first and there's typically only one
+# use some network group, default is to use the first and there's typically only one
 network_group = netfoundry.NetworkGroup(organization)
 
-# create a Network
+# create a network
 network_name = "BibbidiBobbidiBoo"
-if network_name in network_group.networks_by_name().keys():
-    # use the Network
+if network_group.network_exists(network_name):
+    # use the network
     network = netfoundry.Network(network_group, network_name=network_name)
-    network.wait_for_status("PROVISIONED",wait=999,progress=True)
+    network.wait_for_status("PROVISIONED")
 else:
     network_id = network_group.create_network(name=network_name)['id']
     network = netfoundry.Network(network_group, network_id=network_id)
-    network.wait_for_status("PROVISIONED",wait=999,progress=True)
+    network.wait_for_status("PROVISIONED")
 ```
 
 ## Publish a new version of the module
