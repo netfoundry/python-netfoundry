@@ -393,8 +393,13 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
             yield yield_page
 
             # then yield subsequent pages, if applicable
-            if get_all_pages:         # this is False if param 'page' or 'size' to stop recursion or get a single page
-                for next_page in range(1, total_pages):  # first page is 0
+            if get_all_pages:           # this is False if param 'page' or 'size' to stop recursion or get a single page
+                if resource_type.name == 'network-groups':
+                    params['page'] = 1  # workaround API bug https://netfoundry.atlassian.net/browse/MOP-17890
+                    next_range_lower, next_range_upper = params['page'] + 2, total_pages + 1
+                else:
+                    next_range_lower, next_range_upper = params['page'] + 1, total_pages
+                for next_page in range(next_range_lower, next_range_upper):  # first page is 0 unless network-groups which are 1-based
                     params['page'] = next_page
                     try:
                         # recurse
