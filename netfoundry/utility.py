@@ -330,10 +330,8 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
     # normalize output with a default sort param
     if not params.get('sort'):
         params["sort"] = "name,asc"
-    # workaround sort param bug in MOP-18018
-    if resource_type.name in ['identities', 'user-identities', 'api-account-identities']:
-        del params['sort']
-    elif resource_type.name == 'hosts':      # workaround sort param bug in MOP-17863
+    # workaround sort param bugs in MOP-18018, MOP-17863, MOP-18178
+    if resource_type.name in ['identities', 'user-identities', 'api-account-identities', 'hosts', 'terminators']:
         del params['sort']
 
     # only get one page of the requested size, else default page size and all pages
@@ -706,7 +704,28 @@ RESOURCES = {
         mutable=True,
         embeddable=True,
         create_responses=["ACCEPTED"],
-    )
+    ),
+    'config-types': ResourceType(
+        name='config-types',
+        domain='network',
+        mutable=True,
+        embeddable=True,
+        create_responses=["ACCEPTED"],
+    ),
+    'configs': ResourceType(
+        name='configs',
+        domain='network',
+        mutable=True,
+        embeddable=True,
+        create_responses=["ACCEPTED"],
+    ),
+    'terminators': ResourceType(
+        name='terminators',
+        domain='network',
+        mutable=True,
+        embeddable=True,
+        create_responses=["ACCEPTED"],
+    ),
 }
 
 # TODO: [MOP-13441] associate locations with a short list of major geographic regions / continents
