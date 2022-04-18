@@ -1174,7 +1174,7 @@ def use_network_group(cli, organization: object, group: str = None, spinner: obj
     with spinner:
         network_group = NetworkGroup(
             organization,
-            group=group if group else None,
+            group=group,
         )
     spinner.succeed(f"Configured network group '{network_group.name}'")
     cli.log.debug(f"network group is {network_group.name}")
