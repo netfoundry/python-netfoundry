@@ -117,12 +117,20 @@ jobs:
         echo CONTAINER_TAGS="${CONTAINER_TAGS}"
         echo ::set-output name=container_tags::${CONTAINER_TAGS}
 
-    - name: Publish Release Package
+    - name: Publish Release to PyPi
       if: github.event.action == 'published'
       uses: pypa/gh-action-pypi-publish@27b31702a0e7fc50959f5ad993c78deac1bdfc29
       with:
         user: __token__
         password: ${{ secrets.PYPI_API_TOKEN }}
+
+    - name: Attach Wheel Artifact to GH Release
+      if: ${{ github.event.action == 'published' }}
+      uses: softprops/action-gh-release@v1
+      with:
+        files: dist/netfoundry-*.whl
+        fail_on_unmatched_files: true
+        generate_release_notes: true
 
     - name: Set up QEMU
       uses: docker/setup-qemu-action@master
