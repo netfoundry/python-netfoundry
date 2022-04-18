@@ -687,7 +687,7 @@ def list(cli, spinner: object = None):
                            'edgeRouterAttributes', 'serviceAttributes', 'endpointAttributes',
                            'status', 'zitiId', 'provider', 'locationCode', 'ipAddress', 'networkVersion',
                            'active', 'default', 'region', 'size', 'attributes', 'email', 'productVersion',
-                           'state', 'address', 'binding']
+                           'address', 'binding', 'component']
         valid_keys = set(matches[0].keys()) & set(default_columns)
 
     if valid_keys:
