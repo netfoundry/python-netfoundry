@@ -163,21 +163,39 @@ def login(cli):
                 table = tabulate(tabular_data=summary_table, headers=['Domain', 'Summary'], tablefmt=table_borders)
                 if cli.config.general.color:
                     highlighted = highlight(table, text_lexer, Terminal256Formatter(style=cli.config.general.style))
-                    cli.echo(highlighted)
+                    try:
+                        cli.echo(highlighted)
+                    except ValueError:
+                        print(highlighted)
                 else:
-                    cli.echo(table)
+                    try:
+                        cli.echo(table)
+                    except ValueError:
+                        print(table)
             elif cli.args.output == "yaml":
                 if cli.config.general.color:
                     highlighted = highlight(yaml_dumps(summary_object, indent=4), yaml_lexer, Terminal256Formatter(style=cli.config.general.style))
-                    cli.echo(highlighted)
+                    try:
+                        cli.echo(highlighted)
+                    except ValueError:
+                        print(highlighted)
                 else:
-                    cli.echo(yaml_dumps(summary_object, indent=4))
+                    try:
+                        cli.echo(yaml_dumps(summary_object, indent=4))
+                    except ValueError:
+                        print(yaml_dumps(summary_object, indent=4))
             elif cli.args.output == "json":
                 if cli.config.general.color:
                     highlighted = highlight(json_dumps(summary_object, indent=4), json_lexer, Terminal256Formatter(style=cli.config.general.style))
-                    cli.echo(highlighted)
+                    try:
+                        cli.echo(highlighted)
+                    except ValueError:
+                        print(highlighted)
                 else:
-                    cli.echo(json_dumps(summary_object, indent=4))
+                    try:
+                        cli.echo(json_dumps(summary_object, indent=4))
+                    except ValueError:
+                        print(json_dumps(summary_object, indent=4))
         else:             # if eval
             nonf = """
 # helper function logs out from NetFoundry
@@ -212,9 +230,15 @@ export MOPURL="{organization.audience}"
 """
             if cli.config.general.color:
                 highlighted = highlight(token_env, bash_lexer, Terminal256Formatter(style=cli.config.general.style))
-                cli.echo(highlighted)
+                try:
+                    cli.echo(highlighted)
+                except ValueError:
+                    print(highlighted)
             else:
-                cli.echo(token_env)
+                try:
+                    cli.echo(token_env)
+                except ValueError:
+                    print(token_env)
 
 
 @cli.subcommand('logout your identity for the current current profile')
@@ -541,15 +565,27 @@ def get(cli, echo: bool = True, spinner: object = None):
             if cli.args.output in ["yaml", "text"]:
                 if cli.config.general.color:
                     highlighted = highlight(yaml_dumps(filtered_match, indent=4), yaml_lexer, Terminal256Formatter(style=cli.config.general.style))
-                    cli.echo(highlighted)
+                    try:
+                        cli.echo(highlighted)
+                    except ValueError:
+                        print(highlighted)
                 else:
-                    cli.echo(yaml_dumps(filtered_match, indent=4))
+                    try:
+                        cli.echo(yaml_dumps(filtered_match, indent=4))
+                    except ValueError:
+                        print(yaml_dumps(filtered_match, indent=4))
             elif cli.args.output == "json":
                 if cli.config.general.color:
                     highlighted = highlight(json_dumps(filtered_match, indent=4), json_lexer, Terminal256Formatter(style=cli.config.general.style))
-                    cli.echo(highlighted)
+                    try:
+                        cli.echo(highlighted)
+                    except ValueError:
+                        print(highlighted)
                 else:
-                    cli.echo(json_dumps(filtered_match, indent=4))
+                    try:
+                        cli.echo(json_dumps(filtered_match, indent=4))
+                    except ValueError:
+                        print(json_dumps(filtered_match, indent=4))
     elif len(matches) == 0:
         cli.log.warn(f"found no {cli.args.resource_type} by '{', '.join(query_keys)}'")
         sysexit(1)
@@ -651,7 +687,7 @@ def list(cli, spinner: object = None):
                            'edgeRouterAttributes', 'serviceAttributes', 'endpointAttributes',
                            'status', 'zitiId', 'provider', 'locationCode', 'ipAddress', 'networkVersion',
                            'active', 'default', 'region', 'size', 'attributes', 'email', 'productVersion',
-                           'state']
+                           'state', 'address', 'binding']
         valid_keys = set(matches[0].keys()) & set(default_columns)
 
     if valid_keys:
@@ -688,15 +724,27 @@ def list(cli, spinner: object = None):
     elif cli.args.output == "yaml":
         if cli.config.general.color:
             highlighted = highlight(yaml_dumps(filtered_matches, indent=4), yaml_lexer, Terminal256Formatter(style=cli.config.general.style))
-            cli.echo(highlighted)
+            try:
+                cli.echo(highlighted)
+            except ValueError:
+                print(highlighted)
         else:
-            cli.echo(yaml_dumps(filtered_matches, indent=4))
+            try:
+                cli.echo(yaml_dumps(filtered_matches, indent=4))
+            except ValueError:
+                print(yaml_dumps(filtered_matches, indent=4))
     elif cli.args.output == "json":
         if cli.config.general.color:
             highlighted = highlight(json_dumps(filtered_matches, indent=4), json_lexer, Terminal256Formatter(style=cli.config.general.style))
-            cli.echo(highlighted)
+            try:
+                cli.echo(highlighted)
+            except ValueError:
+                print(highlighted)
         else:
-            cli.echo(json_dumps(filtered_matches, indent=4))
+            try:
+                cli.echo(json_dumps(filtered_matches, indent=4))
+            except ValueError:
+                print(json_dumps(filtered_matches, indent=4))
 
 
 @cli.argument('query', arg_only=True, action=StoreDictKeyPair, nargs='?', help="query params as k=v,k=v comma-separated pairs")
