@@ -363,3 +363,4 @@ typescript*.*
 
 /*.json
 /*.jwt
+.eggs/

@@ -319,13 +319,13 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
     elif resource_type.name in ["process-executions"]:
         params['beta'] = str()
 
-    for param in kwargs.keys():
-        if param == 'name' and resource_type.name == 'networks':  # workaround sort param bug in MOP-17863
-            params['findByName'] = param
-        elif param == 'networkGroupId' and resource_type.name == 'network-groups':
-            params['findByNetworkGroupId'] = param
+    for k, v in kwargs.items():
+        if k == 'name' and resource_type.name == 'networks':  # workaround sort param bug in MOP-17863
+            params['findByName'] = v
+        elif k == 'networkGroupId' and resource_type.name in ['networks', 'network-groups']:
+            params['findByNetworkGroupId'] = v
         else:
-            params[param] = kwargs[param]
+            params[k] = v
 
     # normalize output with a default sort param
     if not params.get('sort'):
