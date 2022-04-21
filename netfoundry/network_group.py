@@ -1,7 +1,7 @@
 """Use a network group and find its networks."""
 
 from .network import Networks
-from .utility import NET_RESOURCES, RESOURCES, STATUS_CODES, any_in, find_generic_resources, get_generic_resource, http, is_uuidv4, normalize_caseless
+from .utility import NET_RESOURCES, RESOURCES, STATUS_CODES, any_in, find_generic_resources, get_generic_resource, http, is_uuidv4, normalize_caseless, caseless_equal
 
 
 class NetworkGroup:
@@ -19,22 +19,22 @@ class NetworkGroup:
             if is_uuidv4(group):
                 network_group_id = group
             else:
-                network_group_name = group
+                network_group_name = normalize_caseless(group)
         if network_group_id:
             self.network_group_id = network_group_id
             self.network_group_name = [ng['organizationShortName'] for ng in self.network_groups if ng['id'] == network_group_id][0]
         # TODO: review the use of org short name ref https://mattermost.tools.netfoundry.io/netfoundry/pl/gegyzuybypb9jxnrw1g1imjywh
         elif network_group_name:
             self.network_group_name = network_group_name
-            network_group_matches = [ng['id'] for ng in self.network_groups if ng['organizationShortName'] == network_group_name]
+            network_group_matches = [ng['id'] for ng in self.network_groups if caseless_equal(ng['organizationShortName'], self.network_group_name)]
             if len(network_group_matches) == 1:
-                self.network_group_id = [ng['id'] for ng in self.network_groups if ng['organizationShortName'] == network_group_name][0]
+                self.network_group_id = network_group_matches[0]
             else:
                 raise RuntimeError(f"there was not exactly one network group matching the name '{network_group_name}'")
         elif len(self.network_groups) > 0:
             # first network group is typically the only network group
             self.network_group_id = self.network_groups[0]['id']
-            self.network_group_name = self.network_groups[0]['organizationShortName']
+            self.network_group_name = normalize_caseless(self.network_groups[0]['organizationShortName'])
             # warn if there are other groups
             if len(self.network_groups) > 1:
                 self.logger.warning(f"using first network group {self.network_group_name} and ignoring {len(self.network_groups) - 1} other(s) e.g. {self.network_groups[1]['organizationShortName']}, etc...")
