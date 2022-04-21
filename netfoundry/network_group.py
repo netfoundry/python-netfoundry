@@ -1,7 +1,7 @@
 """Use a network group and find its networks."""
 
 from .network import Networks
-from .utility import NET_RESOURCES, RESOURCES, STATUS_CODES, any_in, find_generic_resources, get_generic_resource, http, is_uuidv4, normalize_caseless
+from .utility import NET_RESOURCES, RESOURCES, STATUS_CODES, any_in, find_generic_resources, get_generic_resource, http, is_uuidv4, normalize_caseless, caseless_equal
 
 
 class NetworkGroup:
@@ -26,7 +26,7 @@ class NetworkGroup:
         # TODO: review the use of org short name ref https://mattermost.tools.netfoundry.io/netfoundry/pl/gegyzuybypb9jxnrw1g1imjywh
         elif network_group_name:
             self.network_group_name = network_group_name
-            network_group_matches = [ng['id'] for ng in self.network_groups if normalize_caseless(ng['organizationShortName']) == network_group_name]
+            network_group_matches = [ng['id'] for ng in self.network_groups if caseless_equal(ng['organizationShortName'], self.network_group_name)]
             if len(network_group_matches) == 1:
                 self.network_group_id = network_group_matches[0]
             else:
