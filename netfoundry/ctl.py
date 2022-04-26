@@ -155,7 +155,7 @@ def login(cli):
                 if network_group:
                     summary_table.append(['Network Resource Group', f"{summary_object['network_group']['name']} ({summary_object['network_group']['organizationShortName']}) with {summary_object['network_group']['networks_count']} networks"])
                 if network:
-                    summary_table.append(['Configured Network', f"{summary_object['network']['name']} ({summary_object['network']['region']}) is {summary_object['network']['productVersion']} and status {summary_object['network']['status']}"])
+                    summary_table.append(['Configured Network', f"{summary_object['network']['name']} - {summary_object['network']['productVersion']} - {summary_object['network']['status']}"])
                 if cli.config.general.borders:
                     table_borders = "presto"
                 else:
