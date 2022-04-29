@@ -484,9 +484,8 @@ class ResourceTypeParent:
 class ResourceType(ResourceTypeParent):
     """Typed resource type spec.
 
-    As close as I could get to a Go struct. This helps us to suggest possible
-    operations such as all resource types in the network domain that can be
-    mutated (C_UD).
+    This helps the CLI to suggest possible operations such as all resource
+    types in the network domain that can be mutated (C_UD).
     """
 
     name: str                                               # plural form as kebab-case e.g. edge-routers

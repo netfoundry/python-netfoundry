@@ -540,7 +540,7 @@ def get(cli, echo: bool = True, spinner: object = None):
                         cli.log.warn(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
                     match = network.get_resource_by_id(type=cli.args.resource_type, id=cli.args.query['id'], accept=cli.args.accept)
                 else:
-                    matches = network.find_resources(type=cli.args.resource_type, accept=cli.args.accept, **cli.args.query)
+                    matches = network.find_resources(type=cli.args.resource_type, accept=cli.args.accept, params=cli.args.query)
                     if len(matches) == 1:
                         match = matches[0]
 
@@ -669,7 +669,7 @@ def list(cli, spinner: object = None):
             if cli.args.resource_type == "data-centers":
                 matches = network.find_edge_router_data_centers(**cli.args.query)
             else:
-                matches = network.find_resources(type=cli.args.resource_type, accept=cli.args.accept, **cli.args.query)
+                matches = network.find_resources(type=cli.args.resource_type, accept=cli.args.accept, params=cli.args.query)
 
     if len(matches) == 0:
         spinner.fail(f"Found no {cli.args.resource_type} by '{', '.join(query_keys)}'")

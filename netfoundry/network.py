@@ -383,7 +383,7 @@ class Network:
         return(resource)
     get_resource = get_resource_by_id
 
-    def find_resources(self, type: str, accept: str = None, deleted: bool = False, **kwargs):
+    def find_resources(self, type: str, accept: str = None, deleted: bool = False, params: dict = dict(), **kwargs):
         """Find resources by type.
 
         :param str type: plural of an entity type in the network domain e.g. networks, endpoints, services, posture-checks, etc...
@@ -399,7 +399,6 @@ class Network:
         if type == "data-centers":
             self.logger.warn("don't call network.get_resources() for data centers, always use network.get_edge_router_data_centers() to filter for locations that support this network's version")
 
-        params = dict()
         for param in kwargs.keys():
             params[param] = kwargs[param]
         if not plural(type) == 'networks':
