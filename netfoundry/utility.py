@@ -436,7 +436,7 @@ class Utility:
 
 
 NET_RESOURCES = dict()             # resources in network domain
-ZITI_NET_RESOURCES = dict()     # network resources that can be updated
+ZITI_NET_RESOURCES = dict()        # network resources that are backed 1:1 by a zitiId
 MUTABLE_NET_RESOURCES = dict()     # network resources that can be updated
 MUTABLE_RESOURCE_ABBREV = dict()   # unique abbreviations for ^
 EMBED_NET_RESOURCES = dict()       # network resources that may be fetched as embedded collections
