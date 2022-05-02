@@ -242,22 +242,28 @@ class NetworkGroup:
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
-        if resource.get('_links') and resource['_links'].get('process-executions'):
-            _links = resource['_links'].get('process-executions')
-            if isinstance(_links, list):
-                process_id = _links[0]['href'].split('/')[6]
+        try:
+            process_executions = resource['_links'].get('process-executions')
+            if isinstance(process_executions, list):
+                find_executions_url = process_executions[0]['href']
             else:
-                process_id = _links['href'].split('/')[6]
-            if wait:
+                find_executions_url = process_executions['href']
+            processes = list()
+            process_id = None
+            for i in find_generic_resources(url=find_executions_url, headers=headers, embedded=NET_RESOURCES['process-executions']._embedded, proxies=self.proxies, verify=self.verify):
+                processes.extend(i)
+            for process in processes:
+                if process['name'].startswith('Create Network'):
+                    process_id = process['id']
+                    break
+            if wait and process_id:
                 self.Networks.wait_for_process(process_id, RESOURCES["process-executions"].status_symbols['complete'], wait=wait, sleep=sleep)
                 resource = self.get_resource_by_id(type="network", id=resource['id'])
-                return(resource)
-            else:    # only wait for the process to start, not finish, or timeout
-                # FIXME: commented to allow create to succeed to workaround MOP-18095
-                # self.Networks.wait_for_process(process_id, RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'], wait=9, sleep=3)
-                return(resource)
-        elif wait:
-            self.logger.warning("unable to wait for async complete because response did not provide a process execution id")
+            else:
+                self.logger.warning("not configured to wait or no process_id found in list of executions")
+        except Exception as e:
+            self.logger.warning(f"unable to wait for async process to complete, caught {e}")
+        finally:
             return(resource)
 
     def delete_network(self, network_id=None, network_name=None):
