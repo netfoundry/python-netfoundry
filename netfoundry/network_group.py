@@ -14,7 +14,7 @@ class NetworkGroup:
         """Initialize the network group class with a group name or ID."""
         self.logger = Organization.logger
         self.Networks = Networks(Organization)
-        self.network_groups = Organization.get_network_groups_by_organization()
+        self.network_groups = Organization.find_network_groups_by_organization()
         if (not network_group_id and not network_group_name) and group:
             if is_uuidv4(group):
                 network_group_id = group
