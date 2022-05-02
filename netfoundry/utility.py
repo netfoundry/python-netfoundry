@@ -557,6 +557,21 @@ RESOURCES = {
         status="state",
         status_symbols=PROCESS_STATUS_SYMBOLS,
     ),
+    'executions': ResourceType(
+        name='executions',
+        domain='network',
+        mutable=False,
+        embeddable=True,
+        status_symbols=PROCESS_STATUS_SYMBOLS,
+        abbreviation='ex',
+    ),
+    # 'processes': ResourceType(  # not a fully-fledged resource type because there is no "find processes" operation at this time
+    #     name='processes',
+    #     domain='network',
+    #     mutable=False,
+    #     embeddable=False,
+    #     status_symbols=PROCESS_STATUS_SYMBOLS,
+    # ),
     'regions': ResourceType(
         name='regions',
         domain='network',
@@ -770,10 +785,10 @@ def docstring_parameters(*args, **kwargs):
 
 
 RETRY_STRATEGY = Retry(
-    total=3,
-    status_forcelist=[413, 429, 503],
+    total=5,
+    status_forcelist=[404, 413, 429, 503],
     method_whitelist=["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE"],
-    backoff_factor=1
+    backoff_factor=1.2
 )
 DEFAULT_TIMEOUT = 31  # seconds, Gateway Service waits 30s before responding with an error code e.g. 503 and
 # so waiting at least 31s is necessary to obtain that information
