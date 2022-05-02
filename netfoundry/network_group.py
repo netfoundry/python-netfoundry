@@ -16,19 +16,28 @@ class NetworkGroup:
         self.Networks = Networks(Organization)
         self.network_groups = Organization.find_network_groups_by_organization()
         if (not network_group_id and not network_group_name) and group:
+            self.logger.debug(f"got 'group' = '{group}' which could be a short name or id")
             if is_uuidv4(group):
                 network_group_id = group
+                self.logger.debug(f"group value '{network_group_name}' is detected as UUIDv4")
             else:
                 network_group_name = normalize_caseless(group)
+                self.logger.debug(f"group value '{network_group_name}' is not detected as UUIDv4, assuming it's a group short name")
         if network_group_id:
             self.network_group_id = network_group_id
-            self.network_group_name = [ng['organizationShortName'] for ng in self.network_groups if ng['id'] == network_group_id][0]
+            network_group_matches = [ng for ng in self.network_groups if ng['id'] == network_group_id]
+            if len(network_group_matches) == 1:
+                self.network_group_name = network_group_matches[0]['organizationShortName']
+                self.logger.debug(f"found one match for group id '{network_group_id}'")
+            else:
+                raise RuntimeError(f"there was not exactly one network group matching the id '{network_group_id}'")
         # TODO: review the use of org short name ref https://mattermost.tools.netfoundry.io/netfoundry/pl/gegyzuybypb9jxnrw1g1imjywh
         elif network_group_name:
             self.network_group_name = network_group_name
-            network_group_matches = [ng['id'] for ng in self.network_groups if caseless_equal(ng['organizationShortName'], self.network_group_name)]
+            network_group_matches = [ng for ng in self.network_groups if caseless_equal(ng['organizationShortName'], self.network_group_name)]
             if len(network_group_matches) == 1:
-                self.network_group_id = network_group_matches[0]
+                self.network_group_id = network_group_matches[0]['id']
+                self.logger.debug(f"found one match for group short name '{network_group_name}'")
             else:
                 raise RuntimeError(f"there was not exactly one network group matching the name '{network_group_name}'")
         elif len(self.network_groups) > 0:
