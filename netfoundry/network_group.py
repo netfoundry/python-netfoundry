@@ -243,21 +243,17 @@ class NetworkGroup:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
         try:
-            process_executions = resource['_links'].get('process-executions')
-            if isinstance(process_executions, list):
-                find_executions_url = process_executions[0]['href']
-            else:
-                find_executions_url = process_executions['href']
+            executions_link = resource['_links']['executions']['href']
             processes = list()
             process_id = None
-            for i in find_generic_resources(url=find_executions_url, headers=headers, embedded=NET_RESOURCES['process-executions']._embedded, proxies=self.proxies, verify=self.verify):
+            for i in find_generic_resources(url=executions_link, headers=headers, embedded=NET_RESOURCES['executions']._embedded, proxies=self.proxies, verify=self.verify):
                 processes.extend(i)
             for process in processes:
                 if process['name'].startswith('Create Network'):
                     process_id = process['id']
                     break
             if wait and process_id:
-                self.Networks.wait_for_process(process_id, RESOURCES["process-executions"].status_symbols['complete'], wait=wait, sleep=sleep)
+                self.Networks.wait_for_process(process_id, RESOURCES["executions"].status_symbols['complete'], wait=wait, sleep=sleep)
                 resource = self.get_resource_by_id(type="network", id=resource['id'])
             else:
                 self.logger.warning("not configured to wait or no process_id found in list of executions")
