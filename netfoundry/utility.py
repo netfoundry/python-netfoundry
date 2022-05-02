@@ -396,7 +396,7 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
             if get_all_pages:           # this is False if param 'page' or 'size' to stop recursion or get a single page
                 if resource_type.name == 'network-groups':
                     params['page'] = 1  # workaround API bug https://netfoundry.atlassian.net/browse/MOP-17890
-                    next_range_lower, next_range_upper = params['page'] + 2, total_pages + 1
+                    next_range_lower, next_range_upper = params['page'], total_pages + 1
                 else:
                     next_range_lower, next_range_upper = params['page'] + 1, total_pages
                 for next_page in range(next_range_lower, next_range_upper):  # first page is 0 unless network-groups which are 1-based
@@ -436,6 +436,7 @@ class Utility:
 
 
 NET_RESOURCES = dict()             # resources in network domain
+ZITI_NET_RESOURCES = dict()        # network resources that are backed 1:1 by a zitiId
 MUTABLE_NET_RESOURCES = dict()     # network resources that can be updated
 MUTABLE_RESOURCE_ABBREV = dict()   # unique abbreviations for ^
 EMBED_NET_RESOURCES = dict()       # network resources that may be fetched as embedded collections
@@ -508,6 +509,7 @@ class ResourceType(ResourceTypeParent):
     abbreviation: str = field(default='default')
     status_symbols: dict = field(default_factory=lambda: RESOURCE_STATUS_SYMBOLS)  # dictionary with three predictable keys: complete, progress, error, each a tuple associating status symbols with a state
     host: bool = field(default=False)                       # may have a managed host in NF cloud
+    ziti: bool = field(default=False)
 
     def __post_init__(self):
         """Compute and assign _embedded if not supplied and then check types in parent class."""
@@ -533,6 +535,8 @@ class ResourceType(ResourceTypeParent):
             if self.host:
                 HOSTABLE_NET_RESOURCES[self.name] = self
                 HOSTABLE_RESOURCE_ABBREV[self.abbreviation] = self
+            if self.ziti:
+                ZITI_NET_RESOURCES[self.name] = self
         return super().__post_init__()
 
 
@@ -649,7 +653,9 @@ RESOURCES = {
             "attributes": [],
             "enrollmentMethod": {"ott": True},
             "name": "Name"
-        }),
+        },
+        ziti=True,
+        ),
     'edge-routers': ResourceType(
         name='edge-routers',
         domain='network',
@@ -658,6 +664,7 @@ RESOURCES = {
         no_update_props=['registration'],
         create_responses=["ACCEPTED"],
         host=True,
+        ziti=True,
     ),
     'edge-router-policies': ResourceType(
         name='edge-router-policies',
@@ -672,6 +679,7 @@ RESOURCES = {
         mutable=True,
         embeddable=True,
         create_responses=["ACCEPTED"],
+        ziti=True,
     ),
     'service-policies': ResourceType(
         name='service-policies',
@@ -679,6 +687,7 @@ RESOURCES = {
         mutable=True,
         embeddable=True,
         create_responses=["ACCEPTED"],
+        ziti=True,
     ),
     'app-wans': ResourceType(
         name='app-wans',
@@ -694,6 +703,7 @@ RESOURCES = {
         mutable=True,
         embeddable=True,
         create_responses=["ACCEPTED"],
+        ziti=True,
     ),
     'posture-checks': ResourceType(
         name='posture-checks',
@@ -701,6 +711,7 @@ RESOURCES = {
         mutable=True,
         embeddable=True,
         create_responses=["ACCEPTED"],
+        ziti=True,
     ),
     'certificate-authorities': ResourceType(
         name='certificate-authorities',
@@ -708,6 +719,7 @@ RESOURCES = {
         mutable=True,
         embeddable=True,
         create_responses=["ACCEPTED"],
+        ziti=True,
     ),
     'config-types': ResourceType(
         name='config-types',
@@ -715,6 +727,7 @@ RESOURCES = {
         mutable=True,
         embeddable=True,
         create_responses=["ACCEPTED"],
+        ziti=True,
     ),
     'configs': ResourceType(
         name='configs',
@@ -722,6 +735,7 @@ RESOURCES = {
         mutable=True,
         embeddable=True,
         create_responses=["ACCEPTED"],
+        ziti=True,
     ),
     'terminators': ResourceType(
         name='terminators',
@@ -729,6 +743,7 @@ RESOURCES = {
         mutable=True,
         embeddable=True,
         create_responses=["ACCEPTED"],
+        ziti=True,
     ),
 }
 
