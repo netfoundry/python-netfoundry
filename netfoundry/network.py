@@ -466,7 +466,7 @@ class Network:
         # compare the patch to the discovered, current state, adding new or updated keys to pruned_patch
         pruned_patch = dict()
         for k in patch.keys():
-            if k not in RESOURCES[plural(type)].no_update_props and k not in before_resource.keys():
+            if k not in RESOURCES[plural(type)].no_update_props and k in before_resource.keys():
                 if isinstance(patch[k], list):
                     if not set(before_resource[k]) == set(patch[k]):
                         pruned_patch[k] = list(set(patch[k]))
