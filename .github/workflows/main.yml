@@ -83,6 +83,7 @@ jobs:
           general.yes=True \
           general.verbose=yes || true # FIXME: sometimes config command exits with an error
         nfctl demo \
+          --size medium \
           --regions us-west-2 us-east-2 \
           --provider AWS
         nfctl \

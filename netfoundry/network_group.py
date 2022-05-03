@@ -16,19 +16,28 @@ class NetworkGroup:
         self.Networks = Networks(Organization)
         self.network_groups = Organization.find_network_groups_by_organization()
         if (not network_group_id and not network_group_name) and group:
+            self.logger.debug(f"got 'group' = '{group}' which could be a short name or id")
             if is_uuidv4(group):
                 network_group_id = group
+                self.logger.debug(f"group value '{network_group_name}' is detected as UUIDv4")
             else:
                 network_group_name = normalize_caseless(group)
+                self.logger.debug(f"group value '{network_group_name}' is not detected as UUIDv4, assuming it's a group short name")
         if network_group_id:
             self.network_group_id = network_group_id
-            self.network_group_name = [ng['organizationShortName'] for ng in self.network_groups if ng['id'] == network_group_id][0]
+            network_group_matches = [ng for ng in self.network_groups if ng['id'] == network_group_id]
+            if len(network_group_matches) == 1:
+                self.network_group_name = network_group_matches[0]['organizationShortName']
+                self.logger.debug(f"found one match for group id '{network_group_id}'")
+            else:
+                raise RuntimeError(f"there was not exactly one network group matching the id '{network_group_id}'")
         # TODO: review the use of org short name ref https://mattermost.tools.netfoundry.io/netfoundry/pl/gegyzuybypb9jxnrw1g1imjywh
         elif network_group_name:
             self.network_group_name = network_group_name
-            network_group_matches = [ng['id'] for ng in self.network_groups if caseless_equal(ng['organizationShortName'], self.network_group_name)]
+            network_group_matches = [ng for ng in self.network_groups if caseless_equal(ng['organizationShortName'], self.network_group_name)]
             if len(network_group_matches) == 1:
-                self.network_group_id = network_group_matches[0]
+                self.network_group_id = network_group_matches[0]['id']
+                self.logger.debug(f"found one match for group short name '{network_group_name}'")
             else:
                 raise RuntimeError(f"there was not exactly one network group matching the name '{network_group_name}'")
         elif len(self.network_groups) > 0:
@@ -233,22 +242,24 @@ class NetworkGroup:
         else:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
-        if resource.get('_links') and resource['_links'].get('process-executions'):
-            _links = resource['_links'].get('process-executions')
-            if isinstance(_links, list):
-                process_id = _links[0]['href'].split('/')[6]
-            else:
-                process_id = _links['href'].split('/')[6]
-            if wait:
-                self.Networks.wait_for_process(process_id, RESOURCES["process-executions"].status_symbols['complete'], wait=wait, sleep=sleep)
+        try:
+            executions_link = resource['_links']['executions']['href']
+            processes = list()
+            process_id = None
+            for i in find_generic_resources(url=executions_link, headers=headers, embedded=NET_RESOURCES['executions']._embedded, proxies=self.proxies, verify=self.verify):
+                processes.extend(i)
+            for process in processes:
+                if process['name'].startswith('Create Network'):
+                    process_id = process['id']
+                    break
+            if wait and process_id:
+                self.Networks.wait_for_process(process_id, RESOURCES["executions"].status_symbols['complete'], wait=wait, sleep=sleep)
                 resource = self.get_resource_by_id(type="network", id=resource['id'])
-                return(resource)
-            else:    # only wait for the process to start, not finish, or timeout
-                # FIXME: commented to allow create to succeed to workaround MOP-18095
-                # self.Networks.wait_for_process(process_id, RESOURCES['process-executions'].status_symbols['progress'] + RESOURCES['process-executions'].status_symbols['complete'], wait=9, sleep=3)
-                return(resource)
-        elif wait:
-            self.logger.warning("unable to wait for async complete because response did not provide a process execution id")
+            else:
+                self.logger.warning("not configured to wait or no process_id found in list of executions")
+        except Exception as e:
+            self.logger.warning(f"unable to wait for async process to complete, caught {e}")
+        finally:
             return(resource)
 
     def delete_network(self, network_id=None, network_name=None):
