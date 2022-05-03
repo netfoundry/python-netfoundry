@@ -786,9 +786,9 @@ def docstring_parameters(*args, **kwargs):
 
 RETRY_STRATEGY = Retry(
     total=5,
-    status_forcelist=[404, 413, 429, 503],
+    status_forcelist=[403, 404, 413, 429, 503],  # The API responds 403 and 404 for not-yet-existing executions for some async operations
     method_whitelist=["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE"],
-    backoff_factor=1.2
+    backoff_factor=1
 )
 DEFAULT_TIMEOUT = 31  # seconds, Gateway Service waits 30s before responding with an error code e.g. 503 and
 # so waiting at least 31s is necessary to obtain that information
