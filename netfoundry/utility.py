@@ -346,6 +346,8 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
     # only get requested page, else first page and all pages
     if params.get('page'):
         get_all_pages = False
+    elif resource_type.name == 'network-groups':
+        params['page'] = 1           # start at 1 instead of 0 to workaround https://netfoundry.atlassian.net/browse/MOP-17890
     else:
         params['page'] = 0
 
@@ -393,13 +395,11 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
             yield yield_page
 
             # then yield subsequent pages, if applicable
-            if get_all_pages:           # this is False if param 'page' or 'size' to stop recursion or get a single page
+            if get_all_pages and total_pages > 1:      # get_all_pages is False if param 'page' or 'size' to stop recursion and get a single page
+                next_range_lower, next_range_upper = params['page'] + 1, total_pages
                 if resource_type.name == 'network-groups':
-                    params['page'] = 1  # workaround API bug https://netfoundry.atlassian.net/browse/MOP-17890
-                    next_range_lower, next_range_upper = params['page'], total_pages + 1
-                else:
-                    next_range_lower, next_range_upper = params['page'] + 1, total_pages
-                for next_page in range(next_range_lower, next_range_upper):  # first page is 0 unless network-groups which are 1-based
+                    next_range_upper += 1              # network-groups pages are 1-based and so +1 upper limit
+                for next_page in range(next_range_lower, next_range_upper):
                     params['page'] = next_page
                     try:
                         # recurse
@@ -557,6 +557,21 @@ RESOURCES = {
         status="state",
         status_symbols=PROCESS_STATUS_SYMBOLS,
     ),
+    'executions': ResourceType(
+        name='executions',
+        domain='network',
+        mutable=False,
+        embeddable=True,
+        status_symbols=PROCESS_STATUS_SYMBOLS,
+        abbreviation='ex',
+    ),
+    # 'processes': ResourceType(  # not a fully-fledged resource type because there is no "find processes" operation at this time
+    #     name='processes',
+    #     domain='network',
+    #     mutable=False,
+    #     embeddable=False,
+    #     status_symbols=PROCESS_STATUS_SYMBOLS,
+    # ),
     'regions': ResourceType(
         name='regions',
         domain='network',
@@ -770,8 +785,8 @@ def docstring_parameters(*args, **kwargs):
 
 
 RETRY_STRATEGY = Retry(
-    total=3,
-    status_forcelist=[413, 429, 503],
+    total=5,
+    status_forcelist=[403, 404, 413, 429, 503],  # The API responds 403 and 404 for not-yet-existing executions for some async operations
     method_whitelist=["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE"],
     backoff_factor=1
 )
