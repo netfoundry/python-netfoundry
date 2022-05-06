@@ -9,10 +9,9 @@ import time
 from pathlib import Path
 from stat import S_IRUSR, S_IWUSR, S_IXUSR, filemode
 
-from platformdirs import user_cache_path, user_config_path
-
 from .exceptions import NFAPINoCredentials
-from .utility import DEFAULT_TOKEN_EXPIRY, EMBED_NET_RESOURCES, ENVIRONMENTS, NET_RESOURCES, RESOURCES, STATUS_CODES, find_generic_resources, get_generic_resource, get_token_cache, http, is_uuidv4, jwt_environment, jwt_expiry, normalize_caseless, plural
+from .utility import (DEFAULT_TOKEN_EXPIRY, EMBED_NET_RESOURCES, ENVIRONMENTS, RESOURCES, STATUS_CODES, find_generic_resources, get_generic_resource_by_url, get_token_cache, get_user_cache_dir, get_user_config_dir, http, is_uuidv4, jwt_environment,
+                      jwt_expiry, normalize_caseless, plural)
 
 
 class Organization:
@@ -104,20 +103,20 @@ class Organization:
             'expiry': None,
             'audience': None
         }
-        cache_dir_path = user_cache_path(appname='netfoundry')
+        self.cache_dir_path = get_user_cache_dir()
         token_cache_file_name = self.profile+'.json'
-        config_dir_path = user_config_path(appname='netfoundry')
+        self.config_dir_path = get_user_config_dir()
 
         try:
             # create and correct mode to 0o700
-            cache_dir_path.mkdir(mode=S_IRUSR | S_IWUSR | S_IXUSR, parents=True, exist_ok=True)
-            cache_dir_path.chmod(mode=S_IRUSR | S_IWUSR | S_IXUSR)
+            self.cache_dir_path.mkdir(mode=S_IRUSR | S_IWUSR | S_IXUSR, parents=True, exist_ok=True)
+            self.cache_dir_path.chmod(mode=S_IRUSR | S_IWUSR | S_IXUSR)
         except Exception as e:
-            raise RuntimeError(f"failed to create cache dir '{str(cache_dir_path.resolve())}', caught {e}")
+            raise RuntimeError(f"failed to create cache dir '{str(self.cache_dir_path.resolve())}', caught {e}")
         else:
-            cache_dir_stats = os.stat(cache_dir_path)
+            cache_dir_stats = os.stat(self.cache_dir_path)
             self.logger.debug(f"token cache dir exists with mode {filemode(cache_dir_stats.st_mode)}")
-        self.token_cache_file_path = Path(cache_dir_path / token_cache_file_name)
+        self.token_cache_file_path = Path(self.cache_dir_path / token_cache_file_name)
         self.logger.debug(f"cache file path is computed '{str(self.token_cache_file_path.resolve())}'")
 
         # short circuit if logout only
@@ -215,7 +214,7 @@ path to credentials file.
                     },
                     {
                         "scope": "site",
-                        "path": config_dir_path
+                        "path": self.config_dir_path
                     },
                 ]
                 for scope in default_creds_scopes:

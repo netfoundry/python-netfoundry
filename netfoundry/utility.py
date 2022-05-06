@@ -15,6 +15,7 @@ from uuid import UUID  # validate UUIDv4 strings
 
 import inflect  # singular and plural nouns
 import jwt
+from platformdirs import user_cache_path, user_config_path
 from requests import Session  # HTTP user agent will not emit server cert warnings if verify=False
 from requests import status_codes
 from requests.exceptions import HTTPError
