@@ -27,7 +27,8 @@ from urllib3.util.retry import Retry
 
 from .exceptions import UnknownResourceType
 
-disable_warnings(InsecureRequestWarning)
+logging.getLogger().setLevel(logging.WARNING)
+disable_warnings(InsecureRequestWarning)  # assumes we're only connecting insecurely to loopback proxy
 
 p = inflect.engine()
 
@@ -496,6 +497,9 @@ for k, v in RESOURCE_STATUS_SYMBOLS.items():
     for i in v:
         RESOURCE_STATUSES.add(i)
 
+IDENTITY_ID_PROPERTIES = [
+    'createdBy', 'updatedBy', 'ownerIdentityId',
+]
 
 # The purpose of the parent class is to validate the type of child class
 # attributes. Homing this logic in a parent class allows any number of child
@@ -857,7 +861,7 @@ class TimeoutHTTPAdapter(HTTPAdapter):
 
 
 http = Session()   # no cache
-HTTP_CACHE_EXPIRE=22
+HTTP_CACHE_EXPIRE = 111
 http_cache = CachedSession(cache_name=f"{get_user_cache_dir()}/http_cache", backend='sqlite', expire_after=HTTP_CACHE_EXPIRE)
 # Mount it for both http and https usage
 adapter = TimeoutHTTPAdapter(timeout=DEFAULT_TIMEOUT, max_retries=RETRY_STRATEGY)

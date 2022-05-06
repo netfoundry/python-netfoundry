@@ -39,7 +39,7 @@ from .exceptions import NeedUserInput, NFAPINoCredentials
 from .network import Network, Networks
 from .network_group import NetworkGroup
 from .organization import Organization
-from .utility import DC_PROVIDERS, EMBED_NET_RESOURCES, MUTABLE_NET_RESOURCES, MUTABLE_RESOURCE_ABBREV, RESOURCE_ABBREV, RESOURCES, any_in, get_generic_resource_by_type_and_id, plural, propid2type, singular
+from .utility import DC_PROVIDERS, EMBED_NET_RESOURCES, IDENTITY_ID_PROPERTIES, MUTABLE_NET_RESOURCES, MUTABLE_RESOURCE_ABBREV, RESOURCE_ABBREV, RESOURCES, any_in, get_generic_resource_by_type_and_id, plural, propid2type, singular
 
 set_metadata(version=f"v{netfoundry_version}", author="NetFoundry", name="nfctl")  # must precend import milc.cli
 from milc import cli, questions  # this uses metadata set above
@@ -709,7 +709,9 @@ def list(cli, spinner: object = None):
             # map any property names that look like a resource ID to the appropriate resource type so we can look up the name later
             type_by_prop = dict()
             for key in valid_keys:
-                if key.endswith('Id'):
+                if key in IDENTITY_ID_PROPERTIES:
+                    type_by_prop[key] = 'identities'
+                elif key.endswith('Id'):
                     type_by_prop[key] = propid2type(key)
 
             for match in filtered_matches:                         # for each match
@@ -718,8 +720,8 @@ def list(cli, spinner: object = None):
                         if type_by_prop.get(k):                    # if this is the property that points to a resolvable ID
                             # get the resource with the name we're after
                             resource, status = get_generic_resource_by_type_and_id(org=organization, resource_type=type_by_prop[k], resource_id=v)
-                            if resource.get('name'):                    # if the name property isn't empty
-                                match[k] = f"{v} ({resource['name']})"  # replace the ID with the name
+                            if resource.get('name'):                # if the name property isn't empty
+                                match[k] = f"{resource['name']}"    # wedge the name into the ID column
 
         if cli.config.general.headers:
             table_headers = filtered_matches[0].keys()
