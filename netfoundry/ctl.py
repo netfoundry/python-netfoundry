@@ -691,6 +691,8 @@ def list(cli, spinner: object = None):
                         'status', 'zitiId', 'provider', 'locationCode', 'ipAddress', 'networkVersion',
                         'active', 'default', 'region', 'size', 'attributes', 'email', 'productVersion',
                         'address', 'binding', 'component']
+        if cli.config.list.names:  # include identity IDs if --names
+            default_keys.extend(IDENTITY_ID_PROPERTIES)
         valid_keys = valid_keys.intersection(default_keys)
 
     if valid_keys:
@@ -704,20 +706,23 @@ def list(cli, spinner: object = None):
         filtered_matches = matches
 
     if cli.args.output == "text":
-
         if cli.config.list.names:
             # map any property names that look like a resource ID to the appropriate resource type so we can look up the name later
             type_by_prop = dict()
             for key in valid_keys:
-                if key in IDENTITY_ID_PROPERTIES:
-                    type_by_prop[key] = 'identities'
-                elif key.endswith('Id'):
-                    type_by_prop[key] = propid2type(key)
+                if key not in ['zitiId']:
+                    if key in IDENTITY_ID_PROPERTIES:
+                        type_by_prop[key] = 'identities'
+                    elif key.endswith('Id'):
+                        type_by_prop[key] = propid2type(key)
 
             for match in filtered_matches:                         # for each match
                 if any_in(type_by_prop.keys(), match.keys()):      # if at least one property points to a resolvable ID (fast)
                     for k, v in match.items():                     # for each key in match (slow)
                         if type_by_prop.get(k):                    # if this is the property that points to a resolvable ID
+                            if v is None:
+                                cli.log.debug(f"unexpected value for {k} = {v}")
+                                continue
                             # get the resource with the name we're after
                             resource, status = get_generic_resource_by_type_and_id(org=organization, resource_type=type_by_prop[k], resource_id=v)
                             if resource.get('name'):                # if the name property isn't empty

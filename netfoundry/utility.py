@@ -498,7 +498,7 @@ for k, v in RESOURCE_STATUS_SYMBOLS.items():
         RESOURCE_STATUSES.add(i)
 
 IDENTITY_ID_PROPERTIES = [
-    'createdBy', 'updatedBy', 'ownerIdentityId',
+    'createdBy', 'updatedBy', 'deletedBy', 'ownerIdentityId',
 ]
 
 # The purpose of the parent class is to validate the type of child class
