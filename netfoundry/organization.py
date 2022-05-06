@@ -423,7 +423,7 @@ path to credentials file.
         headers = {"authorization": "Bearer " + self.token}
         for url in urls:
             try:
-                caller, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+                caller, status_symbol = get_generic_resource_by_url(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
             except Exception as e:
                 self.logger.debug(f"failed to get caller identity from url: '{url}', trying next until last, caught {e}")
             else:
@@ -438,7 +438,7 @@ path to credentials file.
         url = self.audience+'identity/v1/identities/'+identity_id
         headers = {"authorization": "Bearer " + self.token}
         try:
-            identity, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            identity, status_symbol = get_generic_resource_by_url(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except Exception as e:
             raise RuntimeError(f"failed to get identity from url: '{url}', caught {e}")
         else:
@@ -455,7 +455,7 @@ path to credentials file.
             params[param] = kwargs[param]
         for noop in ['sort', 'size', 'page']:
             if params.get(noop):
-                self.logger.warn(f"query param '{noop}' is not supported by Identity Service")
+                self.logger.warn(f"query param '{noop}' is not fully supported by Identity Service")
         if type in ["UserIdentity", "user-identities"]:
             url = self.audience+'identity/v1/user-identities'
         elif type in ["ApiAccountIdentity", "api-account-identities"]:
@@ -511,7 +511,7 @@ path to credentials file.
         url = f"{self.audience}auth/v1/roles/{role_id}"
         headers = {"authorization": "Bearer " + self.token}
         try:
-            role, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            role, status_symbol = get_generic_resource_by_url(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except Exception as e:
             raise RuntimeError(f"failed to get role from url: '{url}', caught {e}")
         else:
@@ -550,7 +550,7 @@ path to credentials file.
         url = self.audience+'identity/v1/organizations/'+id
         headers = {"authorization": "Bearer " + self.token}
         try:
-            organization, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            organization, status_symbol = get_generic_resource_by_url(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except Exception as e:
             raise RuntimeError(f"failed to get organization from url: '{url}', caught {e}")
         else:
@@ -565,7 +565,7 @@ path to credentials file.
         url = self.audience+'rest/v1/network-groups/'+network_group_id
         headers = {"authorization": "Bearer " + self.token}
         try:
-            network_group, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            network_group, status_symbol = get_generic_resource_by_url(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except Exception as e:
             raise RuntimeError(f"failed to get network_group from url: '{url}', caught {e}")
         else:
@@ -598,7 +598,7 @@ path to credentials file.
             self.logger.debug(f"requesting embed of: '{valid_types}'")
 
         url = self.audience+'core/v2/networks/'+network_id
-        network, status_symbol = get_generic_resource(url=url, headers=headers, accept=accept, proxies=self.proxies, verify=self.verify, **params)
+        network, status_symbol = get_generic_resource_by_url(url=url, headers=headers, accept=accept, proxies=self.proxies, verify=self.verify, **params)
         return(network)
 
     def find_network_groups_by_organization(self, **kwargs):

@@ -1,16 +1,16 @@
 """Shared helper functions, constants, and classes."""
 
 import json
-from json import JSONDecodeError
 import logging
 import os
-from stat import filemode
 import re  # regex
-from urllib.parse import urlparse
 import time  # enforce a timeout; sleep
 import unicodedata  # case insensitive compare in Utility
 from dataclasses import dataclass, field
-from re import sub
+from json import JSONDecodeError
+from mmap import ACCESS_COPY
+from stat import filemode
+from urllib.parse import urlparse
 from uuid import UUID  # validate UUIDv4 strings
 
 import inflect  # singular and plural nouns
@@ -18,6 +18,7 @@ import jwt
 from platformdirs import user_cache_path, user_config_path
 from requests import Session  # HTTP user agent will not emit server cert warnings if verify=False
 from requests import status_codes
+from requests.adapters import HTTPAdapter
 from requests.exceptions import HTTPError
 from requests_cache import CachedSession
 from urllib3 import disable_warnings
@@ -79,7 +80,22 @@ def snake2camel(snake_str):
 
 def camel2snake(camel_str):
     """Convert a string from camel case to snake case."""
-    return sub(r'(?<!^)(?=[A-Z])', '_', camel_str).lower()
+    return re.sub(r'(?<!^)(?=[A-Z])', '_', camel_str).lower()
+
+
+def propid2type(prop):
+    """Transform a conventional property name like networkGroupId to a resource type like network-groups."""
+    if not prop.endswith('Id'):
+        raise RuntimeError(f"this function is intended to transform property names ending with 'Id', not {prop}")
+    else:
+        prop = prop[0:-2]                       # everything but the trailing 'Id'
+    words = re.split(r'(?<!^)(?=[A-Z])', prop)  # split dromedary words on zero-width assertion
+    words[-1] = plural(words[-1])               # pluralize the last word
+    resource_type = '-'.join(words).lower()     # e.g. network-groups
+    if not RESOURCES.get(resource_type):
+        raise RuntimeError(f"no such resource type '{resource_type}")
+    else:
+        return resource_type
 
 
 def abbreviate(kebab):
@@ -225,7 +241,7 @@ def get_resource_type_by_url(url: str):
     """Get the resource type definition from a resource URL."""
     url_parts = urlparse(url)
     url_path = url_parts.path
-    resource_type = sub(r'/(core|rest|identity|auth|product-metadata)/v\d+/([^/]+)/?.*', r'\2', url_path)
+    resource_type = re.sub(r'/(core|rest|identity|auth|product-metadata)/v\d+/([^/]+)/?.*', r'\2', url_path)
     if resource_type == "download-urls.json":
         resource_type = "download-urls"
     if RESOURCES.get(resource_type):
@@ -242,7 +258,14 @@ def get_user_config_dir():
     return user_config_path(appname='netfoundry')
 
 
-def get_generic_resource(url: str, headers: dict, proxies: dict = dict(), verify: bool = True, accept: str = None, **kwargs):
+def get_generic_resource_by_type_and_id(org: object, resource_type: str, resource_id: str, accept: str = None, **kwargs):
+    url = f"{org.audience}{RESOURCES[resource_type].find_url}/{resource_id}"
+    headers = {"authorization": "Bearer " + org.token}
+    resource, status_symbol = get_generic_resource_by_url(url=url, headers=headers, proxies=org.proxies, verify=org.verify, accept=accept, **kwargs)
+    return resource, status_symbol
+
+
+def get_generic_resource_by_url(url: str, headers: dict, proxies: dict = dict(), verify: bool = True, accept: str = None, **kwargs):
     """
     Get, deserialize, and return a single resource.
 
@@ -304,6 +327,7 @@ def get_generic_resource(url: str, headers: dict, proxies: dict = dict(), verify
     else:
         resource = response.json()
     return resource, status_symbol
+get_generic_resource = get_generic_resource_by_type_and_id
 
 
 def find_generic_resources(url: str, headers: dict, embedded: str = None, proxies: dict = dict(), verify: bool = True, accept: str = None, **kwargs):
@@ -519,6 +543,7 @@ class ResourceType(ResourceTypeParent):
     status_symbols: dict = field(default_factory=lambda: RESOURCE_STATUS_SYMBOLS)  # dictionary with three predictable keys: complete, progress, error, each a tuple associating status symbols with a state
     host: bool = field(default=False)                       # may have a managed host in NF cloud
     ziti: bool = field(default=False)
+    find_url: str = field(default='default')
 
     def __post_init__(self):
         """Compute and assign _embedded if not supplied and then check types in parent class."""
@@ -546,13 +571,22 @@ class ResourceType(ResourceTypeParent):
                 HOSTABLE_RESOURCE_ABBREV[self.abbreviation] = self
             if self.ziti:
                 ZITI_NET_RESOURCES[self.name] = self
+        if self.find_url == 'default':
+            if self.domain == 'network':
+                setattr(self, 'find_url', f'core/v2/{self.name}')
+            elif self.domain == 'identity':
+                setattr(self, 'find_url', f'identity/v1/{self.name}')
+            elif self.domain == 'authorization':
+                setattr(self, 'find_url', f'auth/v1/{self.name}')
+            else:
+                raise RuntimeError(f"need default find_url for {self.name}")
         return super().__post_init__()
 
 
 RESOURCES = {
     'roles': ResourceType(
         name='roles',
-        domain='identity',
+        domain='authorization',
         mutable=False,
         embeddable=False,
         _embedded='content',
@@ -614,12 +648,14 @@ RESOURCES = {
         _embedded='organizations',
         mutable=False,
         embeddable=False,
+        find_url='rest/v1/network-groups',
     ),
     'download-urls': ResourceType(
         name='download-urls',
         domain='network-group',
         mutable=False,
         embeddable=False,
+        find_url='product-metadata/v2',
     ),
     'networks': ResourceType(
         name='networks',

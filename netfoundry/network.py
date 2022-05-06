@@ -8,7 +8,7 @@ from requests.exceptions import HTTPError, JSONDecodeError
 
 from netfoundry.exceptions import NetworkBoundaryViolation, UnknownResourceType
 
-from .utility import (DC_PROVIDERS, MUTABLE_NET_RESOURCES, NET_RESOURCES, PROCESS_STATUS_SYMBOLS, RESOURCES, STATUS_CODES, VALID_SEPARATORS, VALID_SERVICE_PROTOCOLS, any_in, docstring_parameters, find_generic_resources, get_generic_resource, http,
+from .utility import (DC_PROVIDERS, MUTABLE_NET_RESOURCES, NET_RESOURCES, PROCESS_STATUS_SYMBOLS, RESOURCES, STATUS_CODES, VALID_SEPARATORS, VALID_SERVICE_PROTOCOLS, any_in, docstring_parameters, find_generic_resources, get_generic_resource_by_url, http,
                       is_uuidv4, normalize_caseless, plural, singular)
 
 
@@ -273,7 +273,7 @@ class Network:
         url = self.audience+'core/v2/data-centers/'+id
         headers = {"authorization": "Bearer " + self.token}
         try:
-            data_center, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            data_center, status_symbol = get_generic_resource_by_url(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except Exception as e:
             raise RuntimeError(f"failed to get data_center from url: '{url}', caught {e}")
         else:
@@ -377,7 +377,7 @@ class Network:
 
         headers = {"authorization": "Bearer " + self.token}
         url = self.audience+'core/v2/'+plural(type)+'/'+id
-        resource, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+        resource, status_symbol = get_generic_resource_by_url(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         if not resource['networkId'] == self.id:
             raise NetworkBoundaryViolation("resource ID is from another network")
         return(resource)
@@ -461,7 +461,7 @@ class Network:
 
         if not MUTABLE_NET_RESOURCES.get(type):  # prune properties that can't be patched
             raise RuntimeError(f"got unexpected type '{type}' for patch request to {self_link}")
-        before_resource, status_symbol = get_generic_resource(url=self_link, headers=headers, proxies=self.proxies, verify=self.verify, accept='update')
+        before_resource, status_symbol = get_generic_resource_by_url(url=self_link, headers=headers, proxies=self.proxies, verify=self.verify, accept='update')
         self.logger.debug(f"found existing resource before patching with properties: '{before_resource}'")
         # compare the patch to the discovered, current state, adding new or updated keys to pruned_patch
         pruned_patch = dict()
@@ -1630,7 +1630,7 @@ class Network:
         url = self.audience+'core/v2/networks/'+network_id
         headers = {"authorization": "Bearer " + self.token}
         try:
-            network, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            network, status_symbol = get_generic_resource_by_url(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except Exception as e:
             raise RuntimeError(f"failed to get network from url: '{url}', caught {e}")
         else:
@@ -1645,7 +1645,7 @@ class Network:
         url = self.audience+'core/v2/network-controllers/'+id+'/secrets'
         headers = {"authorization": "Bearer " + self.token}
         try:
-            secrets, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            secrets, status_symbol = get_generic_resource_by_url(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except Exception as e:
             raise RuntimeError(f"failed to get secrets from url: '{url}', caught {e}")
         else:
@@ -1666,7 +1666,7 @@ class Network:
         url = self.audience+'core/v2/network-controllers/'+id+'/session'
         headers = {"authorization": "Bearer " + self.token}
         try:
-            session, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            session, status_symbol = get_generic_resource_by_url(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except Exception as e:
             raise RuntimeError(f"failed to get session from url: '{url}', caught {e}")
         else:
@@ -1879,7 +1879,7 @@ class Network:
             entity_url += f"{plural(type)}/{id}"
 
         headers = {"authorization": "Bearer " + self.token}
-        resource, status_symbol = get_generic_resource(url=entity_url, headers=headers, proxies=self.proxies, verify=self.verify)
+        resource, status_symbol = get_generic_resource_by_url(url=entity_url, headers=headers, proxies=self.proxies, verify=self.verify)
 
         if resource.get(RESOURCES[plural(type)].status):
             status = resource[RESOURCES[plural(type)].status]
@@ -2061,7 +2061,7 @@ class Networks:
 
         url = f"{self.audience}core/v2/{resource_type}"
         headers = {"authorization": "Bearer " + self.token}
-        resource = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params)
+        resource = get_generic_resource_by_url(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params)
         return(resource)
 
     def wait_for_execution(self, process_id: str, expected_statuses: list, wait: int = 300, sleep: int = 3, id: str = None):
@@ -2081,7 +2081,7 @@ class Networks:
         headers = {"authorization": "Bearer " + self.token}
         time.sleep(sleep)                          # allow minimal time for the resource status to become available
         while time.time() < now+wait and status not in expected_statuses:
-            entity_status, status_symbol = get_generic_resource(url, headers, self.proxies, self.verify)
+            entity_status, status_symbol = get_generic_resource_by_url(url, headers, self.proxies, self.verify)
             if entity_status['status']:            # attribute is not None if HTTP OK
                 status = entity_status['status']
                 self.logger.debug(f"{entity_status['name']} has status {entity_status['status']}")
