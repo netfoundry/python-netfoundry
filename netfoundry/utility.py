@@ -18,7 +18,7 @@ import jwt
 from requests import Session  # HTTP user agent will not emit server cert warnings if verify=False
 from requests import status_codes
 from requests.exceptions import HTTPError
-from requests.adapters import HTTPAdapter
+from requests_cache import CachedSession
 from urllib3 import disable_warnings
 from urllib3.exceptions import InsecureRequestWarning
 from urllib3.util.retry import Retry
@@ -233,6 +233,14 @@ def get_resource_type_by_url(url: str):
         raise UnknownResourceType(resource_type, RESOURCES.keys())
 
 
+def get_user_cache_dir():
+    return user_cache_path(appname='netfoundry')
+
+
+def get_user_config_dir():
+    return user_config_path(appname='netfoundry')
+
+
 def get_generic_resource(url: str, headers: dict, proxies: dict = dict(), verify: bool = True, accept: str = None, **kwargs):
     """
     Get, deserialize, and return a single resource.
@@ -262,7 +270,7 @@ def get_generic_resource(url: str, headers: dict, proxies: dict = dict(), verify
         params['beta'] = str()
     else:
         logging.debug(f"no handlers specified for url '{url}'")
-    response = http.get(
+    response = http_cache.get(
         url,
         headers=headers,
         params=params,
@@ -358,7 +366,7 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
         else:
             logging.warn("ignoring invalid value for header 'accept': '{:s}'".format(accept))
 
-    response = http.get(
+    response = http_cache.get(
         url,
         headers=headers,
         params=params,
@@ -811,11 +819,15 @@ class TimeoutHTTPAdapter(HTTPAdapter):
         return super().send(request, **kwargs)
 
 
-http = Session()
+http = Session()   # no cache
+HTTP_CACHE_EXPIRE=22
+http_cache = CachedSession(cache_name=f"{get_user_cache_dir()}/http_cache", backend='sqlite', expire_after=HTTP_CACHE_EXPIRE)
 # Mount it for both http and https usage
 adapter = TimeoutHTTPAdapter(timeout=DEFAULT_TIMEOUT, max_retries=RETRY_STRATEGY)
 http.mount("https://", adapter)
 http.mount("http://", adapter)
+http_cache.mount("https://", adapter)
+http_cache.mount("http://", adapter)
 STATUS_CODES = status_codes
 DEFAULT_TOKEN_EXPIRY = 3600
 
