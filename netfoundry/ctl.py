@@ -679,20 +679,22 @@ def list(cli, spinner: object = None):
         cli.log.debug(f"found at least one {cli.args.resource_type} by '{', '.join(query_keys)}'")
 
     valid_keys = set()
+    for match in matches:
+        valid_keys = valid_keys.union(match.keys())
     if cli.args.keys:
         # intersection of the set of valid, observed keys in the first match
         # and the set of configured, desired keys
-        valid_keys = set(matches[0].keys()) & set(cli.args.keys)
+        valid_keys = valid_keys.intersection(cli.args.keys)
     elif cli.args.output == "text":
-        default_columns = ['name', 'label', 'organizationShortName', 'type', 'description',
-                           'edgeRouterAttributes', 'serviceAttributes', 'endpointAttributes',
-                           'status', 'zitiId', 'provider', 'locationCode', 'ipAddress', 'networkVersion',
-                           'active', 'default', 'region', 'size', 'attributes', 'email', 'productVersion',
-                           'address', 'binding', 'component']
-        valid_keys = set(matches[0].keys()) & set(default_columns)
+        default_keys = ['name', 'label', 'organizationShortName', 'type', 'description',
+                        'edgeRouterAttributes', 'serviceAttributes', 'endpointAttributes',
+                        'status', 'zitiId', 'provider', 'locationCode', 'ipAddress', 'networkVersion',
+                        'active', 'default', 'region', 'size', 'attributes', 'email', 'productVersion',
+                        'address', 'binding', 'component']
+        valid_keys = valid_keys.intersection(default_keys)
 
     if valid_keys:
-        cli.log.debug(f"valid keys: {str(valid_keys)}")
+        cli.log.debug(f"filtering matches for valid keys: {str(valid_keys)}")
         filtered_matches = []
         for match in matches:
             filtered_match = {key: match[key] for key in match.keys() if key in valid_keys}
