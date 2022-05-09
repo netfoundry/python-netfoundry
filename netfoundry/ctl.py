@@ -12,6 +12,7 @@ import platform
 import re
 import signal
 import tempfile
+from builtins import list as blist
 from json import dumps as json_dumps
 from json import load as json_load
 from json import loads as json_loads
@@ -604,8 +605,11 @@ def get(cli, echo: bool = True, spinner: object = None):
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE",
               choices=[choice for group in [[type, RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
 @cli.subcommand(description='find a collection of resources by type and query')
-def list(cli, spinner: object = None):
-    """Find resources as lists."""
+def list(cli, echo: bool = True, spinner: object = None):
+    """Find resources as lists.
+
+    :param echo: False allows the caller to capture the return instead of printing the match
+    """
     if not spinner:
         spinner = get_spinner(cli, "working")
     else:
@@ -627,6 +631,8 @@ def list(cli, spinner: object = None):
         spinner.text = f"Finding {cli.args.resource_type} {'by' if query_keys else '...'} {', '.join(query_keys)}"
     else:
         spinner.text = f"Finding all {cli.args.resource_type}"
+    if not echo:
+        spinner.enabled = False
     with spinner:
         organization, networks = use_organization(cli, spinner)
         if cli.args.resource_type == "organizations":
@@ -699,6 +705,10 @@ def list(cli, spinner: object = None):
     else:
         cli.log.debug("not filtering output keys")
         filtered_matches = matches
+
+    # if echo=False then return the object and parent objects instead of printing with an output format
+    if not echo:
+        return filtered_matches, organization
 
     if cli.args.output == "text":
         if cli.config.general.headers:
