@@ -1191,7 +1191,7 @@ def use_network_group(cli, organization: object, group: str = None, spinner: obj
     return network_group
 
 
-def use_network(cli, organization: object, network_name: str = None, group: str = None, spinner: object = None):
+def use_network(cli, organization: Organization, network_name: str = None, group: str = None, spinner: object = None):
     """
     Use a network.
 
