@@ -37,7 +37,7 @@ class Network:
             else:
                 network_name = network
         elif (network_id or network_name) and network:
-            self.logger.warn(f"ignoring network identifier '{network}' because network_id or network_name were provided")
+            self.logger.warning(f"ignoring network identifier '{network}' because network_id or network_name were provided")
 
         if network_id:
             self.describe = self.get_network_by_id(network_id)
@@ -369,7 +369,7 @@ class Network:
             if accept in ["create", "update"]:
                 headers['accept'] = "application/json;as="+accept
             else:
-                self.logger.warn(f"ignoring invalid value for param 'accept': '{accept}'")
+                self.logger.warning(f"ignoring invalid value for param 'accept': '{accept}'")
         if not type == "network":
             params["networkId"] = self.id
         if not NET_RESOURCES.get(plural(type)):
@@ -397,7 +397,7 @@ class Network:
         if not type[-1] == "s":
             type = plural(type)
         if type == "data-centers":
-            self.logger.warn("don't call network.get_resources() for data centers, always use network.get_edge_router_data_centers() to filter for locations that support this network's version")
+            self.logger.warning("don't call network.get_resources() for data centers, always use network.get_edge_router_data_centers() to filter for locations that support this network's version")
 
         for param in kwargs.keys():
             params[param] = kwargs[param]
@@ -456,7 +456,7 @@ class Network:
         else:
             split_type = self_link.split('/')[5]           # e.g. endpoints, app-wans, edge-routers, etc...
             if type and not type == split_type:
-                self.logger.warn(f"mutating value of param 'type={type}' to match self link '{split_type}' in requested patch")
+                self.logger.warning(f"mutating value of param 'type={type}' to match self link '{split_type}' in requested patch")
             type = split_type
 
         if not MUTABLE_NET_RESOURCES.get(type):  # prune properties that can't be patched
@@ -491,7 +491,7 @@ class Network:
             if type == "services" and not pruned_patch.get('modelType') and pruned_patch.get('model'):
                 # moduleType is immutable, so we're just carrying a known value forward to compose a valid patch request
                 pruned_patch["modelType"] = before_resource["modelType"]
-                self.logger.warn(f"added required service property 'modelType' from current state '{pruned_patch['modelType']}' to patch request")
+                self.logger.warning(f"added required service property 'modelType' from current state '{pruned_patch['modelType']}' to patch request")
             after_response = http.patch(
                 self_link,
                 proxies=self.proxies,
@@ -522,14 +522,14 @@ class Network:
                     self.wait_for_statuses(expected_statuses=RESOURCES['executions'].status_symbols['progress'] + RESOURCES['executions'].status_symbols['complete'], type="executions", id=process_id, wait=9, sleep=2)
                     return(resource)
             elif wait:
-                self.logger.warn(f"unable to wait for async complete because response did not provide a process execution id, returning patched resource '{resource}'")
+                self.logger.warning(f"unable to wait for async complete because response did not provide a process execution id, returning patched resource '{resource}'")
                 return(resource)
             else:  # no links, no wait
                 self.logger.debug(f"returning patched resource without waiting: '{resource}'")
                 return(resource)
         else:
             # no change, return the existing unmodified entity
-            self.logger.warn("not sending patch because there were no differences between the requested state and current state, returning the current state")
+            self.logger.warning("not sending patch because there were no differences between the requested state and current state, returning the current state")
             return(before_resource)
 
     def put_resource(self, put: dict, type: str = None, id: str = None, wait: int = 0, sleep: int = 2, progress: bool = False):
@@ -586,7 +586,7 @@ class Network:
                 self.wait_for_statuses(expected_statuses=RESOURCES['executions'].status_symbols['progress'] + RESOURCES['executions'].status_symbols['complete'], type="executions", id=process_id, wait=9, sleep=2)
                 return(resource)
         elif wait:
-            self.logger.warn("unable to wait for async complete because response did not provide a process execution id")
+            self.logger.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
         else:
             return(resource)
@@ -632,7 +632,7 @@ class Network:
                 self.wait_for_statuses(expected_statuses=RESOURCES['executions'].status_symbols['progress'] + RESOURCES['executions'].status_symbols['complete'], type="executions", id=process_id, wait=9, sleep=2)
                 return(resource)
         elif wait:
-            self.logger.warn("unable to wait for async complete because response did not provide a process execution id")
+            self.logger.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
         else:
             return(resource)
@@ -699,7 +699,7 @@ class Network:
                 self.wait_for_statuses(expected_statuses=RESOURCES['executions'].status_symbols['progress'] + RESOURCES['executions'].status_symbols['complete'], type="executions", id=process_id, wait=9, sleep=2)
                 return(resource)
         elif wait:
-            self.logger.warn("unable to wait for async complete because response did not provide a process execution id")
+            self.logger.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
         else:
             return(resource)
@@ -738,7 +738,7 @@ class Network:
                 "tunnelerEnabled": tunneler_enabled
             }
             if data_center_id:
-                self.logger.warn('data_center_id is deprecated by provider, location_code. ')
+                self.logger.warning('data_center_id is deprecated by provider, location_code. ')
                 data_center = self.get_data_center_by_id(id=data_center_id)
                 body['provider'] = data_center['provider']
                 body['locationCode'] = data_center['locationCode']
@@ -796,7 +796,7 @@ class Network:
                 self.wait_for_statuses(expected_statuses=RESOURCES['executions'].status_symbols['progress'] + RESOURCES['executions'].status_symbols['complete'], type="executions", id=process_id, wait=9, sleep=2)
                 return(resource)
         elif wait:
-            self.logger.warn("unable to wait for async complete because response did not provide a process execution id")
+            self.logger.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
         else:
             return(resource)
@@ -900,7 +900,7 @@ class Network:
             if not server_host_name:
                 body['modelType'] = "TunnelerToSdk"
                 if server_port:
-                    self.logger.warn("ignoring unexpected server details for SDK-hosted service")
+                    self.logger.warning("ignoring unexpected server details for SDK-hosted service")
             else:
                 server_egress = {
                     "protocol": server_protocol.lower(),
@@ -999,7 +999,7 @@ class Network:
                 self.wait_for_statuses(expected_statuses=RESOURCES['executions'].status_symbols['progress'] + RESOURCES['executions'].status_symbols['complete'], type="executions", id=process_id, wait=9, sleep=2)
                 return(resource)
         elif wait:
-            self.logger.warn("unable to wait for async complete because response did not provide a process execution id")
+            self.logger.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
         else:
             return(resource)
@@ -1080,7 +1080,7 @@ class Network:
                 self.wait_for_statuses(expected_statuses=RESOURCES['executions'].status_symbols['progress'] + RESOURCES['executions'].status_symbols['complete'], type="executions", id=process_id, wait=9, sleep=2)
                 return(resource)
         elif wait:
-            self.logger.warn("unable to wait for async complete because response did not provide a process execution id")
+            self.logger.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
         else:
             return(resource)
@@ -1152,7 +1152,7 @@ class Network:
                 self.wait_for_statuses(expected_statuses=RESOURCES['executions'].status_symbols['progress'] + RESOURCES['executions'].status_symbols['complete'], type="executions", id=process_id, wait=9, sleep=2)
                 return(resource)
         elif wait:
-            self.logger.warn("unable to wait for async complete because response did not provide a process execution id")
+            self.logger.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
         else:
             return(resource)
@@ -1241,7 +1241,7 @@ class Network:
                 self.wait_for_statuses(expected_statuses=RESOURCES['executions'].status_symbols['progress'] + RESOURCES['executions'].status_symbols['complete'], type="executions", id=process_id, wait=9, sleep=2)
                 return(resource)
         elif wait:
-            self.logger.warn("unable to wait for async complete because response did not provide a process execution id")
+            self.logger.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
         else:
             return(resource)
@@ -1544,7 +1544,7 @@ class Network:
                 self.wait_for_statuses(expected_statuses=RESOURCES['executions'].status_symbols['progress'] + RESOURCES['executions'].status_symbols['complete'], type="executions", id=process_id, wait=9, sleep=2)
                 return(resource)
         elif wait:
-            self.logger.warn("unable to wait for async complete because response did not provide a process execution id")
+            self.logger.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
         else:
             return(resource)
@@ -1698,7 +1698,7 @@ class Network:
             raise RuntimeError(f"wait duration ({wait}) must be greater than or equal to polling interval ({sleep})")
 
         if progress:
-            self.logger.warn("progress meters are decommissioned and superseded by nfctl")
+            self.logger.warning("progress meters are decommissioned and superseded by nfctl")
         self.logger.debug(f"waiting for {str(property_type)} property {property_name} in {entity_type} with id {id} or until {time.ctime(now+wait)}.")
 
         property_value = None
@@ -1744,7 +1744,7 @@ class Network:
             raise Exception(f"ERROR: unknown type '{entity_type}'. Choices: {', '.join(NET_RESOURCES.keys())}")
 
         if progress:
-            self.logger.warn("progress meters are decommissioned and superseded by nfctl")
+            self.logger.warning("progress meters are decommissioned and superseded by nfctl")
         self.logger.debug(f"waiting for {entity_type} with name {entity_name} to appear or until {time.ctime(now+wait)}.")
 
         found_entities = []
@@ -1786,7 +1786,7 @@ class Network:
             raise RuntimeError("need expect status other than 'ERROR' because it's used internally to notice failures while waiting for valid statuses")
 
         if progress:
-            self.logger.warn("progress meters are decommissioned and superseded by nfctl")
+            self.logger.warning("progress meters are decommissioned and superseded by nfctl")
         self.logger.debug(f"waiting for {type} to have status {expect} or until {time.ctime(now+wait)}")
 
         status = str()
@@ -1835,7 +1835,7 @@ class Network:
         unexpected_statuses = RESOURCES[plural(type)].status_symbols['error']
 
         if progress:
-            self.logger.warn("progress meters are decommissioned and superseded by nfctl")
+            self.logger.warning("progress meters are decommissioned and superseded by nfctl")
         self.logger.debug(f"waiting for any status in {expected_statuses} for {type} with id {id} or until {time.ctime(now+wait)}.")
 
         status = 'NEW'
@@ -1967,7 +1967,7 @@ class Network:
             try:
                 resource = response.json()
             except JSONDecodeError as e:
-                self.logger.debug("ignoring {e}")
+                self.logger.debug(f"ignoring {e}")
                 return(True)
             else:
                 if resource.get('_links') and resource['_links'].get('executions'):
