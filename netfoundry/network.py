@@ -310,9 +310,8 @@ class Network:
                 raise RuntimeError(f"unknown cloud provider '{provider}'. Need one of {str(DC_PROVIDERS)}")
 
         url = self.audience+'core/v2/data-centers'
-        headers = {"authorization": "Bearer " + self.token}
         data_centers = list()
-        for i in find_generic_resources(url=url, headers=headers, embedded=NET_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params):
+        for i in find_generic_resources(setup=self, url=url, embedded=NET_RESOURCES['data-centers']._embedded, **params):
             data_centers.extend(i)
         if location_code:
             return [dc for dc in data_centers if dc['locationCode'] == location_code]
@@ -375,9 +374,8 @@ class Network:
         if not NET_RESOURCES.get(plural(type)):
             raise RuntimeError(f"unknown resource type '{plural(type)}'. Choices: {', '.join(NET_RESOURCES.keys())}")
 
-        headers = {"authorization": "Bearer " + self.token}
         url = self.audience+'core/v2/'+plural(type)+'/'+id
-        resource, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+        resource, status_symbol = get_generic_resource(setup=self, url=url, headers=headers)
         if not resource['networkId'] == self.id:
             raise NetworkBoundaryViolation("resource ID is from another network")
         return(resource)
@@ -413,7 +411,7 @@ class Network:
         headers = {"authorization": "Bearer " + self.token}
         try:
             resources = list()
-            for i in find_generic_resources(url=url, headers=headers, embedded=NET_RESOURCES[plural(type)]._embedded, accept=accept, proxies=self.proxies, verify=self.verify, **params):
+            for i in find_generic_resources(setup=self, url=url, embedded=NET_RESOURCES[plural(type)]._embedded, accept=accept, **params):
                 resources.extend(i)
         except Exception as e:
             raise RuntimeError(f"failed to get {plural(type)} from url: '{url}', caught {e}")
@@ -461,7 +459,7 @@ class Network:
 
         if not MUTABLE_NET_RESOURCES.get(type):  # prune properties that can't be patched
             raise RuntimeError(f"got unexpected type '{type}' for patch request to {self_link}")
-        before_resource, status_symbol = get_generic_resource(url=self_link, headers=headers, proxies=self.proxies, verify=self.verify, accept='update')
+        before_resource, status_symbol = get_generic_resource(setup=self, url=self_link)
         self.logger.debug(f"found existing resource before patching with properties: '{before_resource}'")
         # compare the patch to the discovered, current state, adding new or updated keys to pruned_patch
         pruned_patch = dict()
@@ -1275,9 +1273,8 @@ class Network:
         :param str network_id: the UUID of the network
         """
         url = self.audience+'core/v2/networks/'+network_id
-        headers = {"authorization": "Bearer " + self.token}
         try:
-            network, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            network, status_symbol = get_generic_resource(setup=self, url=url)
         except Exception as e:
             raise RuntimeError(f"failed to get network from url: '{url}', caught {e}")
         else:
@@ -1290,9 +1287,8 @@ class Network:
         :param id: the UUID of the network controller
         """
         url = self.audience+'core/v2/network-controllers/'+id+'/secrets'
-        headers = {"authorization": "Bearer " + self.token}
         try:
-            secrets, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            secrets, status_symbol = get_generic_resource(setup=self, url=url)
         except Exception as e:
             raise RuntimeError(f"failed to get secrets from url: '{url}', caught {e}")
         else:
@@ -1311,9 +1307,8 @@ class Network:
         :param id: the UUID of the network controller
         """
         url = self.audience+'core/v2/network-controllers/'+id+'/session'
-        headers = {"authorization": "Bearer " + self.token}
         try:
-            session, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            session, status_symbol = get_generic_resource(setup=self, url=url)
         except Exception as e:
             raise RuntimeError(f"failed to get session from url: '{url}', caught {e}")
         else:
@@ -1526,7 +1521,7 @@ class Network:
             entity_url += f"{plural(type)}/{id}"
 
         headers = {"authorization": "Bearer " + self.token}
-        resource, status_symbol = get_generic_resource(url=entity_url, headers=headers, proxies=self.proxies, verify=self.verify)
+        resource, status_symbol = get_generic_resource(setup=self, url=entity_url)
 
         if resource.get(RESOURCES[plural(type)].status):
             status = resource[RESOURCES[plural(type)].status]
@@ -1617,21 +1612,14 @@ class Network:
                 self.logger.debug(f"ignoring {e}")
                 return(True)
             else:
-                if resource.get('_links') and resource['_links'].get('executions'):
-                    _links = resource['_links'].get('executions')
-                    if isinstance(_links, list):
-                        process_id = _links[0]['href'].split('/')[6]
-                    else:
-                        process_id = _links['href'].split('/')[6]
-                    if wait:
+                if wait:
+                    if resource.get('_links') and resource['_links'].get('execution'):
+                        execution_url = resource['_links'].get('execution')['href']
                         self.wait_for_statuses(expected_statuses=RESOURCES["executions"].status_symbols['complete'], type="executions", id=process_id, wait=wait, sleep=sleep)
                         return(True)
-                    else:    # only wait for the process to start, not finish, or timeout
-                        self.wait_for_statuses(expected_statuses=RESOURCES['executions'].status_symbols['progress'] + RESOURCES['executions'].status_symbols['complete'], type="executions", id=process_id, wait=9, sleep=2)
-                        return(True)
-                elif wait:
-                    self.logger.warn("unable to wait for async complete because response did not provide a process execution id")
-                    return(False)
+                    else:
+                        self.logger.warning("unable to wait for async complete because response did not provide a process execution id")
+                        return(False)
                 else:
                     return(True)
 
@@ -1677,16 +1665,8 @@ class Networks:
             params[k] = v
 
         url = f"{self.audience}core/v2/{resource_type}"
-        headers = {"authorization": "Bearer " + self.token}
         resources = list()
-        for i in find_generic_resources(
-            url=url,
-            headers=headers,
-            embedded=_embedded,
-            proxies=self.proxies,
-            verify=self.verify,
-            **params,
-        ):
+        for i in find_generic_resources(setup=self, url=url, **params):
             resources.extend(i)
         return(resources)
 
@@ -1707,7 +1687,6 @@ class Networks:
             params[k] = v
 
         url = f"{self.audience}core/v2/{resource_type}"
-        headers = {"authorization": "Bearer " + self.token}
-        resource = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params)
+        resource = get_generic_resource(setup=self, url=url, **params)
         return(resource)
 

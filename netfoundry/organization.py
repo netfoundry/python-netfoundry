@@ -50,12 +50,9 @@ class Organization:
         self.log_file = log_file
         self.debug = debug
         if logger:
-            # print(f"using logger '{logger}' from param")
             self.logger = logger
         else:
-            # print("initializing null logger")
             self.logger = logging.getLogger(__name__)
-#        self.logger = logger or logging.getLogger(__name__)
             self.logger.addHandler(logging.NullHandler())
 
         if self.debug:
@@ -68,7 +65,7 @@ class Organization:
             file_handler.setFormatter(formatter)
             self.logger.addHandler(file_handler)
 
-        # verify auth endpoint's server certificate if proxy is type SOCKS or None
+        # do verify Gateway Service's TLS server certificate if proxy is type SOCKS or None
         self.proxy = proxy
         if proxy is None:
             self.proxies = dict()
@@ -421,10 +418,9 @@ path to credentials file.
             self.audience+'identity/v1/api-account-identities/self',
             self.audience+'identity/v1/user-identities/self',
         ]
-        headers = {"authorization": "Bearer " + self.token}
         for url in urls:
             try:
-                caller, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+                caller, status_symbol = get_generic_resource(setup=self, url=url)
             except Exception as e:
                 self.logger.debug(f"failed to get caller identity from url: '{url}', trying next until last, caught {e}")
             else:
@@ -437,9 +433,8 @@ path to credentials file.
         :param str identity: UUIDv4 of the identity to get
         """
         url = self.audience+'identity/v1/identities/'+identity_id
-        headers = {"authorization": "Bearer " + self.token}
         try:
-            identity, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            identity, status_symbol = get_generic_resource(setup=self, url=url)
         except Exception as e:
             raise RuntimeError(f"failed to get identity from url: '{url}', caught {e}")
         else:
@@ -468,7 +463,7 @@ path to credentials file.
         headers = {"authorization": "Bearer " + self.token}
         try:
             identities = list()
-            for i in find_generic_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params):
+            for i in find_generic_resources(setup=self, url=url, **params):
                 identities.extend(i)
         except Exception as e:
             raise RuntimeError(f"failed to get identities from url: '{url}', caught {e}")
@@ -496,10 +491,9 @@ path to credentials file.
                 self.logger.warn(f"query param '{noop}' is not implemented for Authorization Service in this application")
 
         url = self.audience+'auth/v1/roles'
-        headers = {"authorization": "Bearer " + self.token}
         try:
             roles = list()
-            for i in find_generic_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params):
+            for i in find_generic_resources(setup=self, url=url, **params):
                 roles.extend(i)
         except Exception as e:
             raise RuntimeError(f"failed to get roles from url: '{url}', caught {e}")
@@ -510,9 +504,8 @@ path to credentials file.
         """Get roles as a collection."""
 
         url = f"{self.audience}auth/v1/roles/{role_id}"
-        headers = {"authorization": "Bearer " + self.token}
         try:
-            role, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            role, status_symbol = get_generic_resource(setup=self, url=url)
         except Exception as e:
             raise RuntimeError(f"failed to get role from url: '{url}', caught {e}")
         else:
@@ -531,10 +524,9 @@ path to credentials file.
                 self.logger.warn(f"query param '{noop}' is not supported by Identity Service")
 
         url = self.audience+'identity/v1/organizations'
-        headers = {"authorization": "Bearer " + self.token}
         try:
             organizations = list()
-            for i in find_generic_resources(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params):
+            for i in find_generic_resources(setup=self, url=url, **params):
                 organizations.extend(i)
         except Exception as e:
             raise RuntimeError(f"failed to get organizations from url: '{url}', caught {e}")
@@ -549,9 +541,8 @@ path to credentials file.
         :param id: the UUID of the org
         """
         url = self.audience+'identity/v1/organizations/'+id
-        headers = {"authorization": "Bearer " + self.token}
         try:
-            organization, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            organization, status_symbol = get_generic_resource(setup=self, url=url)
         except Exception as e:
             raise RuntimeError(f"failed to get organization from url: '{url}', caught {e}")
         else:
@@ -564,9 +555,8 @@ path to credentials file.
         :param network_group_id: the UUID of the network group
         """
         url = self.audience+'rest/v1/network-groups/'+network_group_id
-        headers = {"authorization": "Bearer " + self.token}
         try:
-            network_group, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            network_group, status_symbol = get_generic_resource(setup=self, url=url)
         except Exception as e:
             raise RuntimeError(f"failed to get network_group from url: '{url}', caught {e}")
         else:
@@ -581,8 +571,6 @@ path to credentials file.
                 "create" is useful for comparing an existing entity to a set of properties that are used to create the same type of
                 entity in a POST request, and "update" may be used in the same way for a PUT update.
         """
-        headers = dict()
-        headers["authorization"] = "Bearer " + self.token
         params = dict()
         requested_types = list()
         valid_types = set()
@@ -599,7 +587,7 @@ path to credentials file.
             self.logger.debug(f"requesting embed of: '{valid_types}'")
 
         url = self.audience+'core/v2/networks/'+network_id
-        network, status_symbol = get_generic_resource(url=url, headers=headers, accept=accept, proxies=self.proxies, verify=self.verify, **params)
+        network, status_symbol = get_generic_resource(setup=self, url=url, accept=accept, **params)
         return(network)
 
     def find_network_groups_by_organization(self, **kwargs):
@@ -608,9 +596,8 @@ path to credentials file.
         :param str kwargs: filter results by any supported query param
         """
         url = self.audience+'rest/v1/network-groups'
-        headers = {"authorization": "Bearer " + self.token}
         network_groups = list()
-        for i in find_generic_resources(url=url, headers=headers, embedded=RESOURCES['network-groups']._embedded, proxies=self.proxies, verify=self.verify, **kwargs):
+        for i in find_generic_resources(setup=self, url=url, embedded=RESOURCES['network-groups']._embedded, **kwargs):
             network_groups.extend(i)
         return(network_groups)
     get_network_groups_by_organization = find_network_groups_by_organization
@@ -625,7 +612,6 @@ path to credentials file.
         :param bool deleted: include resource entities that have a non-null property deletedAt
         """
         url = self.audience+'core/v2/networks'
-        headers = {"authorization": "Bearer " + self.token}
         params = {
             "findByName": name
         }
@@ -635,7 +621,7 @@ path to credentials file.
             params['status'] = 'DELETED'
         try:
             networks = list()
-            for i in find_generic_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, accept=accept, proxies=self.proxies, verify=self.verify, **params):
+            for i in find_generic_resources(setup=self, url=url, embedded=RESOURCES['networks']._embedded, accept=accept, **params):
                 networks.extend(i)
         except Exception as e:
             raise RuntimeError(f"failed to get networks from url: '{url}', caught {e}")
@@ -688,10 +674,9 @@ path to credentials file.
             params['status'] = "DELETED"
 
         url = self.audience+'core/v2/networks'
-        headers = {"authorization": "Bearer " + self.token}
         try:
             networks = list()
-            for i in find_generic_resources(url=url, headers=headers, embedded=RESOURCES['networks']._embedded, accept=accept, proxies=self.proxies, verify=self.verify, **params):
+            for i in find_generic_resources(setup=self, url=url, embedded=RESOURCES['networks']._embedded, accept=accept, **params):
                 networks.extend(i)
         except Exception as e:
             raise RuntimeError(f"failed to get networks from url: '{url}', caught {e}")

@@ -1,24 +1,23 @@
 """Shared helper functions, constants, and classes."""
 
 import json
-from json import JSONDecodeError
-import logging
 import os
-from stat import filemode
 import re  # regex
-from urllib.parse import urlparse
 import time  # enforce a timeout; sleep
 import unicodedata  # case insensitive compare in Utility
 from dataclasses import dataclass, field
+from json import JSONDecodeError
 from re import sub
+from stat import filemode
+from urllib.parse import urlparse
 from uuid import UUID  # validate UUIDv4 strings
 
 import inflect  # singular and plural nouns
 import jwt
 from requests import Session  # HTTP user agent will not emit server cert warnings if verify=False
 from requests import status_codes
-from requests.exceptions import HTTPError
 from requests.adapters import HTTPAdapter
+from requests.exceptions import HTTPError
 from urllib3 import disable_warnings
 from urllib3.exceptions import InsecureRequestWarning
 from urllib3.util.retry import Retry
@@ -104,7 +103,7 @@ def caseless_equal(left, right):
     return normalize_caseless(left) == normalize_caseless(right)
 
 
-def get_token_cache(path):
+def get_token_cache(setup: object, path):
     """Try to read the token cache file and return the object."""
     try:
         token_cache = json.loads(path.read_text())
@@ -116,7 +115,7 @@ def get_token_cache(path):
         raise RuntimeError(f"failed to read cache file '{path.__str__()}', caught {e}")
     else:
         cache_file_stats = os.stat(path)
-        logging.debug(f"parsed token cache file '{path.__str__()}' as JSON with mode {filemode(cache_file_stats.st_mode)}")
+        setup.logger.debug(f"parsed token cache file '{path.__str__()}' as JSON with mode {filemode(cache_file_stats.st_mode)}")
 
     if all(k in token_cache for k in ['token', 'expiry', 'audience']):
         return token_cache
@@ -124,7 +123,7 @@ def get_token_cache(path):
         raise Exception("not all expected token cache file keys were found: token, expiry, audience")
 
 
-def jwt_expiry(token):
+def jwt_expiry(setup: object, token):
     """Return an epoch timestampt when the token will be expired.
 
     First, try to parse JWT to extract expiry. If that fails then estimate +1h.
@@ -133,20 +132,20 @@ def jwt_expiry(token):
         claim = jwt_decode(token)
         expiry = claim['exp']
     except jwt.exceptions.PyJWTError:
-        logging.debug(f"error parsing JWT to extract expiry, estimating +{DEFAULT_TOKEN_EXPIRY}s")
+        setup.logger.debug(f"error parsing JWT to extract expiry, estimating +{DEFAULT_TOKEN_EXPIRY}s")
         expiry = time.time() + DEFAULT_TOKEN_EXPIRY
     except KeyError:
-        logging.debug(f"failed to extract expiry epoch from claimset as key 'exp', estimating +{DEFAULT_TOKEN_EXPIRY}s")
+        setup.logger.debug(f"failed to extract expiry epoch from claimset as key 'exp', estimating +{DEFAULT_TOKEN_EXPIRY}s")
         expiry = time.time() + DEFAULT_TOKEN_EXPIRY
     except Exception as e:
         raise RuntimeError(f"unexpect error, caught {e}")
     else:
-        logging.debug("successfully extracted expiry from JWT")
+        setup.logger.debug("successfully extracted expiry from JWT")
     finally:
         return expiry
 
 
-def jwt_environment(token):
+def jwt_environment(setup: object, token):
     """Try to extract the environment name from a JWT.
 
     First, try to parse JWT to extract the audience. If that fails then assume "production".
@@ -156,23 +155,23 @@ def jwt_environment(token):
         iss = claim['iss']
     except jwt.exceptions.PyJWTError:
         environment = "production"
-        logging.debug("error parsing JWT to extract audience, assuming environment is Production")
+        setup.logger.debug("error parsing JWT to extract audience, assuming environment is Production")
     except KeyError:
         environment = "production"
-        logging.debug("failed to extract the issuer URL from claimset as key 'iss', assuming environment is Production")
+        setup.logger.debug("failed to extract the issuer URL from claimset as key 'iss', assuming environment is Production")
     except Exception as e:
         raise RuntimeError(f"unexpect error, caught {e}")
 
     else:
         if re.match(r'https://cognito-', iss):
             environment = re.sub(r'https://gateway\.([^.]+)\.netfoundry\.io.*', r'\1', claim['scope'])
-            logging.debug(f"matched Cognito issuer URL convention, found environment '{environment}'")
+            setup.logger.debug(f"matched Cognito issuer URL convention, found environment '{environment}'")
         elif re.match(r'.*\.auth0\.com', iss):
             environment = re.sub(r'https://netfoundry-([^.]+)\.auth0\.com.*', r'\1', claim['iss'])
-            logging.debug(f"matched Auth0 issuer URL convention, found environment '{environment}'")
+            setup.logger.debug(f"matched Auth0 issuer URL convention, found environment '{environment}'")
         else:
             environment = "production"
-            logging.debug(f"failed to match Auth0 and Cognito issuer URL conventions, assuming environment is '{environment}'")
+            setup.logger.debug(f"failed to match Auth0 and Cognito issuer URL conventions, assuming environment is '{environment}'")
     finally:
         return environment
 
@@ -215,9 +214,9 @@ def is_uuidv4(string: str):
         return True
 
 
-def eprint(*args, **kwargs):
-    """Adapt legacy function to logging."""
-    logging.debug(*args, **kwargs)
+# def eprint(*args, **kwargs):
+#     """Adapt legacy function to logging."""
+#     logging.debug(*args, **kwargs)
 
 
 def get_resource_type_by_url(url: str):
@@ -300,26 +299,29 @@ def create_generic_resource(setup: object, url: str, body: dict, headers: dict =
         execution_url = resource['_links']['execution']['href']
         wait_for_execution(org=org, url=execution_url, wait=wait, sleep=sleep)
     return resource
+
+
+def get_generic_resource(setup: object, url: str, headers: dict = dict(), accept: str = None, **kwargs):
     """
     Get, deserialize, and return a single resource.
 
+    :param setup: instance of Organization with attributes token, proxies, verify, and logger
     :param url: the full URL to get
-    :param headers: authorization and accept headers
-    :param proxies: Requests proxies dict
-    :param verify: Requests verify bool is off if proxies enabled in this lib
+    :param accept: None or 'create' which means to find the as=create form of the resource, i.e. just the properties needed to re-create the same resource
     :param kwargs: additional query params are typically logical AND if supported or ignored by the API if not
     """
     params = dict()
+    headers['Authorization'] = f"Bearer {setup.token}"
     for param in kwargs.keys():
         params[param] = kwargs[param]
     if accept:
         if accept in ["create", "update"]:
             headers['accept'] = f"application/json;as={accept}"
         else:
-            logging.warn("ignoring invalid value for header 'accept': '{:s}'".format(accept))
+            setup.logger.warn("ignoring invalid value for header 'accept': '{:s}'".format(accept))
 
     resource_type = get_resource_type_by_url(url)
-    logging.debug(f"detected resource type {resource_type.name}")
+    setup.logger.debug(f"detected URL for resource type {resource_type.name}")
     # always embed the host record if getting the base resource by ID i.e. /{resource_type}/{uuid}, not leaf operations like /session or /rotatekey
     pattern = re.compile(f".*/{resource_type.name}/"+r'[a-f0-9]{8}-?[a-f0-9]{4}-?4[a-f0-9]{3}-?[89ab][a-f0-9]{3}-?[a-f0-9]{12}\Z', re.I)
     if resource_type.name in HOSTABLE_NET_RESOURCES.keys() and re.match(pattern, url):
@@ -327,13 +329,13 @@ def create_generic_resource(setup: object, url: str, body: dict, headers: dict =
     elif resource_type.name in ["process-executions"]:
         params['beta'] = str()
     else:
-        logging.debug(f"no handlers specified for url '{url}'")
+        setup.logger.debug(f"no handlers specified for url '{url}'")
     response = http.get(
         url,
         headers=headers,
         params=params,
-        proxies=proxies,
-        verify=verify,
+        proxies=setup.proxies,
+        verify=setup.verify,
     )
     # Return the HTTP response code symbol. This is useful for functions like
     # network.get_status() which will fall-back to the HTTP status if a status
@@ -363,21 +365,21 @@ def create_generic_resource(setup: object, url: str, body: dict, headers: dict =
     return resource, status_symbol
 
 
-def find_generic_resources(url: str, headers: dict, embedded: str = None, proxies: dict = dict(), verify: bool = True, accept: str = None, **kwargs):
+def find_generic_resources(setup: object, url: str, headers: dict = dict(), embedded: str = None, accept: str = None, **kwargs):
     """
     Generate each page of a type of resource.
 
+    :param setup: instance of Organization with attributes token, proxies, verify, and logger
     :param url: the full URL to get
-    :param headers: authorization and accept headers
     :param embedded: the key under '_embedded' where the list of resources for this type is found (e.g. 'networkList')
-    :param proxies: Requests proxies dict
-    :param verify: Requests verify bool is off if proxies enabled in this lib
+    :param accept: None or 'create' which means to find the as=create form of the collection, i.e. just the properties needed to re-create the same resources
     :param kwargs: additional query params are typically logical AND if supported or ignored by the API if not
     """
     # page through all pages unless a particular page or size or both are requested
     get_all_pages = True
     # parse all kwargs as query params
     params = dict()
+    headers['Authorization'] = f"Bearer {setup.token}"
     # validate and store the resource type
     resource_type = get_resource_type_by_url(url)
     if HOSTABLE_NET_RESOURCES.get(resource_type.name):
@@ -422,14 +424,14 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
             headers['accept'] = "application/hal+json;as="+accept
             embedded = accept + embedded[0].upper() + embedded[1:]  # compose "createEndpointList" from "endpointList"
         else:
-            logging.warn("ignoring invalid value for header 'accept': '{:s}'".format(accept))
+            setup.logger.warn("ignoring invalid value for header 'accept': '{:s}'".format(accept))
 
     response = http.get(
         url,
         headers=headers,
         params=params,
-        proxies=proxies,
-        verify=verify,
+        proxies=setup.proxies,
+        verify=setup.verify,
     )
     response.raise_for_status()
     resource_page = response.json()
@@ -486,19 +488,19 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
         yield resource_page
 
 
-class Utility:
-    """Legacy interface to utility functions."""
-    def __init__(self):
-        pass
+# class Utility:
+#     """Interface to utility functions."""
+#     def __init__(self):
+#         pass
 
-    def caseless_equal(self, left, right):
-        return caseless_equal(left, right)
+#     def caseless_equal(self, left, right):
+#         return caseless_equal(left, right)
 
-    def snake(self, camel_str):
-        return camel2snake(camel_str)
+#     def snake(self, camel_str):
+#         return camel2snake(camel_str)
 
-    def camel(self, snake_str):
-        return snake2camel(snake_str)
+#     def camel(self, snake_str):
+#         return snake2camel(snake_str)
 
 
 NET_RESOURCES = dict()             # resources in network domain
