@@ -14,19 +14,15 @@ from uuid import UUID  # validate UUIDv4 strings
 
 import inflect  # singular and plural nouns
 import jwt
+from platformdirs import user_cache_path, user_config_path
 from requests import Session  # HTTP user agent will not emit server cert warnings if verify=False
 from requests import status_codes
 from requests.adapters import HTTPAdapter
 from requests.exceptions import HTTPError
-from urllib3 import disable_warnings
-from urllib3.exceptions import InsecureRequestWarning
+from requests_cache import CachedSession
 from urllib3.util.retry import Retry
 
 from .exceptions import UnknownResourceType
-
-disable_warnings(InsecureRequestWarning)
-
-p = inflect.engine()
 
 
 def any_in(a, b):
@@ -37,6 +33,7 @@ def any_in(a, b):
 def plural(singular):
     """Pluralize a singular form."""
     # if already plural then return, else pluralize
+    p = inflect.engine()
     if singular[-1:] == 's':
         return(singular)
     else:
@@ -45,6 +42,7 @@ def plural(singular):
 
 def singular(plural):
     """Singularize a plural form."""
+    p = inflect.engine()
     return(p.singular_noun(plural))
 
 
@@ -77,7 +75,22 @@ def snake2camel(snake_str):
 
 def camel2snake(camel_str):
     """Convert a string from camel case to snake case."""
-    return sub(r'(?<!^)(?=[A-Z])', '_', camel_str).lower()
+    return re.sub(r'(?<!^)(?=[A-Z])', '_', camel_str).lower()
+
+
+def propid2type(prop):
+    """Transform a conventional property name like networkGroupId to a resource type like network-groups."""
+    if not prop.endswith('Id'):
+        raise RuntimeError(f"this function is intended to transform property names ending with 'Id', not {prop}")
+    else:
+        prop = prop[0:-2]                       # everything but the trailing 'Id'
+    words = re.split(r'(?<!^)(?=[A-Z])', prop)  # split dromedary words on zero-width assertion
+    words[-1] = plural(words[-1])               # pluralize the last word
+    resource_type = '-'.join(words).lower()     # e.g. network-groups
+    if not RESOURCES.get(resource_type):
+        raise RuntimeError(f"no such resource type '{resource_type}")
+    else:
+        return resource_type
 
 
 def abbreviate(kebab):
@@ -223,13 +236,28 @@ def get_resource_type_by_url(url: str):
     """Get the resource type definition from a resource URL."""
     url_parts = urlparse(url)
     url_path = url_parts.path
-    resource_type = sub(r'/(core|rest|identity|auth|product-metadata)/v\d+/([^/]+)/?.*', r'\2', url_path)
+    resource_type = re.sub(r'/(core|rest|identity|auth|product-metadata)/v\d+/([^/]+)/?.*', r'\2', url_path)
     if resource_type == "download-urls.json":
         resource_type = "download-urls"
     if RESOURCES.get(resource_type):
         return RESOURCES.get(resource_type)
     else:
         raise UnknownResourceType(resource_type, RESOURCES.keys())
+
+
+def get_user_cache_dir():
+    return user_cache_path(appname='netfoundry')
+
+
+def get_user_config_dir():
+    return user_config_path(appname='netfoundry')
+
+
+def get_generic_resource_by_type_and_id(org: object, resource_type: str, resource_id: str, accept: str = None, **kwargs):
+    url = f"{org.audience}{RESOURCES[resource_type].find_url}/{resource_id}"
+    headers = {"authorization": "Bearer " + org.token}
+    resource, status_symbol = get_generic_resource_by_url(url=url, headers=headers, proxies=org.proxies, verify=org.verify, accept=accept, **kwargs)
+    return resource, status_symbol
 
 
 def wait_for_execution(setup: object, url: str, wait: int = 300, sleep: int = 3):
@@ -252,7 +280,7 @@ def wait_for_execution(setup: object, url: str, wait: int = 300, sleep: int = 3)
     status = 'NEW'
     # time.sleep(sleep)  # allow minimal time for the resource status to become available
     while time.time() < now+wait and status not in expected_statuses:
-        execution, status_symbol = get_generic_resource(setup=setup, url=url)
+        execution, status_symbol = get_generic_resource_by_url(setup=setup, url=url)
         if execution.get('status'):  # attribute is not None if HTTP OK
             status = execution['status']
             setup.logger.debug(f"{execution['name']} has status {execution['status']}")
@@ -301,7 +329,7 @@ def create_generic_resource(setup: object, url: str, body: dict, headers: dict =
     return resource
 
 
-def get_generic_resource(setup: object, url: str, headers: dict = dict(), accept: str = None, **kwargs):
+def get_generic_resource_by_url(setup: object, url: str, headers: dict = dict(), accept: str = None, **kwargs):
     """
     Get, deserialize, and return a single resource.
 
@@ -330,7 +358,7 @@ def get_generic_resource(setup: object, url: str, headers: dict = dict(), accept
         params['beta'] = str()
     else:
         setup.logger.debug(f"no handlers specified for url '{url}'")
-    response = http.get(
+    response = http_cache.get(
         url,
         headers=headers,
         params=params,
@@ -363,6 +391,7 @@ def get_generic_resource(setup: object, url: str, headers: dict = dict(), accept
     else:
         resource = response.json()
     return resource, status_symbol
+get_generic_resource = get_generic_resource_by_type_and_id
 
 
 def find_generic_resources(setup: object, url: str, headers: dict = dict(), embedded: str = None, accept: str = None, **kwargs):
@@ -426,7 +455,7 @@ def find_generic_resources(setup: object, url: str, headers: dict = dict(), embe
         else:
             setup.logger.warn("ignoring invalid value for header 'accept': '{:s}'".format(accept))
 
-    response = http.get(
+    response = http_cache.get(
         url,
         headers=headers,
         params=params,
@@ -531,6 +560,9 @@ for k, v in RESOURCE_STATUS_SYMBOLS.items():
     for i in v:
         RESOURCE_STATUSES.add(i)
 
+IDENTITY_ID_PROPERTIES = [
+    'createdBy', 'updatedBy', 'deletedBy', 'ownerIdentityId',
+]
 
 # The purpose of the parent class is to validate the type of child class
 # attributes. Homing this logic in a parent class allows any number of child
@@ -578,6 +610,7 @@ class ResourceType(ResourceTypeParent):
     status_symbols: dict = field(default_factory=lambda: RESOURCE_STATUS_SYMBOLS)  # dictionary with three predictable keys: complete, progress, error, each a tuple associating status symbols with a state
     host: bool = field(default=False)                       # may have a managed host in NF cloud
     ziti: bool = field(default=False)
+    find_url: str = field(default='default')
 
     def __post_init__(self):
         """Compute and assign _embedded if not supplied and then check types in parent class."""
@@ -605,13 +638,22 @@ class ResourceType(ResourceTypeParent):
                 HOSTABLE_RESOURCE_ABBREV[self.abbreviation] = self
             if self.ziti:
                 ZITI_NET_RESOURCES[self.name] = self
+        if self.find_url == 'default':
+            if self.domain == 'network':
+                setattr(self, 'find_url', f'core/v2/{self.name}')
+            elif self.domain == 'identity':
+                setattr(self, 'find_url', f'identity/v1/{self.name}')
+            elif self.domain == 'authorization':
+                setattr(self, 'find_url', f'auth/v1/{self.name}')
+            else:
+                raise RuntimeError(f"need default find_url for {self.name}")
         return super().__post_init__()
 
 
 RESOURCES = {
     'roles': ResourceType(
         name='roles',
-        domain='identity',
+        domain='authorization',
         mutable=False,
         embeddable=False,
         _embedded='content',
@@ -673,12 +715,14 @@ RESOURCES = {
         _embedded='organizations',
         mutable=False,
         embeddable=False,
+        find_url='rest/v1/network-groups',
     ),
     'download-urls': ResourceType(
         name='download-urls',
         domain='network-group',
         mutable=False,
         embeddable=False,
+        find_url='product-metadata/v2',
     ),
     'networks': ResourceType(
         name='networks',
@@ -879,11 +923,15 @@ class TimeoutHTTPAdapter(HTTPAdapter):
         return super().send(request, **kwargs)
 
 
-http = Session()
+http = Session()   # no cache
+HTTP_CACHE_EXPIRE = 111
+http_cache = CachedSession(cache_name=f"{get_user_cache_dir()}/http_cache", backend='sqlite', expire_after=HTTP_CACHE_EXPIRE)
 # Mount it for both http and https usage
 adapter = TimeoutHTTPAdapter(timeout=DEFAULT_TIMEOUT, max_retries=RETRY_STRATEGY)
 http.mount("https://", adapter)
 http.mount("http://", adapter)
+http_cache.mount("https://", adapter)
+http_cache.mount("http://", adapter)
 STATUS_CODES = status_codes
 DEFAULT_TOKEN_EXPIRY = 3600
 

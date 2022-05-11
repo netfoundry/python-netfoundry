@@ -1,7 +1,7 @@
 """Use a network group and find its networks."""
 
 from .network import Networks
-from .utility import NET_RESOURCES, RESOURCES, STATUS_CODES, any_in, caseless_equal, create_generic_resource, find_generic_resources, get_generic_resource, http, is_uuidv4, normalize_caseless
+from .utility import NET_RESOURCES, RESOURCES, STATUS_CODES, any_in, caseless_equal, create_generic_resource, find_generic_resources, get_generic_resource_by_url, http, is_uuidv4, normalize_caseless
 
 
 class NetworkGroup:
@@ -135,7 +135,7 @@ class NetworkGroup:
         url = self.audience+'product-metadata/v2/download-urls.json'
         headers = dict()  # no auth
         try:
-            all_product_metadata, status_symbol = get_generic_resource(setup=self, url=url)
+            all_product_metadata, status_symbol = get_generic_resource_by_url(setup=self, url=url)
         except Exception as e:
             raise RuntimeError(f"failed to get product-metadata from url: '{url}', caught {e}")
         else:

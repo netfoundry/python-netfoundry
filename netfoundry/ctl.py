@@ -40,7 +40,7 @@ from .exceptions import NeedUserInput, NFAPINoCredentials
 from .network import Network, Networks
 from .network_group import NetworkGroup
 from .organization import Organization
-from .utility import DC_PROVIDERS, EMBED_NET_RESOURCES, MUTABLE_NET_RESOURCES, MUTABLE_RESOURCE_ABBREV, RESOURCE_ABBREV, RESOURCES, is_jwt, normalize_caseless, plural, singular
+from .utility import DC_PROVIDERS, EMBED_NET_RESOURCES, IDENTITY_ID_PROPERTIES, MUTABLE_NET_RESOURCES, MUTABLE_RESOURCE_ABBREV, RESOURCE_ABBREV, RESOURCES, any_in, get_generic_resource_by_type_and_id, plural, propid2type, singular
 
 set_metadata(version=f"v{netfoundry_version}", author="NetFoundry", name="nfctl")  # must precend import milc.cli
 from milc import cli, questions  # this uses metadata set above
@@ -602,6 +602,7 @@ def get(cli, echo: bool = True, spinner: object = None):
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
 @cli.argument('-m', '--my-roles', arg_only=True, action='store_true', help="filter roles by caller identity")
 @cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create'], help="request the as=create alternative form of the resources")
+@cli.argument('-n', '--names', default=False, action='store_boolean', help=argparse.SUPPRESS)
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE",
               choices=[choice for group in [[type, RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
 @cli.subcommand(description='find a collection of resources by type and query')
@@ -684,20 +685,24 @@ def list(cli, echo: bool = True, spinner: object = None):
         cli.log.debug(f"found at least one {cli.args.resource_type} by '{', '.join(query_keys)}'")
 
     valid_keys = set()
+    for match in matches:
+        valid_keys = valid_keys.union(match.keys())
     if cli.args.keys:
         # intersection of the set of valid, observed keys in the first match
         # and the set of configured, desired keys
-        valid_keys = set(matches[0].keys()) & set(cli.args.keys)
+        valid_keys = valid_keys.intersection(cli.args.keys)
     elif cli.args.output == "text":
-        default_columns = ['name', 'label', 'organizationShortName', 'type', 'description',
-                           'edgeRouterAttributes', 'serviceAttributes', 'endpointAttributes',
-                           'status', 'zitiId', 'provider', 'locationCode', 'ipAddress', 'networkVersion',
-                           'active', 'default', 'region', 'size', 'attributes', 'email', 'productVersion',
-                           'address', 'binding', 'component']
-        valid_keys = set(matches[0].keys()) & set(default_columns)
+        default_keys = ['name', 'label', 'organizationShortName', 'type', 'description',
+                        'edgeRouterAttributes', 'serviceAttributes', 'endpointAttributes',
+                        'status', 'zitiId', 'provider', 'locationCode', 'ipAddress', 'networkVersion',
+                        'active', 'default', 'region', 'size', 'attributes', 'email', 'productVersion',
+                        'address', 'binding', 'component']
+        if cli.config.list.names:  # include identity IDs if --names
+            default_keys.extend(IDENTITY_ID_PROPERTIES)
+        valid_keys = valid_keys.intersection(default_keys)
 
     if valid_keys:
-        cli.log.debug(f"valid keys: {str(valid_keys)}")
+        cli.log.debug(f"filtering matches for valid keys: {str(valid_keys)}")
         filtered_matches = []
         for match in matches:
             filtered_match = {key: match[key] for key in match.keys() if key in valid_keys}
@@ -711,6 +716,28 @@ def list(cli, echo: bool = True, spinner: object = None):
         return filtered_matches, organization
 
     if cli.args.output == "text":
+        if cli.config.list.names:
+            # map any property names that look like a resource ID to the appropriate resource type so we can look up the name later
+            type_by_prop = dict()
+            for key in valid_keys:
+                if key not in ['zitiId']:
+                    if key in IDENTITY_ID_PROPERTIES:
+                        type_by_prop[key] = 'identities'
+                    elif key.endswith('Id'):
+                        type_by_prop[key] = propid2type(key)
+
+            for match in filtered_matches:                         # for each match
+                if any_in(type_by_prop.keys(), match.keys()):      # if at least one property points to a resolvable ID (fast)
+                    for k, v in match.items():                     # for each key in match (slow)
+                        if type_by_prop.get(k):                    # if this is the property that points to a resolvable ID
+                            if v is None:
+                                cli.log.debug(f"unexpected value for {k} = {v}")
+                                continue
+                            # get the resource with the name we're after
+                            resource, status = get_generic_resource_by_type_and_id(org=organization, resource_type=type_by_prop[k], resource_id=v)
+                            if resource.get('name'):                # if the name property isn't empty
+                                match[k] = f"{resource['name']}"    # wedge the name into the ID column
+
         if cli.config.general.headers:
             table_headers = filtered_matches[0].keys()
         else:

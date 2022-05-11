@@ -8,8 +8,8 @@ from requests.exceptions import JSONDecodeError
 
 from netfoundry.exceptions import NetworkBoundaryViolation, UnknownResourceType
 
-from .utility import (DC_PROVIDERS, MUTABLE_NET_RESOURCES, NET_RESOURCES, PROCESS_STATUS_SYMBOLS, RESOURCES, STATUS_CODES, VALID_SEPARATORS, VALID_SERVICE_PROTOCOLS, create_generic_resource, docstring_parameters, find_generic_resources,
-                      get_generic_resource, http, is_uuidv4, normalize_caseless, plural, singular)
+from .utility import (DC_PROVIDERS, MUTABLE_NET_RESOURCES, NET_RESOURCES, RESOURCES, STATUS_CODES, VALID_SEPARATORS, VALID_SERVICE_PROTOCOLS, create_generic_resource, docstring_parameters, find_generic_resources,
+                      get_generic_resource_by_url, http, is_uuidv4, normalize_caseless, plural, singular)
 
 
 class Network:
@@ -273,7 +273,7 @@ class Network:
         url = self.audience+'core/v2/data-centers/'+id
         headers = {"authorization": "Bearer " + self.token}
         try:
-            data_center, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            data_center, status_symbol = get_generic_resource_by_url(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
         except Exception as e:
             raise RuntimeError(f"failed to get data_center from url: '{url}', caught {e}")
         else:
@@ -375,7 +375,7 @@ class Network:
             raise RuntimeError(f"unknown resource type '{plural(type)}'. Choices: {', '.join(NET_RESOURCES.keys())}")
 
         url = self.audience+'core/v2/'+plural(type)+'/'+id
-        resource, status_symbol = get_generic_resource(setup=self, url=url, headers=headers)
+        resource, status_symbol = get_generic_resource_by_url(setup=self, url=url, headers=headers)
         if not resource['networkId'] == self.id:
             raise NetworkBoundaryViolation("resource ID is from another network")
         return(resource)
@@ -459,7 +459,7 @@ class Network:
 
         if not MUTABLE_NET_RESOURCES.get(type):  # prune properties that can't be patched
             raise RuntimeError(f"got unexpected type '{type}' for patch request to {self_link}")
-        before_resource, status_symbol = get_generic_resource(setup=self, url=self_link)
+        before_resource, status_symbol = get_generic_resource_by_url(setup=self, url=self_link)
         self.logger.debug(f"found existing resource before patching with properties: '{before_resource}'")
         # compare the patch to the discovered, current state, adding new or updated keys to pruned_patch
         pruned_patch = dict()
@@ -1274,7 +1274,7 @@ class Network:
         """
         url = self.audience+'core/v2/networks/'+network_id
         try:
-            network, status_symbol = get_generic_resource(setup=self, url=url)
+            network, status_symbol = get_generic_resource_by_url(setup=self, url=url)
         except Exception as e:
             raise RuntimeError(f"failed to get network from url: '{url}', caught {e}")
         else:
@@ -1288,7 +1288,7 @@ class Network:
         """
         url = self.audience+'core/v2/network-controllers/'+id+'/secrets'
         try:
-            secrets, status_symbol = get_generic_resource(setup=self, url=url)
+            secrets, status_symbol = get_generic_resource_by_url(setup=self, url=url)
         except Exception as e:
             raise RuntimeError(f"failed to get secrets from url: '{url}', caught {e}")
         else:
@@ -1308,7 +1308,7 @@ class Network:
         """
         url = self.audience+'core/v2/network-controllers/'+id+'/session'
         try:
-            session, status_symbol = get_generic_resource(setup=self, url=url)
+            session, status_symbol = get_generic_resource_by_url(setup=self, url=url)
         except Exception as e:
             raise RuntimeError(f"failed to get session from url: '{url}', caught {e}")
         else:
@@ -1521,7 +1521,7 @@ class Network:
             entity_url += f"{plural(type)}/{id}"
 
         headers = {"authorization": "Bearer " + self.token}
-        resource, status_symbol = get_generic_resource(setup=self, url=entity_url)
+        resource, status_symbol = get_generic_resource_by_url(setup=self, url=entity_url)
 
         if resource.get(RESOURCES[plural(type)].status):
             status = resource[RESOURCES[plural(type)].status]
@@ -1687,6 +1687,6 @@ class Networks:
             params[k] = v
 
         url = f"{self.audience}core/v2/{resource_type}"
-        resource = get_generic_resource(setup=self, url=url, **params)
+        resource = get_generic_resource_by_url(setup=self, url=url, **params)
         return(resource)
 
