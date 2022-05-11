@@ -138,7 +138,7 @@ class Organization:
             self.logger.debug(f"got token from env NETFOUNDRY_API_TOKEN as {len(self.token)}B")
         else:
             try:
-                token_cache = get_token_cache(self.token_cache_file_path)
+                token_cache = get_token_cache(self)
             except Exception as e:
                 self.token = None
                 self.expiry = None
@@ -153,7 +153,7 @@ class Organization:
         # if the token was found but not the expiry then try to parse to extract the expiry so we can enforce minimum lifespan seconds
         if self.token and not self.expiry:
             try:
-                self.expiry = jwt_expiry(self.token)
+                self.expiry = jwt_expiry(self)
             except Exception as e:
                 self.expiry = round(epoch + DEFAULT_TOKEN_EXPIRY)
                 self.expiry_seconds = DEFAULT_TOKEN_EXPIRY
@@ -243,18 +243,10 @@ path to credentials file.
         # the try-except block is to soft-fail all attempts to parse the JWT,
         # which is intended for the API, not this application
         if self.token and not self.environment:
-            try:
-                self.environment = jwt_environment(self.token)
-            except Exception as e:
-                # an exception here is very unlikely because the called
-                # function is designed to provide a sane default in case the
-                # token can't be parsed
-                raise RuntimeError(f"unexpected error extracting environment from JWT, caught {e}")
-            else:
-                self.logger.debug(f"parsed token as JWT and found environment {self.environment}")
-            finally:
-                if self.environment not in ENVIRONMENTS:
-                    self.logger.warn(f"unexpected environment '{self.environment}'")
+            self.environment = jwt_environment(self)
+            self.logger.debug(f"parsed token as JWT and found environment {self.environment}")
+            if self.environment not in ENVIRONMENTS:
+                self.logger.warning(f"unexpected environment '{self.environment}'")
 
         if self.environment and not self.audience:
             self.audience = f'https://gateway.{self.environment}.netfoundry.io/'
@@ -269,7 +261,7 @@ path to credentials file.
         # application
         if self.token and not self.expiry:  # if token was obtained in this pass then expiry is already defined by response 'expires_in' property
             try:
-                self.expiry = jwt_expiry(self.token)
+                self.expiry = jwt_expiry(self)
             except Exception as e:
                 raise RuntimeError(f"unexpected error getting expiry from token, caught {e}")
             else:
@@ -350,7 +342,7 @@ path to credentials file.
                     }
                     self.token_cache_file_path.write_text(json.dumps(token_cache_out, indent=4))
                 except Exception as e:
-                    self.logger.warn(f"failed to cache token in '{str(self.token_cache_file_path.resolve())}', caught {e}")
+                    self.logger.warning(f"failed to cache token in '{str(self.token_cache_file_path.resolve())}', caught {e}")
                 else:
                     self.logger.debug(f"cached token in '{str(self.token_cache_file_path.resolve())}'")
             else:
@@ -450,7 +442,7 @@ path to credentials file.
             params[param] = kwargs[param]
         for noop in ['sort', 'size', 'page']:
             if params.get(noop):
-                self.logger.warn(f"query param '{noop}' is not fully supported by Identity Service")
+                self.logger.warning(f"query param '{noop}' is not fully supported by Identity Service")
         if type in ["UserIdentity", "user-identities"]:
             url = self.audience+'identity/v1/user-identities'
         elif type in ["ApiAccountIdentity", "api-account-identities"]:
@@ -459,7 +451,6 @@ path to credentials file.
             url = self.audience+'identity/v1/identities'
         else:
             raise RuntimeError(f"unexpected value for param 'type', got {type}, need one of 'user-identities' or 'api-account-identities'")
-        headers = {"authorization": "Bearer " + self.token}
         try:
             identities = list()
             for i in find_generic_resources(setup=self, url=url, **params):
@@ -487,7 +478,7 @@ path to credentials file.
                 params[k] = v
         for noop in ['size', 'page']:
             if params.get(noop):
-                self.logger.warn(f"query param '{noop}' is not implemented for Authorization Service in this application")
+                self.logger.warning(f"query param '{noop}' is not implemented for Authorization Service in this application")
 
         url = self.audience+'auth/v1/roles'
         try:
@@ -520,7 +511,7 @@ path to credentials file.
             params[param] = kwargs[param]
         for noop in ['sort', 'size', 'page']:
             if params.get(noop):
-                self.logger.warn(f"query param '{noop}' is not supported by Identity Service")
+                self.logger.warning(f"query param '{noop}' is not supported by Identity Service")
 
         url = self.audience+'identity/v1/organizations'
         try:

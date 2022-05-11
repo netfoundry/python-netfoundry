@@ -603,6 +603,7 @@ def get(cli, echo: bool = True, spinner: object = None):
 @cli.argument('-m', '--my-roles', arg_only=True, action='store_true', help="filter roles by caller identity")
 @cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create'], help="request the as=create alternative form of the resources")
 @cli.argument('-n', '--names', default=False, action='store_boolean', help=argparse.SUPPRESS)
+@cli.argument('-n', '--names', default=False, action='store_boolean', help=argparse.SUPPRESS)
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE",
               choices=[choice for group in [[type, RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
 @cli.subcommand(description='find a collection of resources by type and query')
@@ -652,6 +653,8 @@ def list(cli, echo: bool = True, spinner: object = None):
                 matches = organization.find_roles(**cli.args.query)
             else:
                 matches = organization.find_roles(**cli.args.query)
+        elif cli.args.resource_type == "regions":
+            matches = networks.find_regions(**cli.args.query)
         elif cli.args.resource_type == "networks":
             if cli.config.general.network_group:
                 network_group = use_network_group(
@@ -687,19 +690,22 @@ def list(cli, echo: bool = True, spinner: object = None):
     valid_keys = set()
     for match in matches:
         valid_keys = valid_keys.union(match.keys())
-    if cli.args.keys:
-        # intersection of the set of valid, observed keys in the first match
-        # and the set of configured, desired keys
-        valid_keys = valid_keys.intersection(cli.args.keys)
-    elif cli.args.output == "text":
-        default_keys = ['name', 'label', 'organizationShortName', 'type', 'description',
-                        'edgeRouterAttributes', 'serviceAttributes', 'endpointAttributes',
-                        'status', 'zitiId', 'provider', 'locationCode', 'ipAddress', 'networkVersion',
-                        'active', 'default', 'region', 'size', 'attributes', 'email', 'productVersion',
-                        'address', 'binding', 'component']
-        if cli.config.list.names:  # include identity IDs if --names
-            default_keys.extend(IDENTITY_ID_PROPERTIES)
-        valid_keys = valid_keys.intersection(default_keys)
+
+    valid_keys = valid_keys.intersection(cli.args.keys)
+    # intersection of the set of valid, observed keys in the first match
+    default_keys = ['name', 'label', 'organizationShortName', 'type', 'description',
+                    'edgeRouterAttributes', 'serviceAttributes', 'endpointAttributes',
+                    'status', 'zitiId', 'provider', 'locationCode', 'ipAddress', 'networkVersion',
+                    'active', 'default', 'region', 'size', 'attributes', 'email', 'productVersion',
+                    'address', 'binding', 'component']
+    if cli.config.list.names:  # include identity IDs if --names
+        default_keys.extend(IDENTITY_ID_PROPERTIES)
+    valid_keys = valid_keys.intersection(default_keys)
+                    'active', 'default', 'region', 'size', 'attributes', 'email', 'productVersion',
+                    'address', 'binding', 'component']
+    cli.log.debug(f"filtering matches for valid keys: {str(valid_keys)}")
+        default_keys.extend(IDENTITY_ID_PROPERTIES)
+    valid_keys = valid_keys.intersection(default_keys)
 
     if valid_keys:
         cli.log.debug(f"filtering matches for valid keys: {str(valid_keys)}")
@@ -710,6 +716,28 @@ def list(cli, echo: bool = True, spinner: object = None):
     else:
         cli.log.debug("not filtering output keys")
         filtered_matches = matches
+
+        if cli.config.list.names:
+            # map any property names that look like a resource ID to the appropriate resource type so we can look up the name later
+            type_by_prop = dict()
+            for key in valid_keys:
+                if key not in ['zitiId']:
+                    if key in IDENTITY_ID_PROPERTIES:
+                        type_by_prop[key] = 'identities'
+                    elif key.endswith('Id'):
+                        type_by_prop[key] = propid2type(key)
+
+            for match in filtered_matches:                         # for each match
+                if any_in(type_by_prop.keys(), match.keys()):      # if at least one property points to a resolvable ID (fast)
+                    for k, v in match.items():                     # for each key in match (slow)
+                        if type_by_prop.get(k):                    # if this is the property that points to a resolvable ID
+                            if v is None:
+                                cli.log.debug(f"unexpected value for {k} = {v}")
+                                continue
+                            # get the resource with the name we're after
+                            resource, status = get_generic_resource_by_type_and_id(org=organization, resource_type=type_by_prop[k], resource_id=v)
+                            if resource.get('name'):                # if the name property isn't empty
+                                match[k] = f"{resource['name']}"    # wedge the name into the ID column
 
     # if echo=False then return the object and parent objects instead of printing with an output format
     if not echo:

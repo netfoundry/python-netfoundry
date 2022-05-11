@@ -24,6 +24,11 @@ from urllib3.util.retry import Retry
 
 from .exceptions import UnknownResourceType
 
+# FIXME: disable warning for debug proxy
+from urllib3 import disable_warnings
+from urllib3.exceptions import InsecureRequestWarning
+disable_warnings(InsecureRequestWarning)
+
 
 def any_in(a, b):
     "True if any of a are in b"
@@ -116,19 +121,19 @@ def caseless_equal(left, right):
     return normalize_caseless(left) == normalize_caseless(right)
 
 
-def get_token_cache(setup: object, path):
+def get_token_cache(setup: object):
     """Try to read the token cache file and return the object."""
     try:
-        token_cache = json.loads(path.read_text())
+        token_cache = json.loads(setup.token_cache_file_path.read_text())
     except FileNotFoundError as e:
-        raise RuntimeError(f"cache file '{path.__str__()}' not found, caught {e}")
+        raise RuntimeError(f"cache file '{setup.token_cache_file_path.__str__()}' not found, caught {e}")
     except JSONDecodeError as e:
-        raise RuntimeError(f"failed to parse cache file '{path.__str__()}' as JSON, caught {e}")
+        raise RuntimeError(f"failed to parse cache file '{setup.token_cache_file_path.__str__()}' as JSON, caught {e}")
     except Exception as e:
-        raise RuntimeError(f"failed to read cache file '{path.__str__()}', caught {e}")
+        raise RuntimeError(f"failed to read cache file '{setup.token_cache_file_path.__str__()}', caught {e}")
     else:
-        cache_file_stats = os.stat(path)
-        setup.logger.debug(f"parsed token cache file '{path.__str__()}' as JSON with mode {filemode(cache_file_stats.st_mode)}")
+        cache_file_stats = os.stat(setup.token_cache_file_path)
+        setup.logger.debug(f"parsed token cache file '{setup.token_cache_file_path.__str__()}' as JSON with mode {filemode(cache_file_stats.st_mode)}")
 
     if all(k in token_cache for k in ['token', 'expiry', 'audience']):
         return token_cache
@@ -136,13 +141,13 @@ def get_token_cache(setup: object, path):
         raise Exception("not all expected token cache file keys were found: token, expiry, audience")
 
 
-def jwt_expiry(setup: object, token):
+def jwt_expiry(setup: object):
     """Return an epoch timestampt when the token will be expired.
 
     First, try to parse JWT to extract expiry. If that fails then estimate +1h.
     """
     try:
-        claim = jwt_decode(token)
+        claim = jwt_decode(setup)
         expiry = claim['exp']
     except jwt.exceptions.PyJWTError:
         setup.logger.debug(f"error parsing JWT to extract expiry, estimating +{DEFAULT_TOKEN_EXPIRY}s")
@@ -151,20 +156,20 @@ def jwt_expiry(setup: object, token):
         setup.logger.debug(f"failed to extract expiry epoch from claimset as key 'exp', estimating +{DEFAULT_TOKEN_EXPIRY}s")
         expiry = time.time() + DEFAULT_TOKEN_EXPIRY
     except Exception as e:
-        raise RuntimeError(f"unexpect error, caught {e}")
+        raise RuntimeError(f"unexpected error, caught {e}")
     else:
         setup.logger.debug("successfully extracted expiry from JWT")
     finally:
         return expiry
 
 
-def jwt_environment(setup: object, token):
+def jwt_environment(setup: object):
     """Try to extract the environment name from a JWT.
 
     First, try to parse JWT to extract the audience. If that fails then assume "production".
     """
     try:
-        claim = jwt_decode(token)
+        claim = jwt_decode(setup)
         iss = claim['iss']
     except jwt.exceptions.PyJWTError:
         environment = "production"
@@ -173,7 +178,7 @@ def jwt_environment(setup: object, token):
         environment = "production"
         setup.logger.debug("failed to extract the issuer URL from claimset as key 'iss', assuming environment is Production")
     except Exception as e:
-        raise RuntimeError(f"unexpect error, caught {e}")
+        raise RuntimeError(f"unexpected error, caught {e}")
 
     else:
         if re.match(r'https://cognito-', iss):
@@ -189,30 +194,29 @@ def jwt_environment(setup: object, token):
         return environment
 
 
-def jwt_decode(token):
+def jwt_decode(setup):
     # TODO: figure out how to stop doing this because the token is for the
     # API, not this app, and so may change algorithm unexpectedly or stop
     # being a JWT altogether, currently needed to build the URL for HTTP
     # requests, might need to start using env config
     """Parse the token and return claimset."""
     try:
-        claim = jwt.decode(jwt=token, algorithms=["RS256"], options={"verify_signature": False})
+        claim = jwt.decode(jwt=setup.token, algorithms=["RS256"], options={"verify_signature": False})
     except jwt.exceptions.PyJWTError as e:
         raise jwt.exceptions.PyJWTError(f"failed to parse bearer token as JWT, caught {e}")
     except Exception as e:
-        raise RuntimeError(f"unexpect error parsing JWT, caught {e}")
+        raise RuntimeError(f"unexpected error parsing JWT, caught {e}")
     return claim
 
 
-def is_jwt(token):
+def is_jwt(setup):
     """If is a JWT then True."""
     try:
-        jwt_decode(token)
+        jwt_decode(setup)
     except jwt.exceptions.PyJWTError:
         return False
     except Exception as e:
-        raise RuntimeError(f"unexpect error parsing JWT, caught {e}")
-
+        raise RuntimeError(f"unexpected error parsing JWT, caught {e}")
     else:
         return True
 
@@ -253,10 +257,9 @@ def get_user_config_dir():
     return user_config_path(appname='netfoundry')
 
 
-def get_generic_resource_by_type_and_id(org: object, resource_type: str, resource_id: str, accept: str = None, **kwargs):
-    url = f"{org.audience}{RESOURCES[resource_type].find_url}/{resource_id}"
-    headers = {"authorization": "Bearer " + org.token}
-    resource, status_symbol = get_generic_resource_by_url(url=url, headers=headers, proxies=org.proxies, verify=org.verify, accept=accept, **kwargs)
+def get_generic_resource_by_type_and_id(setup: object, resource_type: str, resource_id: str, accept: str = None, **kwargs):
+    url = f"{setup.audience}{RESOURCES[resource_type].find_url}/{resource_id}"
+    resource, status_symbol = get_generic_resource_by_url(setup=setup, url=url, accept=accept, **kwargs)
     return resource, status_symbol
 
 
@@ -312,6 +315,7 @@ def create_generic_resource(setup: object, url: str, body: dict, headers: dict =
     resource_type = get_resource_type_by_url(url)
     setup.logger.debug(f"detected URL for resource type {resource_type.name}")
     headers['Authorization'] = f"Bearer {setup.token}"
+    headers['Content-Type'] = 'application/json'
     response = http.post(
         url,
         json=body,
@@ -323,9 +327,9 @@ def create_generic_resource(setup: object, url: str, body: dict, headers: dict =
     resource = response.json()
 
     if wait:
-        setup.logger.debug(f"waiting for create {resource_type} execution with url {execution_url}")
         execution_url = resource['_links']['execution']['href']
-        wait_for_execution(org=org, url=execution_url, wait=wait, sleep=sleep)
+        setup.logger.debug(f"waiting for create {resource_type} execution with url {execution_url}")
+        wait_for_execution(setup=setup, url=execution_url, wait=wait, sleep=sleep)
     return resource
 
 
@@ -339,7 +343,6 @@ def get_generic_resource_by_url(setup: object, url: str, headers: dict = dict(),
     :param kwargs: additional query params are typically logical AND if supported or ignored by the API if not
     """
     params = dict()
-    headers['Authorization'] = f"Bearer {setup.token}"
     for param in kwargs.keys():
         params[param] = kwargs[param]
     if accept:
@@ -350,6 +353,8 @@ def get_generic_resource_by_url(setup: object, url: str, headers: dict = dict(),
 
     resource_type = get_resource_type_by_url(url)
     setup.logger.debug(f"detected URL for resource type {resource_type.name}")
+    if not resource_type.name == "download-urls":
+        headers['Authorization'] = f"Bearer {setup.token}"
     # always embed the host record if getting the base resource by ID i.e. /{resource_type}/{uuid}, not leaf operations like /session or /rotatekey
     pattern = re.compile(f".*/{resource_type.name}/"+r'[a-f0-9]{8}-?[a-f0-9]{4}-?4[a-f0-9]{3}-?[89ab][a-f0-9]{3}-?[a-f0-9]{12}\Z', re.I)
     if resource_type.name in HOSTABLE_NET_RESOURCES.keys() and re.match(pattern, url):
@@ -378,7 +383,7 @@ def get_generic_resource_by_url(setup: object, url: str, headers: dict = dict(),
             process_id = path_parts[-1]                                      # the UUID is the last part of the expected URL to get_generic_resource()
             url = f"https://{url_parts.netloc}{'/'.join(path_parts[:-1])}"  # everything but the id
             params['processId'] = process_id
-            resources = next(find_generic_resources(url, headers=headers, embedded=RESOURCES['process-executions']._embedded, proxies=proxies, verify=verify, accept=accept, **params))
+            resources = next(find_generic_resources(setup=setup, url=url, headers=headers, embedded=RESOURCES['process-executions']._embedded, accept=accept, **params))
             if len(resources) == 1:
                 resource = resources[0]
             else:
@@ -391,6 +396,8 @@ def get_generic_resource_by_url(setup: object, url: str, headers: dict = dict(),
     else:
         resource = response.json()
     return resource, status_symbol
+
+
 get_generic_resource = get_generic_resource_by_type_and_id
 
 
@@ -408,9 +415,11 @@ def find_generic_resources(setup: object, url: str, headers: dict = dict(), embe
     get_all_pages = True
     # parse all kwargs as query params
     params = dict()
-    headers['Authorization'] = f"Bearer {setup.token}"
     # validate and store the resource type
     resource_type = get_resource_type_by_url(url)
+    setup.logger.debug(f"detected URL for resource type {resource_type.name}")
+    if not resource_type.name == "download-urls":
+        headers['Authorization'] = f"Bearer {setup.token}"
     if HOSTABLE_NET_RESOURCES.get(resource_type.name):
         params['embed'] = "host"
     elif resource_type.name in ["process-executions"]:
@@ -500,7 +509,7 @@ def find_generic_resources(setup: object, url: str, headers: dict = dict(), embe
                     params['page'] = next_page
                     try:
                         # recurse
-                        yield from find_generic_resources(url=url, headers=headers, embedded=embedded, proxies=proxies, verify=verify, **params)
+                        yield from find_generic_resources(setup=setup, url=url, headers=headers, embedded=embedded, **params)
                     except Exception as e:
                         raise RuntimeError(f"failed to get page {next_page} of {total_pages}, caught {e}'")
     elif embedded:      # function param 'embedded' specifies the reference in which the collection of resources should be found
@@ -517,19 +526,20 @@ def find_generic_resources(setup: object, url: str, headers: dict = dict(), embe
         yield resource_page
 
 
-# class Utility:
-#     """Interface to utility functions."""
-#     def __init__(self):
-#         pass
+# FIXME: used by Ansible modules
+class Utility:
+    """Interface to utility functions."""
+    def __init__(self):
+        pass
 
-#     def caseless_equal(self, left, right):
-#         return caseless_equal(left, right)
+    def caseless_equal(self, left, right):
+        return caseless_equal(left, right)
 
-#     def snake(self, camel_str):
-#         return camel2snake(camel_str)
+    def snake(self, camel_str):
+        return camel2snake(camel_str)
 
-#     def camel(self, snake_str):
-#         return snake2camel(snake_str)
+    def camel(self, snake_str):
+        return snake2camel(snake_str)
 
 
 NET_RESOURCES = dict()             # resources in network domain
@@ -564,13 +574,15 @@ IDENTITY_ID_PROPERTIES = [
     'createdBy', 'updatedBy', 'deletedBy', 'ownerIdentityId',
 ]
 
-# The purpose of the parent class is to validate the type of child class
-# attributes. Homing this logic in a parent class allows any number of child
-# classes to use it.
+
 @dataclass
 class ResourceTypeParent:
-    """Parent class for ResourceType class."""
+    """Parent class for ResourceType class.
 
+    The purpose of the parent class is to validate the type of child class
+    attributes. Homing this logic in a parent class allows any number of child
+    classes to use it.
+    """
     def __post_init__(self):
         """Enforce typed fields in resource spec."""
         for (name, field_type) in self.__annotations__.items():

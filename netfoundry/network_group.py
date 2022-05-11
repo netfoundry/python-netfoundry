@@ -1,7 +1,7 @@
 """Use a network group and find its networks."""
 
 from .network import Networks
-from .utility import NET_RESOURCES, RESOURCES, STATUS_CODES, any_in, caseless_equal, create_generic_resource, find_generic_resources, get_generic_resource_by_url, http, is_uuidv4, normalize_caseless
+from .utility import NET_RESOURCES, STATUS_CODES, caseless_equal, create_generic_resource, find_generic_resources, get_generic_resource_by_url, http, is_uuidv4, normalize_caseless
 
 
 class NetworkGroup:
@@ -107,7 +107,7 @@ class NetworkGroup:
         params = dict()
         for param in kwargs.keys():
             params[param] = kwargs[param]
-        params["productVersion"] = self.find_latest_product_version(is_active=True)
+        params["productVersion"] = self.find_latest_network_version(is_active=True)
         params["hostType"] = "NC"
         params["provider"] = "AWS"
 
@@ -133,7 +133,6 @@ class NetworkGroup:
         :param product_version: semver string of a single version to get, default is all versions
         """
         url = self.audience+'product-metadata/v2/download-urls.json'
-        headers = dict()  # no auth
         try:
             all_product_metadata, status_symbol = get_generic_resource_by_url(setup=self, url=url)
         except Exception as e:
@@ -148,25 +147,27 @@ class NetworkGroup:
             else:
                 return (all_product_metadata)
 
-    def list_product_versions(self, product_metadata: dict = dict(), is_active: bool = True):
-        """Find product versions in all products' metadata."""
-        if product_metadata:
-            product_versions = product_metadata.keys()
-        else:
-            product_metadata = self.get_product_metadata(is_active=is_active)
-            product_versions = product_metadata.keys()
+    def find_network_versions(self, is_active: bool = True):
+        """Find active network versions."""
+        url = self.audience+NET_RESOURCES['network-versions'].find_url
+        network_versions = list()
+        for i in find_generic_resources(setup=self, url=url, active=is_active, embedded=NET_RESOURCES['network-versions']._embedded):
+            # self.logger.debug(f"found a page of versions {i}")
+            network_versions.extend(i)
+        return network_versions
 
-        return (product_versions)
+    list_product_versions = find_network_versions
 
-    def find_latest_product_version(self, product_versions: list = list(), is_active: bool = True):
-        """Get the highest product version number (may be experimental, not stable)."""
-        if not product_versions:
-            product_versions = self.list_product_versions(is_active=is_active)
-
+    def find_latest_network_version(self, network_versions: list = list(), is_active: bool = True):
+        """Get the highest network version."""
+        if not network_versions:
+            network_versions = [v['networkVersion'] for v in self.find_network_versions(is_active=is_active)]
         from distutils.version import LooseVersion
-        return sorted(product_versions, key=LooseVersion)[-1]
+        return sorted(network_versions, key=LooseVersion)[-1]
 
-    def create_network(self, name: str, network_group_id: str = None, location: str = "us-east-1", version: str = None, size: str = "small", wait: int = 1200, sleep: int = 10, **kwargs):
+    find_latest_product_version = find_latest_network_version
+
+    def create_network(self, name: str, network_group_id: str = None, location: str = "us-east-1", version: str = None, size: str = "medium", wait: int = 1200, sleep: int = 10, **kwargs):
         """
         Create a network in this network group.
 
@@ -176,9 +177,9 @@ class NetworkGroup:
         :param version: optional product version string like 7.3.17
         :param size: optional network configuration metadata name from /core/v2/network-configs e.g. "medium"
         """
-        my_nc_data_centers_by_location = self.nc_data_centers_by_location()
-        if not my_nc_data_centers_by_location.get(location):
-            raise RuntimeError(f"unexpected network location '{location}'. Valid locations include: {', '.join(my_nc_data_centers_by_location.keys())}.")
+        # my_nc_data_centers_by_location = self.nc_data_centers_by_location()
+        # if not my_nc_data_centers_by_location.get(location):
+            # raise RuntimeError(f"unexpected network location '{location}'. Valid locations include: {', '.join(my_nc_data_centers_by_location.keys())}.")
 
         # map incongruent api keys from kwargs to function params ("name", "size" are congruent)
         for param, value in kwargs.items():
@@ -197,6 +198,10 @@ class NetworkGroup:
             else:
                 self.logger.warn(f"ignoring unexpected keyword argument '{param}'")
 
+        matching_regions = Networks.find_regions(region=location)
+        if not len(matching_regions) == 1:
+            raise RuntimeError(f"failed to find exactly one match for requested controller region '{location}'")
+
         body = {
             "name": name.strip('"'),
             "locationCode": location,
@@ -208,23 +213,16 @@ class NetworkGroup:
         else:
             body["networkGroupId"] = self.network_group_id
 
-        if version:
-            product_versions = self.list_product_versions()
+        if version and not version == "default":
+            network_versions = self.find_network_versions()
             if version == "latest":
-                body['productVersion'] = self.find_latest_product_version(product_versions)
-            elif version in product_versions:
+                body['productVersion'] = self.find_latest_network_version(network_versions)
+            elif version in network_versions:
                 body['productVersion'] = version
-            elif version == "default":
-                pass    # do not specify a value for productVersion
             else:
-                raise RuntimeError(f"invalid version '{version}'. Expected one of {product_versions}")
-        headers = {
-            'Content-Type': 'application/json',
-            "authorization": "Bearer " + self.token
-        }
-
+                raise RuntimeError(f"invalid version '{version}'. Expected one of {network_versions}")
         url = self.audience+'core/v2/networks'
-        resource = create_generic_resource(url=url, body=body, headers=headers, proxies=self.proxies, verify=self.verify, wait=wait, sleep=sleep)
+        resource = create_generic_resource(setup=self, url=url, body=body, wait=wait, sleep=sleep)
         return(resource)
 
     def delete_network(self, network_id=None, network_name=None):

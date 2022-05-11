@@ -408,7 +408,6 @@ class Network:
             params['status'] = "DELETED"
 
         url = self.audience+'core/v2/'+plural(type)
-        headers = {"authorization": "Bearer " + self.token}
         try:
             resources = list()
             for i in find_generic_resources(setup=self, url=url, embedded=NET_RESOURCES[plural(type)]._embedded, accept=accept, **params):
@@ -831,7 +830,6 @@ class Network:
         resource = create_generic_resource(url=url, body=body, headers=headers, proxies=self.proxies, verify=self.verify, wait=wait, sleep=sleep)
         return(resource)
 
-
     # the above method was renamed to follow the development of PSM-based services (platform service models)
     create_service = create_service_simple
 
@@ -871,7 +869,6 @@ class Network:
         url = self.audience+'core/v2/service-policies'
         resource = create_generic_resource(url=url, body=body, headers=headers, proxies=self.proxies, verify=self.verify, wait=wait, sleep=sleep)
         return(resource)
-
 
     def create_service_edge_router_policy(self, name: str, services: list, edge_routers: list, semantic: str = "AnyOf",
                                           dry_run: bool = False, wait: int = 30, sleep: int = 10, progress: bool = False):
@@ -921,9 +918,6 @@ class Network:
             if not role[0:1] == '#':
                 raise Exception('ERROR: invalid role "{:s}". Must begin with "#"'.format(role))
 
-        headers = {
-            "authorization": "Bearer " + self.token
-        }
         body = {
             "networkId": self.id,
             "name": name.strip('"'),
@@ -945,16 +939,11 @@ class Network:
             "attributes": attributes,
         }
 
-        params = dict()
-        # params = {
-        #     "beta": ''
-        # }
-
         if dry_run:
             return(body)
 
         url = self.audience+'core/v2/services'
-        resource = create_generic_resource(url=url, body=body, headers=headers, proxies=self.proxies, verify=self.verify, wait=wait, sleep=sleep)
+        resource = create_generic_resource(setup=self, url=url, body=body, wait=wait, sleep=sleep)
         return(resource)
 
     @docstring_parameters(valid_service_protocols=VALID_SERVICE_PROTOCOLS)
@@ -1642,6 +1631,7 @@ class Networks:
         self.verify = Organization.verify
         self.audience = Organization.audience
         self.environment = Organization.environment
+        self.logger = Organization.logger
 
     def find_network_domain_resources(self, resource_type: str, **kwargs):
         """
@@ -1664,9 +1654,9 @@ class Networks:
         for k, v in kwargs.items():
             params[k] = v
 
-        url = f"{self.audience}core/v2/{resource_type}"
+        url = self.audience+NET_RESOURCES[resource_type].find_url
         resources = list()
-        for i in find_generic_resources(setup=self, url=url, **params):
+        for i in find_generic_resources(setup=self, url=url, embedded=_embedded, **params):
             resources.extend(i)
         return(resources)
 
@@ -1690,3 +1680,19 @@ class Networks:
         resource = get_generic_resource_by_url(setup=self, url=url, **params)
         return(resource)
 
+    def find_regions(self, **kwargs):
+        """Find regions."""
+        # data centers returns a list of dicts (data center objects)
+        params = dict()
+        for param in kwargs.keys():
+            params[param] = kwargs[param]
+
+        url = self.audience+NET_RESOURCES['regions'].find_url
+        try:
+            regions = list()
+            for i in find_generic_resources(setup=self, url=url, embedded=NET_RESOURCES['data-centers']._embedded, **params):
+                regions.extend(i)
+        except Exception as e:
+            raise RuntimeError(f"failed to get data-centers from url: '{url}', caught {e}")
+        else:
+            return(regions)
