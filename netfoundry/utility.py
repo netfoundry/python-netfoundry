@@ -233,7 +233,73 @@ def get_resource_type_by_url(url: str):
         raise UnknownResourceType(resource_type, RESOURCES.keys())
 
 
-def get_generic_resource(url: str, headers: dict, proxies: dict = dict(), verify: bool = True, accept: str = None, **kwargs):
+def wait_for_execution(setup: object, url: str, wait: int = 300, sleep: int = 3):
+    """Continuously poll for execution until completion or max wait seconds.
+
+    :param setup: instance of Organization with attributes token, proxies, verify, and logger
+    :param url: the full URL of the execution
+    :param wait: Seconds to wait for async execution to be FINISHED
+    :param sleep: Execution status polling interval in seconds
+    """
+
+    now = time.time()
+    if not wait >= sleep:
+        raise RuntimeError(f"wait duration ({wait}) must be greater than or equal to polling interval ({sleep})")
+
+    expected_statuses = RESOURCES['executions'].status_symbols['complete']
+    unexpected_statuses = RESOURCES['executions'].status_symbols['error']
+    setup.logger.debug(f"waiting for any status in {expected_statuses} for {type} with id {id} or until {time.ctime(now+wait)}.")
+
+    status = 'NEW'
+    # time.sleep(sleep)  # allow minimal time for the resource status to become available
+    while time.time() < now+wait and status not in expected_statuses:
+        execution, status_symbol = get_generic_resource(setup=setup, url=url)
+        if execution.get('status'):  # attribute is not None if HTTP OK
+            status = execution['status']
+            setup.logger.debug(f"{execution['name']} has status {execution['status']}")
+        if status in unexpected_statuses:
+            raise RuntimeError(f"got unexpected status {status} while waiting for {expected_statuses}")
+        elif status not in expected_statuses:
+            time.sleep(sleep)
+
+    if status in expected_statuses:
+        return True
+    elif status == 'NEW':
+        raise RuntimeError(f"failed to read status while waiting for expected statuses in '{expected_statuses}'; got HTTP status {execution['http_status']}")
+    else:
+        raise RuntimeError(f"timed out with status '{status}' while waiting for expected statuses in '{expected_statuses}'")
+
+
+def create_generic_resource(setup: object, url: str, body: dict, headers: dict = dict(), wait: int = 30, sleep: int = 3):
+    """
+    POST to create a resource by URL and wait for async execution to be FINISHED.
+
+    :param setup: instance of Organization with attributes token, proxies, verify, and logger
+    :param url: the full URL to POST
+    :param body: the body document to POST
+    :param wait: Seconds to wait for async execution to be FINISHED
+    :param sleep: Execution status polling interval in seconds
+    :param kwargs: additional query params are typically logical AND if supported or ignored by the API if not
+    """
+
+    resource_type = get_resource_type_by_url(url)
+    setup.logger.debug(f"detected URL for resource type {resource_type.name}")
+    headers['Authorization'] = f"Bearer {setup.token}"
+    response = http.post(
+        url,
+        json=body,
+        headers=headers,
+        proxies=setup.proxies,
+        verify=setup.verify,
+    )
+    response.raise_for_status()
+    resource = response.json()
+
+    if wait:
+        setup.logger.debug(f"waiting for create {resource_type} execution with url {execution_url}")
+        execution_url = resource['_links']['execution']['href']
+        wait_for_execution(org=org, url=execution_url, wait=wait, sleep=sleep)
+    return resource
     """
     Get, deserialize, and return a single resource.
 

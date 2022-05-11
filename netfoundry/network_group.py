@@ -1,7 +1,7 @@
 """Use a network group and find its networks."""
 
 from .network import Networks
-from .utility import NET_RESOURCES, RESOURCES, STATUS_CODES, any_in, find_generic_resources, get_generic_resource, http, is_uuidv4, normalize_caseless, caseless_equal
+from .utility import NET_RESOURCES, RESOURCES, STATUS_CODES, any_in, caseless_equal, create_generic_resource, find_generic_resources, get_generic_resource, http, is_uuidv4, normalize_caseless
 
 
 class NetworkGroup:
@@ -115,7 +115,7 @@ class NetworkGroup:
         headers = {"authorization": "Bearer " + self.token}
         try:
             data_centers = list()
-            for i in find_generic_resources(url=url, headers=headers, embedded=NET_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params):
+            for i in find_generic_resources(setup=self, url=url, embedded=NET_RESOURCES['data-centers']._embedded, **params):
                 data_centers.extend(i)
         except Exception as e:
             raise RuntimeError(f"failed to get data-centers from url: '{url}', caught {e}")
@@ -135,7 +135,7 @@ class NetworkGroup:
         url = self.audience+'product-metadata/v2/download-urls.json'
         headers = dict()  # no auth
         try:
-            all_product_metadata, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            all_product_metadata, status_symbol = get_generic_resource(setup=self, url=url)
         except Exception as e:
             raise RuntimeError(f"failed to get product-metadata from url: '{url}', caught {e}")
         else:
@@ -166,7 +166,7 @@ class NetworkGroup:
         from distutils.version import LooseVersion
         return sorted(product_versions, key=LooseVersion)[-1]
 
-    def create_network(self, name: str, network_group_id: str = None, location: str = "us-east-1", version: str = None, size: str = "small", wait: int = 0, sleep: int = 10, **kwargs):
+    def create_network(self, name: str, network_group_id: str = None, location: str = "us-east-1", version: str = None, size: str = "small", wait: int = 1200, sleep: int = 10, **kwargs):
         """
         Create a network in this network group.
 
@@ -197,23 +197,23 @@ class NetworkGroup:
             else:
                 self.logger.warn(f"ignoring unexpected keyword argument '{param}'")
 
-        request = {
+        body = {
             "name": name.strip('"'),
             "locationCode": location,
             "size": size,
         }
 
         if network_group_id:
-            request["networkGroupId"] = network_group_id
+            body["networkGroupId"] = network_group_id
         else:
-            request["networkGroupId"] = self.network_group_id
+            body["networkGroupId"] = self.network_group_id
 
         if version:
             product_versions = self.list_product_versions()
             if version == "latest":
-                request['productVersion'] = self.find_latest_product_version(product_versions)
+                body['productVersion'] = self.find_latest_product_version(product_versions)
             elif version in product_versions:
-                request['productVersion'] = version
+                body['productVersion'] = version
             elif version == "default":
                 pass    # do not specify a value for productVersion
             else:
@@ -223,44 +223,9 @@ class NetworkGroup:
             "authorization": "Bearer " + self.token
         }
 
-        try:
-            response = http.post(
-                self.audience+"core/v2/networks",
-                proxies=self.proxies,
-                verify=self.verify,
-                json=request,
-                headers=headers
-            )
-            response_code = response.status_code
-        except Exception as e:
-            raise RuntimeError(f"problem creating network, caught {e}")
-
-        # the HTTP response code is one of the expected responses for creating a network
-        response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, RESOURCES['networks'].create_responses):
-            resource = response.json()
-        else:
-            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
-
-        try:
-            executions_link = resource['_links']['executions']['href']
-            processes = list()
-            process_id = None
-            for i in find_generic_resources(url=executions_link, headers=headers, embedded=NET_RESOURCES['executions']._embedded, proxies=self.proxies, verify=self.verify):
-                processes.extend(i)
-            for process in processes:
-                if process['name'].startswith('Create Network'):
-                    process_id = process['id']
-                    break
-            if wait and process_id:
-                self.Networks.wait_for_process(process_id, RESOURCES["executions"].status_symbols['complete'], wait=wait, sleep=sleep)
-                resource = self.get_resource_by_id(type="network", id=resource['id'])
-            else:
-                self.logger.warning("not configured to wait or no process_id found in list of executions")
-        except Exception as e:
-            self.logger.warning(f"unable to wait for async process to complete, caught {e}")
-        finally:
-            return(resource)
+        url = self.audience+'core/v2/networks'
+        resource = create_generic_resource(url=url, body=body, headers=headers, proxies=self.proxies, verify=self.verify, wait=wait, sleep=sleep)
+        return(resource)
 
     def delete_network(self, network_id=None, network_name=None):
         """
