@@ -7,7 +7,7 @@ import time  # enforce a timeout; sleep
 import unicodedata  # case insensitive compare in Utility
 from dataclasses import dataclass, field
 from json import JSONDecodeError
-from re import sub
+# from re import sub
 from stat import filemode
 from urllib.parse import urlparse
 from uuid import UUID  # validate UUIDv4 strings
