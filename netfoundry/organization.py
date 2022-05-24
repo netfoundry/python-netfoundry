@@ -153,7 +153,7 @@ class Organization:
         # if the token was found but not the expiry then try to parse to extract the expiry so we can enforce minimum lifespan seconds
         if self.token and not self.expiry:
             try:
-                self.expiry = jwt_expiry(self)
+                self.expiry = jwt_expiry(setup=self)
             except Exception as e:
                 self.expiry = round(epoch + DEFAULT_TOKEN_EXPIRY)
                 self.expiry_seconds = DEFAULT_TOKEN_EXPIRY
@@ -243,7 +243,7 @@ path to credentials file.
         # the try-except block is to soft-fail all attempts to parse the JWT,
         # which is intended for the API, not this application
         if self.token and not self.environment:
-            self.environment = jwt_environment(self)
+            self.environment = jwt_environment(setup=self)
             self.logger.debug(f"parsed token as JWT and found environment {self.environment}")
             if self.environment not in ENVIRONMENTS:
                 self.logger.warning(f"unexpected environment '{self.environment}'")
