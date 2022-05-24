@@ -687,13 +687,6 @@ RESOURCES = {
         status_symbols=PROCESS_STATUS_SYMBOLS,
         abbreviation='ex',
     ),
-    # 'processes': ResourceType(  # not a fully-fledged resource type because there is no "find processes" operation at this time
-    #     name='processes',
-    #     domain='network',
-    #     mutable=False,
-    #     embeddable=False,
-    #     status_symbols=PROCESS_STATUS_SYMBOLS,
-    # ),
     'regions': ResourceType(
         name='regions',
         domain='network',
@@ -707,13 +700,6 @@ RESOURCES = {
         mutable=False,
         embeddable=False,
         _embedded='network-versions',
-    ),
-    'data-centers': ResourceType(
-        name='data-centers',
-        domain='network',
-        _embedded='dataCenters',
-        mutable=False,
-        embeddable=False,
     ),
     'organizations': ResourceType(
         name='organizations',
@@ -729,13 +715,6 @@ RESOURCES = {
         embeddable=False,
         find_url='rest/v1/network-groups',
     ),
-    # 'download-urls': ResourceType(
-    #     name='download-urls',
-    #     domain='network-group',
-    #     mutable=False,
-    #     embeddable=False,
-    #     find_url='product-metadata/v2',
-    # ),
     'networks': ResourceType(
         name='networks',
         domain='network',

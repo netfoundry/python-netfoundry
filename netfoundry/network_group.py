@@ -13,7 +13,6 @@ class NetworkGroup:
     def __init__(self, Organization: object, network_group_id: str = None, network_group_name: str = None, group: str = None):
         """Initialize the network group class with a group name or ID."""
         self.logger = Organization.logger
-        self.Networks = Networks(Organization)
         self.network_groups = Organization.find_network_groups_by_organization()
         if (not network_group_id and not network_group_name) and group:
             self.logger.debug(f"got 'group' = '{group}' which could be a short name or id")
@@ -70,13 +69,14 @@ class NetworkGroup:
         for net in Organization.get_networks_by_group(network_group_id=self.network_group_id):
             self.network_ids_by_normal_name[normalize_caseless(net['name'])] = net['id']
 
-    def nc_data_centers_by_location(self):
-        """Get a controller data center by locationCode."""
-        my_nc_data_centers_by_location = dict()
-        for dc in self.get_controller_data_centers():
-            my_nc_data_centers_by_location[dc['locationCode']] = dc['id']
+    def map_region_id_by_location_code(self):
+        """Map all region ids by their location code e.g. us-west-1: id."""
+        region_map = dict()
+        for region in Networks.find_regions(provider='OCP') + Networks.find_regions(provider='AWS'):
+            region_map[region['locationCode']] = region['id']
             # e.g. { us-east-1: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
-        return(my_nc_data_centers_by_location)
+        return(region_map)
+    nc_data_centers_by_location = map_region_id_by_location_code
 
     # resolve network UUIDs by name
     def network_id_by_normal_name(self, name):
@@ -101,26 +101,10 @@ class NetworkGroup:
         else:
             return(False)
 
-    def nc_data_centers(self, **kwargs):
-        """Find network controller data centers."""
-        # data centers returns a list of dicts (data center objects)
-        params = dict()
-        for param in kwargs.keys():
-            params[param] = kwargs[param]
-        params["productVersion"] = self.find_latest_network_version(is_active=True)
-        params["hostType"] = "NC"
-        params["provider"] = "AWS"
-
-        url = self.audience+'core/v2/data-centers'
-        headers = {"authorization": "Bearer " + self.token}
-        try:
-            data_centers = list()
-            for i in find_generic_resources(setup=self, url=url, embedded=NET_RESOURCES['data-centers']._embedded, **params):
-                data_centers.extend(i)
-        except Exception as e:
-            raise RuntimeError(f"failed to get data-centers from url: '{url}', caught {e}")
-        else:
-            return(data_centers)
+    def find_regions(self, **kwargs):
+        """Find network controller data center regions."""
+        return(Networks.find_regions(**kwargs))
+    nc_data_centers = find_regions
 
     # provide a compatible alias
     get_controller_data_centers = nc_data_centers
@@ -133,19 +117,15 @@ class NetworkGroup:
         :param product_version: semver string of a single version to get, default is all versions
         """
         url = self.audience+'product-metadata/v2/download-urls.json'
-        try:
-            all_product_metadata, status_symbol = get_generic_resource_by_url(setup=self, url=url)
-        except Exception as e:
-            raise RuntimeError(f"failed to get product-metadata from url: '{url}', caught {e}")
+        all_product_metadata, status_symbol = get_generic_resource_by_url(setup=self, url=url)
+        if is_active:
+            filtered_product_metadata = dict()
+            for product in all_product_metadata.keys():
+                if all_product_metadata[product]['active']:
+                    filtered_product_metadata[product] = all_product_metadata[product]
+            return (filtered_product_metadata)
         else:
-            if is_active:
-                filtered_product_metadata = dict()
-                for product in all_product_metadata.keys():
-                    if all_product_metadata[product]['active']:
-                        filtered_product_metadata[product] = all_product_metadata[product]
-                return (filtered_product_metadata)
-            else:
-                return (all_product_metadata)
+            return (all_product_metadata)
 
     def find_network_versions(self, is_active: bool = True):
         """Find active network versions."""

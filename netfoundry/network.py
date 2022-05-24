@@ -265,59 +265,25 @@ class Network:
 
         return(valid_entities)
 
-    def get_data_center_by_id(self, id: str):
-        """Get data centers by UUIDv4.
+    def get_region_by_id(self, id: str):
+        """Get data center region by UUIDv4.
 
         :param id:        required UUIDv4 of data center
         """
-        url = self.audience+'core/v2/data-centers/'+id
-        headers = {"authorization": "Bearer " + self.token}
-        try:
-            data_center, status_symbol = get_generic_resource_by_url(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
-        except Exception as e:
-            raise RuntimeError(f"failed to get data_center from url: '{url}', caught {e}")
-        else:
-            return(data_center)
+        url = self.audience+'core/v2/regions/'+id
+        data_center, status_symbol = get_generic_resource_by_url(setup=self, url=url)
+        return(data_center)
+    get_data_center_by_id = get_region_by_id
 
     @docstring_parameters(providers=str(DC_PROVIDERS))
-    def find_edge_router_data_centers(self, provider: str = None, location_code: str = None, **kwargs):
-        """Find data centers for hosting edge routers.
+    def find_regions(self, **kwargs):
+        """Find regions for hosted router placement.
 
-        :param provider:        optionally filter by data center provider, choices: {providers}
-        :param location_code:   provider-specific string identifying the data center location e.g. us-west-1
+        :param provider:        optionally filter by data-center region provider, choices: {providers}
         """
-        params = dict()
-        for param in kwargs.keys():
-            if param == 'region':
-                location_code = kwargs[param]
-            else:
-                params[param] = kwargs[param]
-        if not params.get('productVersion'):
-            params["productVersion"] = self.product_version
-        if not params.get('hostType'):
-            params["hostType"] = "ER"
-
-        if location_code:
-            params["locationCode"] = location_code
-        elif params.get('locationCode'):
-            location_code = params['locationCode']  # query param not yet implemented in API so store it in function to filter the list in response
-        elif params.get('region'):
-            location_code = params['region']        # alternatively, get the location_code from a 'region' query param
-        if provider is not None:
-            if provider in DC_PROVIDERS:
-                params['provider'] = provider
-            else:
-                raise RuntimeError(f"unknown cloud provider '{provider}'. Need one of {str(DC_PROVIDERS)}")
-
-        url = self.audience+'core/v2/data-centers'
-        data_centers = list()
-        for i in find_generic_resources(setup=self, url=url, embedded=NET_RESOURCES['data-centers']._embedded, **params):
-            data_centers.extend(i)
-        if location_code:
-            return [dc for dc in data_centers if dc['locationCode'] == location_code]
-        else:
-            return data_centers
-    get_edge_router_data_centers = find_edge_router_data_centers
+        return self.Networks.find_regions(**kwargs)
+    get_edge_router_data_centers = find_regions
+    find_edge_router_data_centers = find_regions
 
     def share_endpoint(self, recipient, endpoint_id):
         """
@@ -1687,12 +1653,11 @@ class Networks:
         for param in kwargs.keys():
             params[param] = kwargs[param]
 
+        if params.get('provider') and not params['provider'] in DC_PROVIDERS:
+                raise RuntimeError(f"unknown cloud provider '{params['provider']}'. Need one of {str(DC_PROVIDERS)}")
+
         url = self.audience+NET_RESOURCES['regions'].find_url
-        try:
-            regions = list()
-            for i in find_generic_resources(setup=self, url=url, embedded=NET_RESOURCES['data-centers']._embedded, **params):
-                regions.extend(i)
-        except Exception as e:
-            raise RuntimeError(f"failed to get data-centers from url: '{url}', caught {e}")
-        else:
-            return(regions)
+        regions = list()
+        for i in find_generic_resources(setup=self, url=url, embedded=NET_RESOURCES['regions']._embedded, **params):
+            regions.extend(i)
+        return(regions)

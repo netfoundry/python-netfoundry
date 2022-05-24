@@ -523,17 +523,17 @@ def get(cli, echo: bool = True, spinner: object = None):
             else:
                 cli.log.error("need --network=ACMENet")
                 sysexit(1)
-            if cli.args.resource_type == "data-center":
+            if cli.args.resource_type == "region":
                 if 'id' in query_keys:
-                    cli.log.warn("data centers fetched by ID may not support this network's product version, try provider or locationCode params for safety")
+                    cli.log.warn("regions fetched by ID may not support this network's product version, try provider or locationCode params for safety")
                     if len(query_keys) > 1:
                         query_keys.remove('id')
                         cli.log.warn(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
-                    match = network.get_data_center_by_id(id=cli.args.query['id'])
+                    match = network.get_region_by_id(id=cli.args.query['id'])
                 else:
-                    matches = network.find_edge_router_data_centers(**cli.args.query)
+                    matches = networks.find_regions(**cli.args.query)
                     if len(matches) == 1:
-                        match = network.get_data_center_by_id(id=matches[0]['id'])
+                        match = network.get_region_by_id(id=matches[0]['id'])
             else:
                 if 'id' in query_keys:
                     if len(query_keys) > 1:
@@ -618,7 +618,7 @@ def list(cli, echo: bool = True, spinner: object = None):
         cli.log.debug("got spinner as function param")
     if RESOURCE_ABBREV.get(cli.args.resource_type):
         cli.args.resource_type = RESOURCE_ABBREV[cli.args.resource_type].name
-    if cli.args.accept and not MUTABLE_NET_RESOURCES.get(cli.args.resource_type):  # mutable excludes data-centers
+    if cli.args.accept and not MUTABLE_NET_RESOURCES.get(cli.args.resource_type):
         cli.log.warn("the --as=ACCEPT param is not applicable to resources outside the network domain")
     if cli.args.query and cli.args.query.get('id'):
         cli.log.warn("try 'get' command to get by id")
@@ -676,10 +676,7 @@ def list(cli, echo: bool = True, spinner: object = None):
             else:
                 cli.log.error("first configure a network: '--network=ACMENet'")
                 sysexit(1)
-            if cli.args.resource_type == "data-centers":
-                matches = network.find_edge_router_data_centers(**cli.args.query)
-            else:
-                matches = network.find_resources(type=cli.args.resource_type, accept=cli.args.accept, params=cli.args.query)
+            matches = network.find_resources(type=cli.args.resource_type, accept=cli.args.accept, params=cli.args.query)
 
     if len(matches) == 0:
         spinner.fail(f"Found no {cli.args.resource_type} by '{', '.join(query_keys)}'")
@@ -978,8 +975,8 @@ def demo(cli):
     # a list of locations to place a hosted router
     fabric_placements = []
     for region in cli.config.demo.regions:
-        dc_matches = network.find_edge_router_data_centers(provider=cli.config.demo.provider, location_code=region)
-        if not len(dc_matches) == 1:
+        region_matches = networks.find_regions(provider=cli.config.demo.provider, location_code=region)
+        if not len(region_matches) == 1:
             raise RuntimeError(f"invalid region '{region}'")
         else:
             existing_count = len([er for er in hosted_edge_routers if er['provider'] == cli.config.demo.provider and er['region'] == region])
