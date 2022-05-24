@@ -31,6 +31,8 @@ class Network:
         self.audience = NetworkGroup.audience
         self.network_group_id = NetworkGroup.id
 
+        self.Networks = Networks(NetworkGroup)
+
         if (not network_id and not network_name) and network:
             if is_uuidv4(network):
                 network_id = network
@@ -317,7 +319,7 @@ class Network:
         if not response_code == STATUS_CODES.codes['ACCEPTED']:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
-    def get_resource_by_id(self, type: str, id: str, accept: str = None):
+    def get_resource_by_id(self, type: str, id: str, accept: str = None, use_cache: bool=True):
         """Return an object describing a resource entity.
 
         :param type: required string of the singular of an entity type e.g. network, endpoint, service, edge-router, edge-router-policy, posture-check
@@ -341,13 +343,13 @@ class Network:
             raise RuntimeError(f"unknown resource type '{plural(type)}'. Choices: {', '.join(NET_RESOURCES.keys())}")
 
         url = self.audience+'core/v2/'+plural(type)+'/'+id
-        resource, status_symbol = get_generic_resource_by_url(setup=self, url=url, headers=headers)
+        resource, status_symbol = get_generic_resource_by_url(setup=self, url=url, headers=headers, use_cache=use_cache)
         if not resource['networkId'] == self.id:
             raise NetworkBoundaryViolation("resource ID is from another network")
         return(resource)
     get_resource = get_resource_by_id
 
-    def find_resources(self, type: str, accept: str = None, deleted: bool = False, params: dict = dict(), **kwargs):
+    def find_resources(self, type: str, accept: str = None, deleted: bool = False, params: dict = dict(), use_cache: bool = True, **kwargs):
         """Find resources by type.
 
         :param str type: plural of an entity type in the network domain e.g. networks, endpoints, services, posture-checks, etc...
@@ -360,8 +362,6 @@ class Network:
         # pluralize if singular
         if not type[-1] == "s":
             type = plural(type)
-        if type == "data-centers":
-            self.logger.warning("don't call network.get_resources() for data centers, always use network.get_edge_router_data_centers() to filter for locations that support this network's version")
 
         for param in kwargs.keys():
             params[param] = kwargs[param]
@@ -376,7 +376,7 @@ class Network:
         url = self.audience+'core/v2/'+plural(type)
         try:
             resources = list()
-            for i in find_generic_resources(setup=self, url=url, embedded=NET_RESOURCES[plural(type)]._embedded, accept=accept, **params):
+            for i in find_generic_resources(setup=self, url=url, embedded=NET_RESOURCES[plural(type)]._embedded, accept=accept, use_cache=use_cache, **params):
                 resources.extend(i)
         except Exception as e:
             raise RuntimeError(f"failed to get {plural(type)} from url: '{url}', caught {e}")
@@ -424,7 +424,7 @@ class Network:
 
         if not MUTABLE_NET_RESOURCES.get(type):  # prune properties that can't be patched
             raise RuntimeError(f"got unexpected type '{type}' for patch request to {self_link}")
-        before_resource, status_symbol = get_generic_resource_by_url(setup=self, url=self_link)
+        before_resource, status_symbol = get_generic_resource_by_url(setup=self, url=self_link, use_cache=False)
         self.logger.debug(f"found existing resource before patching with properties: '{before_resource}'")
         # compare the patch to the discovered, current state, adding new or updated keys to pruned_patch
         pruned_patch = dict()
@@ -568,7 +568,7 @@ class Network:
         if body.get('name'):
             body['name'] = body['name'].strip('"')
         url = self.audience+'core/v2/'+type
-        resource = create_generic_resource(url=url, body=body, headers=headers, proxies=self.proxies, verify=self.verify, wait=wait, sleep=sleep)
+        resource = create_generic_resource(setup=self, url=url, body=body, wait=wait, sleep=sleep)
         return(resource)
 
     def create_endpoint(self, name: str, attributes: list = [], session_identity: str = None, wait: int = 30, sleep: int = 2, progress: bool = False):
@@ -596,7 +596,7 @@ class Network:
             body['sessionIdentityId'] = session_identity
 
         url = self.audience+'core/v2/endpoints'
-        resource = create_generic_resource(url=url, body=body, headers=headers, proxies=self.proxies, verify=self.verify, wait=wait, sleep=sleep)
+        resource = create_generic_resource(setup=self, url=url, body=body, wait=wait, sleep=sleep)
         self.logger.debug(f"created endpoint {resource['name']}")
         return(resource)
 
@@ -651,10 +651,10 @@ class Network:
                 raise RuntimeError("need both provider and location_code to create a hosted router.")
 
         url = self.audience+'core/v2/edge-routers'
-        resource = create_generic_resource(url=url, body=body, headers=headers, proxies=self.proxies, verify=self.verify, wait=wait, sleep=sleep)
+        resource = create_generic_resource(setup=self, url=url, body=body, wait=wait, sleep=sleep)
         return(resource)
 
-    def create_edge_router_policy(self, name: str, endpoint_attributes: list = [], edge_router_attributes: list = [], wait: int = 30):
+    def create_edge_router_policy(self, name: str, endpoint_attributes: list = [], edge_router_attributes: list = [], wait: int = 30, sleep: int = 3):
         """Create an edge router Policy.
 
         :param name:                    a meaningful, unique name
@@ -662,9 +662,6 @@ class Network:
         :param edge_router_attributes:  a list of router hashtag role attributes and router name mentions
         :param wait:                    seconds to  wait for provisioning to finish before raising an exception
         """
-        headers = {
-            "authorization": "Bearer " + self.token
-        }
         for role in endpoint_attributes+edge_router_attributes:
             if not re.match('^[#@]', role):
                 raise RuntimeError("role attributes on a policy must begin with # or @")
@@ -675,7 +672,7 @@ class Network:
             "edgeRouterAttributes": edge_router_attributes
         }
         url = self.audience+'core/v2/edge-router-policies'
-        resource = create_generic_resource(url=url, body=body, headers=headers, proxies=self.proxies, verify=self.verify, wait=wait)
+        resource = create_generic_resource(setup=self, url=url, body=body, wait=wait, sleep=sleep)
         return(resource)
 
     @docstring_parameters(valid_service_protocols=VALID_SERVICE_PROTOCOLS)
@@ -793,7 +790,7 @@ class Network:
             body['model']['bindEndpointAttributes'] = bind_endpoints
 
         url = self.audience+'core/v2/services'
-        resource = create_generic_resource(url=url, body=body, headers=headers, proxies=self.proxies, verify=self.verify, wait=wait, sleep=sleep)
+        resource = create_generic_resource(setup=self, url=url, body=body, wait=wait, sleep=sleep)
         return(resource)
 
     # the above method was renamed to follow the development of PSM-based services (platform service models)
@@ -833,7 +830,7 @@ class Network:
             return(body)
 
         url = self.audience+'core/v2/service-policies'
-        resource = create_generic_resource(url=url, body=body, headers=headers, proxies=self.proxies, verify=self.verify, wait=wait, sleep=sleep)
+        resource = create_generic_resource(setup=self, url=url, body=body, wait=wait, sleep=sleep)
         return(resource)
 
     def create_service_edge_router_policy(self, name: str, services: list, edge_routers: list, semantic: str = "AnyOf",
@@ -864,7 +861,7 @@ class Network:
             return(body)
 
         url = self.audience+'core/v2/service-edge-router-policies'
-        resource = create_generic_resource(url=url, body=body, headers=headers, proxies=self.proxies, verify=self.verify, wait=wait, sleep=sleep)
+        resource = create_generic_resource(setup=self, url=url, body=body, wait=wait, sleep=sleep)
         return(resource)
 
     def create_service_with_configs(self, name: str, intercept_config_data: dict, host_config_data: dict, attributes: list = [],
@@ -1171,14 +1168,14 @@ class Network:
             return(body)
 
         url = self.audience+'core/v2/services'
-        resource = create_generic_resource(url=url, body=body, headers=headers, proxies=self.proxies, verify=self.verify, wait=wait, sleep=sleep)
+        resource = create_generic_resource(setup=self, url=url, body=body, wait=wait, sleep=sleep)
         return(resource)
 
     # the above method was renamed to follow the development of PSM-based services (platform service models)
     create_endpoint_service = create_service_advanced
 
     def create_app_wan(self, name: str, endpoint_attributes: list = [], service_attributes: list = [], posture_check_attributes: list = [],
-                       wait: int = 10):
+                       wait: int = 10, sleep: int = 3):
         """Create an AppWAN.
 
         :param name:                        a meaningful, unique name
@@ -1200,7 +1197,7 @@ class Network:
             "postureCheckAttributes": posture_check_attributes
         }
         url = self.audience+'core/v2/app-wans'
-        resource = create_generic_resource(url=url, body=body, headers=headers, proxies=self.proxies, verify=self.verify, wait=wait)
+        resource = create_generic_resource(setup=self, url=url, body=body, wait=wait, sleep=sleep)
         return(resource)
 
     def get_network_by_name(self, name: str):
@@ -1302,7 +1299,7 @@ class Network:
         while time.time() < now+wait:
 
             try:
-                entity = self.get_resource_by_id(type=entity_type, id=id)
+                entity = self.get_resource_by_id(type=entity_type, id=id, use_cache=False)
             except Exception as e:
                 raise RuntimeError(f"problem getting resource by id to get status, caught {e}")
 
@@ -1347,7 +1344,7 @@ class Network:
         found_entities = []
         while time.time() < now+wait:
             try:
-                found_entities = self.find_resources(type=plural(entity_type), name=entity_name)
+                found_entities = self.find_resources(type=plural(entity_type), name=entity_name, use_cache=False)
             except Exception as e:
                 raise RuntimeError(f"error finding resources, caught {e}")
 
@@ -1475,8 +1472,7 @@ class Network:
         else:
             entity_url += f"{plural(type)}/{id}"
 
-        headers = {"authorization": "Bearer " + self.token}
-        resource, status_symbol = get_generic_resource_by_url(setup=self, url=entity_url)
+        resource, status_symbol = get_generic_resource_by_url(setup=self, url=entity_url, use_cache=False)
 
         if resource.get(RESOURCES[plural(type)].status):
             status = resource[RESOURCES[plural(type)].status]
@@ -1588,16 +1584,16 @@ class Networks:
     networks.
     """
 
-    def __init__(self, Organization: object) -> None:
+    def __init__(self, setup: object) -> None:
         """
-        :organization: an instance of netfoundry.Organization provides a session and configuration
+        :organization: an instance of an object such as netfoundry.Organization provides a session and configuration
         """
-        self.token = Organization.token
-        self.proxies = Organization.proxies
-        self.verify = Organization.verify
-        self.audience = Organization.audience
-        self.environment = Organization.environment
-        self.logger = Organization.logger
+        self.token = setup.token
+        self.proxies = setup.proxies
+        self.verify = setup.verify
+        self.audience = setup.audience
+        self.environment = setup.environment
+        self.logger = setup.logger
 
     def find_network_domain_resources(self, resource_type: str, **kwargs):
         """

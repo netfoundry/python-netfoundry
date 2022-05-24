@@ -257,9 +257,9 @@ def get_user_config_dir():
     return user_config_path(appname='netfoundry')
 
 
-def get_generic_resource_by_type_and_id(setup: object, resource_type: str, resource_id: str, accept: str = None, **kwargs):
+def get_generic_resource_by_type_and_id(setup: object, resource_type: str, resource_id: str, accept: str = None, use_cache: bool = True, **kwargs):
     url = f"{setup.audience}{RESOURCES[resource_type].find_url}/{resource_id}"
-    resource, status_symbol = get_generic_resource_by_url(setup=setup, url=url, accept=accept, **kwargs)
+    resource, status_symbol = get_generic_resource_by_url(setup=setup, url=url, accept=accept, use_cache=use_cache, **kwargs)
     return resource, status_symbol
 
 
@@ -283,7 +283,7 @@ def wait_for_execution(setup: object, url: str, wait: int = 300, sleep: int = 3)
     status = 'NEW'
     # time.sleep(sleep)  # allow minimal time for the resource status to become available
     while time.time() < now+wait and status not in expected_statuses:
-        execution, status_symbol = get_generic_resource_by_url(setup=setup, url=url)
+        execution, status_symbol = get_generic_resource_by_url(setup=setup, url=url, use_cache=False)
         if execution.get('status'):  # attribute is not None if HTTP OK
             status = execution['status']
             setup.logger.debug(f"{execution['name']} has status {execution['status']}")
@@ -333,7 +333,7 @@ def create_generic_resource(setup: object, url: str, body: dict, headers: dict =
     return resource
 
 
-def get_generic_resource_by_url(setup: object, url: str, headers: dict = dict(), accept: str = None, **kwargs):
+def get_generic_resource_by_url(setup: object, url: str, headers: dict = dict(), accept: str = None, use_cache: bool = True, **kwargs):
     """
     Get, deserialize, and return a single resource.
 
@@ -363,7 +363,11 @@ def get_generic_resource_by_url(setup: object, url: str, headers: dict = dict(),
         params['beta'] = str()
     else:
         setup.logger.debug(f"no handlers specified for url '{url}'")
-    response = http_cache.get(
+    if use_cache:
+        http_session = http_cache
+    else:
+        http_session = http
+    response = http_session.get(
         url,
         headers=headers,
         params=params,
@@ -401,7 +405,7 @@ def get_generic_resource_by_url(setup: object, url: str, headers: dict = dict(),
 get_generic_resource = get_generic_resource_by_type_and_id
 
 
-def find_generic_resources(setup: object, url: str, headers: dict = dict(), embedded: str = None, accept: str = None, **kwargs):
+def find_generic_resources(setup: object, url: str, headers: dict = dict(), embedded: str = None, accept: str = None, use_cache: bool = True, **kwargs):
     """
     Generate each page of a type of resource.
 
@@ -418,8 +422,8 @@ def find_generic_resources(setup: object, url: str, headers: dict = dict(), embe
     # validate and store the resource type
     resource_type = get_resource_type_by_url(url)
     setup.logger.debug(f"detected URL for resource type {resource_type.name}")
-    if not resource_type.name == "download-urls":
-        headers['Authorization'] = f"Bearer {setup.token}"
+    # if not resource_type.name == "download-urls":
+    headers['Authorization'] = f"Bearer {setup.token}"
     if HOSTABLE_NET_RESOURCES.get(resource_type.name):
         params['embed'] = "host"
     elif resource_type.name in ["process-executions"]:
@@ -436,15 +440,15 @@ def find_generic_resources(setup: object, url: str, headers: dict = dict(), embe
     # normalize output with a default sort param
     if not params.get('sort'):
         params["sort"] = "name,asc"
-    # workaround sort param bugs in MOP-18018, MOP-17863, MOP-18178
-    if resource_type.name in ['identities', 'user-identities', 'api-account-identities', 'hosts', 'terminators']:
+    # workaround sort param bugs in MOP-18018, MOP-17863, MOP-18178, MOP-18366
+    if resource_type.name in ['identities', 'user-identities', 'api-account-identities', 'hosts', 'terminators', 'network-versions']:
         del params['sort']
 
     # only get one page of the requested size, else default page size and all pages
     if params.get('size'):
         get_all_pages = False
     else:
-        if resource_type.name in ['data-centers', 'roles']:
+        if resource_type.name in ['roles']:
             params['size'] = 3000    # workaround last page bug in MOP-17993
         else:
             params['size'] = DEFAULT_PAGE_SIZE
@@ -463,8 +467,11 @@ def find_generic_resources(setup: object, url: str, headers: dict = dict(), embe
             embedded = accept + embedded[0].upper() + embedded[1:]  # compose "createEndpointList" from "endpointList"
         else:
             setup.logger.warn("ignoring invalid value for header 'accept': '{:s}'".format(accept))
-
-    response = http_cache.get(
+    if use_cache:
+        http_session = http_cache
+    else:
+        http_session = http
+    response = http_session.get(
         url,
         headers=headers,
         params=params,
@@ -915,7 +922,7 @@ class TimeoutHTTPAdapter(HTTPAdapter):
 
 
 http = Session()   # no cache
-HTTP_CACHE_EXPIRE = 111
+HTTP_CACHE_EXPIRE = 33
 http_cache = CachedSession(cache_name=f"{get_user_cache_dir()}/http_cache", backend='sqlite', expire_after=HTTP_CACHE_EXPIRE)
 # Mount it for both http and https usage
 adapter = TimeoutHTTPAdapter(timeout=DEFAULT_TIMEOUT, max_retries=RETRY_STRATEGY)
