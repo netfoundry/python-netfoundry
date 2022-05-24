@@ -241,8 +241,8 @@ def get_resource_type_by_url(url: str):
     url_parts = urlparse(url)
     url_path = url_parts.path
     resource_type = re.sub(r'/(core|rest|identity|auth|product-metadata)/v\d+/([^/]+)/?.*', r'\2', url_path)
-    if resource_type == "download-urls.json":
-        resource_type = "download-urls"
+    # if resource_type == "download-urls.json":
+    #     resource_type = "download-urls"
     if RESOURCES.get(resource_type):
         return RESOURCES.get(resource_type)
     else:
@@ -729,13 +729,13 @@ RESOURCES = {
         embeddable=False,
         find_url='rest/v1/network-groups',
     ),
-    'download-urls': ResourceType(
-        name='download-urls',
-        domain='network-group',
-        mutable=False,
-        embeddable=False,
-        find_url='product-metadata/v2',
-    ),
+    # 'download-urls': ResourceType(
+    #     name='download-urls',
+    #     domain='network-group',
+    #     mutable=False,
+    #     embeddable=False,
+    #     find_url='product-metadata/v2',
+    # ),
     'networks': ResourceType(
         name='networks',
         domain='network',
