@@ -11,6 +11,7 @@ import logging
 import platform
 import re
 import signal
+import jwt
 import tempfile
 from builtins import list as blist
 from json import dumps as json_dumps
@@ -40,7 +41,7 @@ from .exceptions import NeedUserInput, NFAPINoCredentials
 from .network import Network, Networks
 from .network_group import NetworkGroup
 from .organization import Organization
-from .utility import DC_PROVIDERS, EMBED_NET_RESOURCES, IDENTITY_ID_PROPERTIES, MUTABLE_NET_RESOURCES, MUTABLE_RESOURCE_ABBREV, RESOURCE_ABBREV, RESOURCES, any_in, get_generic_resource_by_type_and_id, plural, propid2type, singular
+from .utility import DC_PROVIDERS, EMBED_NET_RESOURCES, IDENTITY_ID_PROPERTIES, MUTABLE_NET_RESOURCES, MUTABLE_RESOURCE_ABBREV, RESOURCE_ABBREV, RESOURCES, any_in, get_generic_resource_by_type_and_id, normalize_caseless, plural, propid2type, singular
 
 set_metadata(version=f"v{netfoundry_version}", author="NetFoundry", name="nfctl")  # must precend import milc.cli
 from milc import cli, questions  # this uses metadata set above
@@ -603,7 +604,6 @@ def get(cli, echo: bool = True, spinner: object = None):
 @cli.argument('-m', '--my-roles', arg_only=True, action='store_true', help="filter roles by caller identity")
 @cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create'], help="request the as=create alternative form of the resources")
 @cli.argument('-n', '--names', default=False, action='store_boolean', help=argparse.SUPPRESS)
-@cli.argument('-n', '--names', default=False, action='store_boolean', help=argparse.SUPPRESS)
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE",
               choices=[choice for group in [[type, RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
 @cli.subcommand(description='find a collection of resources by type and query')
@@ -688,7 +688,6 @@ def list(cli, echo: bool = True, spinner: object = None):
     for match in matches:
         valid_keys = valid_keys.union(match.keys())
 
-    valid_keys = valid_keys.intersection(cli.args.keys)
     # intersection of the set of valid, observed keys in the first match
     default_keys = ['name', 'label', 'organizationShortName', 'type', 'description',
                     'edgeRouterAttributes', 'serviceAttributes', 'endpointAttributes',
@@ -697,12 +696,11 @@ def list(cli, echo: bool = True, spinner: object = None):
                     'address', 'binding', 'component']
     if cli.config.list.names:  # include identity IDs if --names
         default_keys.extend(IDENTITY_ID_PROPERTIES)
-    valid_keys = valid_keys.intersection(default_keys)
-                    'active', 'default', 'region', 'size', 'attributes', 'email', 'productVersion',
-                    'address', 'binding', 'component']
+    if cli.args.keys:
+        valid_keys = valid_keys.intersection(cli.args.keys)
+    else:
+        valid_keys = valid_keys.intersection(default_keys)
     cli.log.debug(f"filtering matches for valid keys: {str(valid_keys)}")
-        default_keys.extend(IDENTITY_ID_PROPERTIES)
-    valid_keys = valid_keys.intersection(default_keys)
 
     if valid_keys:
         cli.log.debug(f"filtering matches for valid keys: {str(valid_keys)}")
@@ -732,7 +730,7 @@ def list(cli, echo: bool = True, spinner: object = None):
                                 cli.log.debug(f"unexpected value for {k} = {v}")
                                 continue
                             # get the resource with the name we're after
-                            resource, status = get_generic_resource_by_type_and_id(org=organization, resource_type=type_by_prop[k], resource_id=v)
+                            resource, status = get_generic_resource_by_type_and_id(setup=organization, resource_type=type_by_prop[k], resource_id=v)
                             if resource.get('name'):                # if the name property isn't empty
                                 match[k] = f"{resource['name']}"    # wedge the name into the ID column
 
@@ -759,7 +757,7 @@ def list(cli, echo: bool = True, spinner: object = None):
                                 cli.log.debug(f"unexpected value for {k} = {v}")
                                 continue
                             # get the resource with the name we're after
-                            resource, status = get_generic_resource_by_type_and_id(org=organization, resource_type=type_by_prop[k], resource_id=v)
+                            resource, status = get_generic_resource_by_type_and_id(setup=organization, resource_type=type_by_prop[k], resource_id=v)
                             if resource.get('name'):                # if the name property isn't empty
                                 match[k] = f"{resource['name']}"    # wedge the name into the ID column
 
@@ -1215,7 +1213,7 @@ def use_organization(cli, spinner: object = None, prompt: bool = True):
             raise NFAPINoCredentials()
     spinner.succeed(f"Logged in profile '{cli.config.general.profile}'")
     cli.log.debug(f"logged-in organization label is {organization.label}.")
-    networks = Networks(Organization=organization)
+    networks = Networks(setup=organization)
     return organization, networks
 
 
@@ -1394,6 +1392,33 @@ def get_spinner(cli, text):
     else:
         inner_spinner.enabled = True
     return inner_spinner
+
+
+def jwt_decode(token):
+    # TODO: figure out how to stop doing this because the token is for the
+    # API, not this app, and so may change algorithm unexpectedly or stop
+    # being a JWT altogether, currently needed to build the URL for HTTP
+    # requests, might need to start using env config
+    """Parse the token and return claimset."""
+    try:
+        claim = jwt.decode(jwt=token, algorithms=["RS256"], options={"verify_signature": False})
+    except jwt.exceptions.PyJWTError as e:
+        raise jwt.exceptions.PyJWTError(f"failed to parse bearer token as JWT, caught {e}")
+    except Exception as e:
+        raise RuntimeError(f"unexpected error parsing JWT, caught {e}")
+    return claim
+
+
+def is_jwt(token):
+    """If is a JWT then True."""
+    try:
+        jwt_decode(token)
+    except jwt.exceptions.PyJWTError:
+        return False
+    except Exception as e:
+        raise RuntimeError(f"unexpected error parsing JWT, caught {e}")
+    else:
+        return True
 
 
 yaml_lexer = get_lexer_by_name("yaml", stripall=True)

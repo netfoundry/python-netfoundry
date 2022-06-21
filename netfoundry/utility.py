@@ -1,6 +1,7 @@
 """Shared helper functions, constants, and classes."""
 
 import json
+import logging
 import os
 import re  # regex
 import time  # enforce a timeout; sleep
@@ -20,14 +21,17 @@ from requests import status_codes
 from requests.adapters import HTTPAdapter
 from requests.exceptions import HTTPError
 from requests_cache import CachedSession
+# FIXME: disable warning for debug proxy
+from urllib3 import disable_warnings
+from urllib3.exceptions import InsecureRequestWarning
 from urllib3.util.retry import Retry
 
 from .exceptions import UnknownResourceType
 
-# FIXME: disable warning for debug proxy
-from urllib3 import disable_warnings
-from urllib3.exceptions import InsecureRequestWarning
 disable_warnings(InsecureRequestWarning)
+for name, logger in logging.root.manager.loggerDict.items():
+    if name.startswith('requests_cache'):
+        logger.disabled = True
 
 
 def any_in(a, b):
