@@ -335,7 +335,7 @@ def create_generic_resource(setup: object, url: str, body: dict, headers: dict =
         setup.logger.debug(f"waiting for create {resource_type} execution with url {execution_url}")
         wait_for_execution(setup=setup, url=execution_url, wait=wait, sleep=sleep)
     else:
-        setup.logger.warn(f"not waiting for create {resource_type['name']} execution")
+        setup.logger.warn(f"not waiting for create {resource_type.name} execution")
     return resource
 
 

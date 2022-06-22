@@ -1641,20 +1641,25 @@ class Networks:
         if provider:
             providers.append(provider)
 
+        unique_providers = set()
         if providers:
             for provider in providers:
-                if provider not in DC_PROVIDERS:
+                if provider in DC_PROVIDERS:
+                    unique_providers.add(provider)
+                else:
                     raise RuntimeError(f"unknown cloud provider '{provider}'. Need one of {str(DC_PROVIDERS)}")
+
 
         url = self.audience+NET_RESOURCES['regions'].find_url
 
-        if len(providers) == 1 and location_code:
-            url = f"{url}/{providers[0]}/{location_code}"
+        if len(unique_providers) == 1 and location_code:
+            unique_providers_iterator = iter(unique_providers)
+            url = f"{url}/{next(unique_providers_iterator, None)}/{location_code}"
             region, status = get_generic_resource_by_url(setup=self, url=url)
             return([region])
         else:
             regions = list()
-            for i in find_generic_resources(setup=self, url=url, embedded=NET_RESOURCES['regions']._embedded, providers=providers):
+            for i in find_generic_resources(setup=self, url=url, embedded=NET_RESOURCES['regions']._embedded, providers=unique_providers):
                 regions.extend(i)
 
             if location_code and len(regions) > 0:
