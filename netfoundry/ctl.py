@@ -955,7 +955,7 @@ def demo(cli):
                 name=network_name,
                 size=cli.config.demo.size,
                 version=cli.config.demo.product_version,
-                wait=0)  # FIXME: don't use wait > 0 until process-executions beta is launched, until then poll for status
+                wait=333)
             network, network_group = use_network(
                 cli,
                 organization=organization,
