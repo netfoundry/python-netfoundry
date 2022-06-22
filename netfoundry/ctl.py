@@ -487,6 +487,14 @@ def get(cli, echo: bool = True, spinner: object = None):
                 matches = organization.find_roles(**cli.args.query)
                 if len(matches) == 1:
                     match = matches[0]
+        elif cli.args.resource_type == "region":
+            if 'id' in query_keys:
+                cli.log.error("regions do not have an ID property, try provider and location_code params")
+                sysexit(1)
+            else:
+                matches = networks.find_regions(**cli.args.query)
+                if len(matches) == 1:
+                    match = matches[0]
         elif cli.args.resource_type == "network":
             if 'id' in query_keys:
                 if len(query_keys) > 1:
@@ -524,27 +532,15 @@ def get(cli, echo: bool = True, spinner: object = None):
             else:
                 cli.log.error("need --network=ACMENet")
                 sysexit(1)
-            if cli.args.resource_type == "region":
-                if 'id' in query_keys:
-                    cli.log.warn("regions fetched by ID may not support this network's product version, try provider or locationCode params for safety")
-                    if len(query_keys) > 1:
-                        query_keys.remove('id')
-                        cli.log.warn(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
-                    match = network.get_region_by_id(id=cli.args.query['id'])
-                else:
-                    matches = networks.find_regions(**cli.args.query)
-                    if len(matches) == 1:
-                        match = network.get_region_by_id(id=matches[0]['id'])
+            if 'id' in query_keys:
+                if len(query_keys) > 1:
+                    query_keys.remove('id')
+                    cli.log.warn(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
+                match = network.get_resource_by_id(type=cli.args.resource_type, id=cli.args.query['id'], accept=cli.args.accept)
             else:
-                if 'id' in query_keys:
-                    if len(query_keys) > 1:
-                        query_keys.remove('id')
-                        cli.log.warn(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
-                    match = network.get_resource_by_id(type=cli.args.resource_type, id=cli.args.query['id'], accept=cli.args.accept)
-                else:
-                    matches = network.find_resources(type=cli.args.resource_type, accept=cli.args.accept, params=cli.args.query)
-                    if len(matches) == 1:
-                        match = matches[0]
+                matches = network.find_resources(type=cli.args.resource_type, accept=cli.args.accept, params=cli.args.query)
+                if len(matches) == 1:
+                    match = matches[0]
 
     if match:
         cli.log.debug(f"found exactly one {cli.args.resource_type} by '{', '.join(query_keys)}'")
@@ -686,6 +682,7 @@ def list(cli, echo: bool = True, spinner: object = None):
 
     valid_keys = set()
     for match in matches:
+        # cli.log.debug(match)
         valid_keys = valid_keys.union(match.keys())
 
     # intersection of the set of valid, observed keys in the first match
@@ -973,7 +970,7 @@ def demo(cli):
     # a list of locations to place a hosted router
     fabric_placements = []
     for region in cli.config.demo.regions:
-        region_matches = networks.find_regions(provider=cli.config.demo.provider, location_code=region)
+        region_matches = networks.find_regions(providers=[cli.config.demo.provider], location_code=region)
         if not len(region_matches) == 1:
             raise RuntimeError(f"invalid region '{region}'")
         else:

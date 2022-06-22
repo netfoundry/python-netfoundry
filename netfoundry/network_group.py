@@ -1,5 +1,6 @@
 """Use a network group and find its networks."""
 
+# from .organization import Organization
 from .network import Networks
 from .utility import NET_RESOURCES, STATUS_CODES, caseless_equal, create_generic_resource, find_generic_resources, get_generic_resource_by_url, http, is_uuidv4, normalize_caseless
 
@@ -12,6 +13,7 @@ class NetworkGroup:
 
     def __init__(self, Organization: object, network_group_id: str = None, network_group_name: str = None, group: str = None):
         """Initialize the network group class with a group name or ID."""
+        # self.organization = Organization
         self.logger = Organization.logger
         self.network_groups = Organization.find_network_groups_by_organization()
         if (not network_group_id and not network_group_name) and group:
@@ -72,9 +74,9 @@ class NetworkGroup:
     def map_region_id_by_location_code(self):
         """Map all region ids by their location code e.g. us-west-1: id."""
         region_map = dict()
-        for region in Networks.find_regions(provider='OCP') + Networks.find_regions(provider='AWS'):
-            region_map[region['locationCode']] = region['id']
-            # e.g. { us-east-1: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
+        for region in Networks.find_regions(providers=['OCI', 'AWS']):
+            region_map[region['provider']-region['locationCode']] = region['name']
+            # e.g. { AWS-us-east-1: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
         return(region_map)
     nc_data_centers_by_location = map_region_id_by_location_code
 
@@ -147,7 +149,7 @@ class NetworkGroup:
 
     find_latest_product_version = find_latest_network_version
 
-    def create_network(self, name: str, network_group_id: str = None, location: str = "us-east-1", version: str = None, size: str = "medium", wait: int = 1200, sleep: int = 10, **kwargs):
+    def create_network(self, name: str, network_group_id: str = None, location: str = "us-ashburn-1", provider: str = "OCI", version: str = None, size: str = "medium", wait: int = 1200, sleep: int = 10, **kwargs):
         """
         Create a network in this network group.
 
@@ -159,7 +161,7 @@ class NetworkGroup:
         """
         # my_nc_data_centers_by_location = self.nc_data_centers_by_location()
         # if not my_nc_data_centers_by_location.get(location):
-            # raise RuntimeError(f"unexpected network location '{location}'. Valid locations include: {', '.join(my_nc_data_centers_by_location.keys())}.")
+        # raise RuntimeError(f"unexpected network location '{location}'. Valid locations include: {', '.join(my_nc_data_centers_by_location.keys())}.")
 
         # map incongruent api keys from kwargs to function params ("name", "size" are congruent)
         for param, value in kwargs.items():
@@ -178,13 +180,15 @@ class NetworkGroup:
             else:
                 self.logger.warn(f"ignoring unexpected keyword argument '{param}'")
 
-        matching_regions = Networks.find_regions(region=location)
+        networks = Networks(setup=self)
+        matching_regions = networks.find_regions(provider=provider, location_code=location)
         if not len(matching_regions) == 1:
             raise RuntimeError(f"failed to find exactly one match for requested controller region '{location}'")
 
         body = {
             "name": name.strip('"'),
-            "locationCode": location,
+            "provider": provider,
+            "region": location,
             "size": size,
         }
 

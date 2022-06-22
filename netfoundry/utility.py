@@ -885,7 +885,7 @@ MAJOR_REGIONS = {
     }
 }
 
-DC_PROVIDERS = ["AWS", "AZURE", "GCP", "OCP"]
+DC_PROVIDERS = ["AWS", "AZURE", "GCP", "OCP", "OCI", "ALICLOUD", "NETFOUNDRY"]
 VALID_SERVICE_PROTOCOLS = ["tcp", "udp"]
 VALID_SEPARATORS = '[:-]'  # : or - will match regex pattern
 

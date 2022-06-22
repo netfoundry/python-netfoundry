@@ -267,16 +267,6 @@ class Network:
 
         return(valid_entities)
 
-    def get_region_by_id(self, id: str):
-        """Get data center region by UUIDv4.
-
-        :param id:        required UUIDv4 of data center
-        """
-        url = self.audience+'core/v2/regions/'+id
-        data_center, status_symbol = get_generic_resource_by_url(setup=self, url=url)
-        return(data_center)
-    get_data_center_by_id = get_region_by_id
-
     @docstring_parameters(providers=str(DC_PROVIDERS))
     def find_regions(self, **kwargs):
         """Find regions for hosted router placement.
@@ -632,15 +622,9 @@ class Network:
             "linkListener": link_listener,
             "tunnelerEnabled": tunneler_enabled
         }
-        if data_center_id:
-            self.logger.warning('data_center_id is deprecated by provider, location_code. ')
-            data_center = self.get_data_center_by_id(id=data_center_id)
-            body['provider'] = data_center['provider']
-            body['locationCode'] = data_center['locationCode']
-            body['linkListener'] = True
-        elif provider or location_code:
+        if provider or location_code:
             if provider and location_code:
-                data_centers = self.get_edge_router_data_centers(provider=provider, location_code=location_code)
+                data_centers = self.find_regions(provider=provider, location_code=location_code)
                 if len(data_centers) == 1:
                     body['provider'] = provider
                     body['locationCode'] = location_code
@@ -1642,18 +1626,39 @@ class Networks:
         resource = get_generic_resource_by_url(setup=self, url=url, **params)
         return(resource)
 
-    def find_regions(self, **kwargs):
-        """Find regions."""
-        # data centers returns a list of dicts (data center objects)
-        params = dict()
-        for param in kwargs.keys():
-            params[param] = kwargs[param]
+    def find_regions(self, providers: list = [], provider: str = None, location_code: str = None):
+        """
+        Find regions.
 
-        if params.get('provider') and not params['provider'] in DC_PROVIDERS:
-                raise RuntimeError(f"unknown cloud provider '{params['provider']}'. Need one of {str(DC_PROVIDERS)}")
+        Optionally filter by provider, and optionally get exactly one region by sending both a single element for providers and a location_code
+
+        :param providers: optional list of providers from DC_PROVIDERS
+        :param provider: optional string matching one provider from DC_PROVIDERS
+        :param location_code: optional string that uniquely identifies a region for some provider
+        """
+        # regions returns a list of dicts (data center objects)
+
+        if provider:
+            providers.append(provider)
+
+        if providers:
+            for provider in providers:
+                if provider not in DC_PROVIDERS:
+                    raise RuntimeError(f"unknown cloud provider '{provider}'. Need one of {str(DC_PROVIDERS)}")
 
         url = self.audience+NET_RESOURCES['regions'].find_url
-        regions = list()
-        for i in find_generic_resources(setup=self, url=url, embedded=NET_RESOURCES['regions']._embedded, **params):
-            regions.extend(i)
-        return(regions)
+
+        if len(providers) == 1 and location_code:
+            url = f"{url}/{providers[0]}/{location_code}"
+            region, status = get_generic_resource_by_url(setup=self, url=url)
+            return([region])
+        else:
+            regions = list()
+            for i in find_generic_resources(setup=self, url=url, embedded=NET_RESOURCES['regions']._embedded, providers=providers):
+                regions.extend(i)
+
+            if location_code and len(regions) > 0:
+                regions = [r for r in regions if r['locationCode'] == location_code]
+                return(regions)
+            else:
+                return(regions)
