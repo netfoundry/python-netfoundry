@@ -71,14 +71,14 @@ class NetworkGroup:
         for net in Organization.get_networks_by_group(network_group_id=self.network_group_id):
             self.network_ids_by_normal_name[normalize_caseless(net['name'])] = net['id']
 
-    def map_region_id_by_location_code(self):
-        """Map all region ids by their location code e.g. us-west-1: id."""
+    def map_region_name_by_provider_and_location_code(self):
+        """Map all region providers by their location code."""
         region_map = dict()
-        for region in Networks.find_regions(providers=['OCI', 'AWS']):
-            region_map[region['provider']-region['locationCode']] = region['name']
-            # e.g. { AWS-us-east-1: 02f0eb51-fb7a-4d2e-8463-32bd9f6fa4d7 }
+        networks = Networks(self)
+        for region in networks.find_regions(providers=['OCI', 'AWS']):
+            region_map[region['locationCode']] = region['provider']
         return(region_map)
-    nc_data_centers_by_location = map_region_id_by_location_code
+    nc_data_centers_by_location = map_region_name_by_provider_and_location_code
 
     # resolve network UUIDs by name
     def network_id_by_normal_name(self, name):
