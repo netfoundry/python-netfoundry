@@ -8,8 +8,8 @@ from requests.exceptions import JSONDecodeError
 
 from netfoundry.exceptions import NetworkBoundaryViolation, UnknownResourceType
 
-from .utility import (DC_PROVIDERS, MUTABLE_NET_RESOURCES, NET_RESOURCES, RESOURCES, STATUS_CODES, VALID_SEPARATORS, VALID_SERVICE_PROTOCOLS, create_generic_resource, docstring_parameters, find_generic_resources,
-                      get_generic_resource_by_url, http, is_uuidv4, normalize_caseless, plural, singular)
+from .utility import (DC_PROVIDERS, MUTABLE_NET_RESOURCES, NET_RESOURCES, RESOURCES, STATUS_CODES, VALID_SEPARATORS, VALID_SERVICE_PROTOCOLS, create_generic_resource, docstring_parameters, find_generic_resources, get_generic_resource_by_type_and_id,
+                      get_generic_resource_by_url, http, is_uuidv4, normalize_caseless, plural, singular, wait_for_execution)
 
 
 class Network:
@@ -269,9 +269,14 @@ class Network:
 
     @docstring_parameters(providers=str(DC_PROVIDERS))
     def find_regions(self, **kwargs):
-        """Find regions for hosted router placement.
+        """
+        Find regions for router placement.
 
-        :param provider:        optionally filter by data-center region provider, choices: {providers}
+        Optionally filter by provider, and optionally get exactly one region by sending both a single element for providers and a location_code
+
+        :param providers: optional list of providers from DC_PROVIDERS
+        :param provider: optional string matching one provider from DC_PROVIDERS
+        :param location_code: optional string that uniquely identifies a region for some provider
         """
         return self.Networks.find_regions(**kwargs)
     get_edge_router_data_centers = find_regions
@@ -309,7 +314,7 @@ class Network:
         if not response_code == STATUS_CODES.codes['ACCEPTED']:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
-    def get_resource_by_id(self, type: str, id: str, accept: str = None, use_cache: bool=True):
+    def get_resource_by_id(self, type: str, id: str, accept: str = None, use_cache: bool = True):
         """Return an object describing a resource entity.
 
         :param type: required string of the singular of an entity type e.g. network, endpoint, service, edge-router, edge-router-policy, posture-check
@@ -552,7 +557,6 @@ class Network:
         :param post: required dictionary with all properties required by the particular resource type's model
         """
         type = plural(type)
-        headers = {"authorization": "Bearer " + self.token}
         body = post
         body['networkId'] = self.id
         if body.get('name'):
@@ -569,9 +573,6 @@ class Network:
         :param: session_identity is optional string UUID of the identity in the NF organization for
                 which a concurrent web console session is required to activate this endpoint
         """
-        headers = {
-            "authorization": "Bearer " + self.token
-        }
         for role in attributes:
             if not role[0:1] == '#':
                 raise RuntimeError("hashtag role attributes on an endpoint must begin with #")
@@ -587,11 +588,13 @@ class Network:
 
         url = self.audience+'core/v2/endpoints'
         resource = create_generic_resource(setup=self, url=url, body=body, wait=wait, sleep=sleep)
+        # get it again without cache to ensure the JWT is defined
+        resource, status = get_generic_resource_by_type_and_id(setup=self, resource_type='endpoints', resource_id=resource['id'], use_cache=False)
         self.logger.debug(f"created endpoint {resource['name']}")
         return(resource)
 
     @docstring_parameters(providers=str(DC_PROVIDERS))
-    def create_edge_router(self, name: str, attributes: list = list(), link_listener: bool = False, data_center_id: str = None,
+    def create_edge_router(self, name: str, attributes: list = list(), link_listener: bool = False,
                            tunneler_enabled: bool = False, wait: int = 900, sleep: int = 10, progress: bool = False,
                            provider: str = None, location_code: str = None):
         """Create an edge router.
@@ -603,15 +606,11 @@ class Network:
         :param name:              a meaningful, unique name
         :param attributes:        a list of hashtag role attributes
         :param link_listener:     true if router should listen for other routers' transit links on 80/tcp, always true if hosted by NetFoundry
-        :param data_center_id:    (DEPRECATED by provider, location_code) the UUIDv4 of a NetFoundry data center location that can host edge routers
         :param provider:          datacenter provider, choices: {providers}
         :param location_code:     provider-specific string identifying the datacenter location e.g. us-west-1
         :param tunneler_enabled:  true if the built-in tunneler features should be enabled for hosting or interception or both
         :param wait:              seconds to wait for async create to succeed
         """
-        headers = {
-            "authorization": "Bearer " + self.token
-        }
         for role in attributes:
             if not role[0:1] == '#':
                 raise RuntimeError("hashtag role attributes on an endpoint must begin with #")
@@ -688,7 +687,6 @@ class Network:
         :param: endpoints is optional list of strings of hosting endpoints. Selects endpoint-hosting strategy.
         :param: encryption_required is optional Boolean. Default is to enable edge-to-edge encryption.
         """
-        headers = {"authorization": "Bearer " + self.token}
         for role in attributes:
             if not role[0:1] == '#':
                 raise Exception(f'invalid role "{role}". Must begin with "#"')
@@ -764,7 +762,7 @@ class Network:
                     else:
                         # else assume is a name and resolve to ID
                         try:
-                            name_lookup = self.get_resources(type="endpoints", name=endpoint)[0]
+                            name_lookup = self.get_resources(type="endpoints", name=endpoint, use_cache=False)[0]
                             endpoint_name = name_lookup['name']
                         except Exception as e:
                             raise RuntimeError(f'failed to find exactly one hosting endpoint named "{endpoint}", caught {e}')
@@ -797,9 +795,6 @@ class Network:
         bind_endpoints = self.validate_entity_roles(endpoints, type="endpoints")
         valid_services = self.validate_entity_roles(services, type="services")
         valid_postures = self.validate_entity_roles(posture_checks, type="posture-checks")
-        headers = {
-            "authorization": "Bearer " + self.token
-        }
         body = {
             "networkId": self.id,
             "name":  name.strip('"'),
@@ -830,9 +825,6 @@ class Network:
         """
         valid_services = self.validate_entity_roles(services, type="services")
         valid_routers = self.validate_entity_roles(edge_routers, type="edge-routers")
-        headers = {
-            "authorization": "Bearer " + self.token
-        }
         body = {
             "networkId": self.id,
             "name":  name.strip('"'),
@@ -1119,7 +1111,7 @@ class Network:
                         bind_endpoints.append('@'+endpoint_name)  # is an existing endpoint's name resolved from UUID
                 else:
                     try:
-                        name_lookup = self.get_resources(type="endpoints", name=endpoint)[0]
+                        name_lookup = self.get_resources(type="endpoints", name=endpoint, use_cache=False)[0]
                         endpoint_name = name_lookup['name']
                     except Exception as e:
                         raise Exception('ERROR: Failed to find exactly one hosting endpoint named "{}". Caught exception: {}'.format(endpoint, e))
@@ -1127,9 +1119,6 @@ class Network:
                     else:
                         bind_endpoints.append('@'+endpoint_name)      # is an existing endpoint's name
 
-        headers = {
-            "authorization": "Bearer " + self.token
-        }
         body = {
             "networkId": self.id,
             "name": name,
@@ -1167,9 +1156,6 @@ class Network:
         :param service_attributes:          a list of service hashtag role attributes and service names
         :param posture_check_attributes:    a list of posture hashtag role attributes and posture names
         """
-        headers = {
-            "authorization": "Bearer " + self.token
-        }
         for role in endpoint_attributes+service_attributes+posture_check_attributes:
             if not re.match('^[#@]', role):
                 raise RuntimeError("ERROR: role attributes on an AppWAN must begin with # or @")
@@ -1550,10 +1536,10 @@ class Network:
                 if wait:
                     if resource.get('_links') and resource['_links'].get('execution'):
                         execution_url = resource['_links'].get('execution')['href']
-                        self.wait_for_statuses(expected_statuses=RESOURCES["executions"].status_symbols['complete'], type="executions", id=process_id, wait=wait, sleep=sleep)
+                        wait_for_execution(setup=self, url=execution_url, wait=wait, sleep=sleep)
                         return(True)
                     else:
-                        self.logger.warning("unable to wait for async complete because response did not provide a process execution id")
+                        self.logger.error("unable to wait for async complete because response did not provide an execution link")
                         return(False)
                 else:
                     return(True)
@@ -1648,7 +1634,6 @@ class Networks:
                     unique_providers.add(provider)
                 else:
                     raise RuntimeError(f"unknown cloud provider '{provider}'. Need one of {str(DC_PROVIDERS)}")
-
 
         url = self.audience+NET_RESOURCES['regions'].find_url
 
