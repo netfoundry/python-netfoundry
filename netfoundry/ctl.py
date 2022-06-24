@@ -933,7 +933,7 @@ def demo(cli):
                 name=network_name,
                 size=cli.config.demo.size,
                 version=cli.config.demo.product_version,
-                wait=333)
+            )
             network, network_group = use_network(
                 cli,
                 organization=organization,
