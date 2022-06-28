@@ -8,7 +8,6 @@ import time  # enforce a timeout; sleep
 import unicodedata  # case insensitive compare in Utility
 from dataclasses import dataclass, field
 from json import JSONDecodeError
-# from re import sub
 from stat import filemode
 from urllib.parse import urlparse
 from uuid import UUID  # validate UUIDv4 strings
@@ -235,18 +234,11 @@ def is_uuidv4(string: str):
         return True
 
 
-# def eprint(*args, **kwargs):
-#     """Adapt legacy function to logging."""
-#     logging.debug(*args, **kwargs)
-
-
 def get_resource_type_by_url(url: str):
     """Get the resource type definition from a resource URL."""
     url_parts = urlparse(url)
     url_path = url_parts.path
     resource_type = re.sub(r'/(core|rest|identity|auth|product-metadata)/v\d+/([^/]+)/?.*', r'\2', url_path)
-    # if resource_type == "download-urls.json":
-    #     resource_type = "download-urls"
     if RESOURCES.get(resource_type):
         return RESOURCES.get(resource_type)
     else:
