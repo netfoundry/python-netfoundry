@@ -159,9 +159,6 @@ class NetworkGroup:
         :param version: optional product version string like 7.3.17
         :param size: optional network configuration metadata name from /core/v2/network-configs e.g. "medium"
         """
-        # my_nc_data_centers_by_location = self.nc_data_centers_by_location()
-        # if not my_nc_data_centers_by_location.get(location):
-        # raise RuntimeError(f"unexpected network location '{location}'. Valid locations include: {', '.join(my_nc_data_centers_by_location.keys())}.")
 
         # map incongruent api keys from kwargs to function params ("name", "size" are congruent)
         for param, value in kwargs.items():
