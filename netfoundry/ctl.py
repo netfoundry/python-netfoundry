@@ -11,7 +11,9 @@ import logging
 import platform
 import re
 import signal
+import jwt
 import tempfile
+from builtins import list as blist
 from json import dumps as json_dumps
 from json import load as json_load
 from json import loads as json_loads
@@ -39,7 +41,7 @@ from .exceptions import NeedUserInput, NFAPINoCredentials
 from .network import Network, Networks
 from .network_group import NetworkGroup
 from .organization import Organization
-from .utility import DC_PROVIDERS, EMBED_NET_RESOURCES, MUTABLE_NET_RESOURCES, MUTABLE_RESOURCE_ABBREV, RESOURCE_ABBREV, RESOURCES, is_jwt, normalize_caseless, plural, singular
+from .utility import DC_PROVIDERS, EMBED_NET_RESOURCES, IDENTITY_ID_PROPERTIES, MUTABLE_NET_RESOURCES, MUTABLE_RESOURCE_ABBREV, RESOURCE_ABBREV, RESOURCES, any_in, get_generic_resource_by_type_and_id, normalize_caseless, plural, propid2type, singular
 
 set_metadata(version=f"v{netfoundry_version}", author="NetFoundry", name="nfctl")  # must precend import milc.cli
 from milc import cli, questions  # this uses metadata set above
@@ -485,6 +487,14 @@ def get(cli, echo: bool = True, spinner: object = None):
                 matches = organization.find_roles(**cli.args.query)
                 if len(matches) == 1:
                     match = matches[0]
+        elif cli.args.resource_type == "region":
+            if 'id' in query_keys:
+                cli.log.error("regions do not have an ID property, try provider and location_code params")
+                sysexit(1)
+            else:
+                matches = networks.find_regions(**cli.args.query)
+                if len(matches) == 1:
+                    match = matches[0]
         elif cli.args.resource_type == "network":
             if 'id' in query_keys:
                 if len(query_keys) > 1:
@@ -522,27 +532,15 @@ def get(cli, echo: bool = True, spinner: object = None):
             else:
                 cli.log.error("need --network=ACMENet")
                 sysexit(1)
-            if cli.args.resource_type == "data-center":
-                if 'id' in query_keys:
-                    cli.log.warn("data centers fetched by ID may not support this network's product version, try provider or locationCode params for safety")
-                    if len(query_keys) > 1:
-                        query_keys.remove('id')
-                        cli.log.warn(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
-                    match = network.get_data_center_by_id(id=cli.args.query['id'])
-                else:
-                    matches = network.find_edge_router_data_centers(**cli.args.query)
-                    if len(matches) == 1:
-                        match = network.get_data_center_by_id(id=matches[0]['id'])
+            if 'id' in query_keys:
+                if len(query_keys) > 1:
+                    query_keys.remove('id')
+                    cli.log.warn(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
+                match = network.get_resource_by_id(type=cli.args.resource_type, id=cli.args.query['id'], accept=cli.args.accept)
             else:
-                if 'id' in query_keys:
-                    if len(query_keys) > 1:
-                        query_keys.remove('id')
-                        cli.log.warn(f"using 'id' only, ignoring params: '{', '.join(query_keys)}'")
-                    match = network.get_resource_by_id(type=cli.args.resource_type, id=cli.args.query['id'], accept=cli.args.accept)
-                else:
-                    matches = network.find_resources(type=cli.args.resource_type, accept=cli.args.accept, params=cli.args.query)
-                    if len(matches) == 1:
-                        match = matches[0]
+                matches = network.find_resources(type=cli.args.resource_type, accept=cli.args.accept, params=cli.args.query)
+                if len(matches) == 1:
+                    match = matches[0]
 
     if match:
         cli.log.debug(f"found exactly one {cli.args.resource_type} by '{', '.join(query_keys)}'")
@@ -601,18 +599,22 @@ def get(cli, echo: bool = True, spinner: object = None):
 @cli.argument('-k', '--keys', arg_only=True, action=StoreListKeys, help="list of keys as a,b,c to print only selected keys (columns)")
 @cli.argument('-m', '--my-roles', arg_only=True, action='store_true', help="filter roles by caller identity")
 @cli.argument('-a', '--as', dest='accept', arg_only=True, choices=['create'], help="request the as=create alternative form of the resources")
+@cli.argument('-n', '--names', default=False, action='store_boolean', help=argparse.SUPPRESS)
 @cli.argument('resource_type', arg_only=True, help='type of resource', metavar="RESOURCE_TYPE",
               choices=[choice for group in [[type, RESOURCES[type].abbreviation] for type in RESOURCES.keys()] for choice in group])
 @cli.subcommand(description='find a collection of resources by type and query')
-def list(cli, spinner: object = None):
-    """Find resources as lists."""
+def list(cli, echo: bool = True, spinner: object = None):
+    """Find resources as lists.
+
+    :param echo: False allows the caller to capture the return instead of printing the match
+    """
     if not spinner:
         spinner = get_spinner(cli, "working")
     else:
         cli.log.debug("got spinner as function param")
     if RESOURCE_ABBREV.get(cli.args.resource_type):
         cli.args.resource_type = RESOURCE_ABBREV[cli.args.resource_type].name
-    if cli.args.accept and not MUTABLE_NET_RESOURCES.get(cli.args.resource_type):  # mutable excludes data-centers
+    if cli.args.accept and not MUTABLE_NET_RESOURCES.get(cli.args.resource_type):
         cli.log.warn("the --as=ACCEPT param is not applicable to resources outside the network domain")
     if cli.args.query and cli.args.query.get('id'):
         cli.log.warn("try 'get' command to get by id")
@@ -627,6 +629,8 @@ def list(cli, spinner: object = None):
         spinner.text = f"Finding {cli.args.resource_type} {'by' if query_keys else '...'} {', '.join(query_keys)}"
     else:
         spinner.text = f"Finding all {cli.args.resource_type}"
+    if not echo:
+        spinner.enabled = False
     with spinner:
         organization, networks = use_organization(cli, spinner)
         if cli.args.resource_type == "organizations":
@@ -645,6 +649,8 @@ def list(cli, spinner: object = None):
                 matches = organization.find_roles(**cli.args.query)
             else:
                 matches = organization.find_roles(**cli.args.query)
+        elif cli.args.resource_type == "regions":
+            matches = networks.find_regions(**cli.args.query)
         elif cli.args.resource_type == "networks":
             if cli.config.general.network_group:
                 network_group = use_network_group(
@@ -666,10 +672,7 @@ def list(cli, spinner: object = None):
             else:
                 cli.log.error("first configure a network: '--network=ACMENet'")
                 sysexit(1)
-            if cli.args.resource_type == "data-centers":
-                matches = network.find_edge_router_data_centers(**cli.args.query)
-            else:
-                matches = network.find_resources(type=cli.args.resource_type, accept=cli.args.accept, params=cli.args.query)
+            matches = network.find_resources(type=cli.args.resource_type, accept=cli.args.accept, params=cli.args.query)
 
     if len(matches) == 0:
         spinner.fail(f"Found no {cli.args.resource_type} by '{', '.join(query_keys)}'")
@@ -678,20 +681,26 @@ def list(cli, spinner: object = None):
         cli.log.debug(f"found at least one {cli.args.resource_type} by '{', '.join(query_keys)}'")
 
     valid_keys = set()
+    for match in matches:
+        # cli.log.debug(match)
+        valid_keys = valid_keys.union(match.keys())
+
+    # intersection of the set of valid, observed keys in the first match
+    default_keys = ['name', 'label', 'organizationShortName', 'type', 'description',
+                    'edgeRouterAttributes', 'serviceAttributes', 'endpointAttributes',
+                    'status', 'zitiId', 'provider', 'locationCode', 'ipAddress', 'networkVersion',
+                    'active', 'default', 'region', 'size', 'attributes', 'email', 'productVersion',
+                    'address', 'binding', 'component']
+    if cli.config.list.names:  # include identity IDs if --names
+        default_keys.extend(IDENTITY_ID_PROPERTIES)
     if cli.args.keys:
-        # intersection of the set of valid, observed keys in the first match
-        # and the set of configured, desired keys
-        valid_keys = set(matches[0].keys()) & set(cli.args.keys)
-    elif cli.args.output == "text":
-        default_columns = ['name', 'label', 'organizationShortName', 'type', 'description',
-                           'edgeRouterAttributes', 'serviceAttributes', 'endpointAttributes',
-                           'status', 'zitiId', 'provider', 'locationCode', 'ipAddress', 'networkVersion',
-                           'active', 'default', 'region', 'size', 'attributes', 'email', 'productVersion',
-                           'address', 'binding', 'component']
-        valid_keys = set(matches[0].keys()) & set(default_columns)
+        valid_keys = valid_keys.intersection(cli.args.keys)
+    else:
+        valid_keys = valid_keys.intersection(default_keys)
+    cli.log.debug(f"filtering matches for valid keys: {str(valid_keys)}")
 
     if valid_keys:
-        cli.log.debug(f"valid keys: {str(valid_keys)}")
+        cli.log.debug(f"filtering matches for valid keys: {str(valid_keys)}")
         filtered_matches = []
         for match in matches:
             filtered_match = {key: match[key] for key in match.keys() if key in valid_keys}
@@ -700,7 +709,33 @@ def list(cli, spinner: object = None):
         cli.log.debug("not filtering output keys")
         filtered_matches = matches
 
+    # if echo=False then return the object and parent objects instead of printing with an output format
+    if not echo:
+        return filtered_matches, organization
+
     if cli.args.output == "text":
+        if cli.config.list.names:
+            # map any property names that look like a resource ID to the appropriate resource type so we can look up the name later
+            type_by_prop = dict()
+            for key in valid_keys:
+                if key not in ['zitiId']:
+                    if key in IDENTITY_ID_PROPERTIES:
+                        type_by_prop[key] = 'identities'
+                    elif key.endswith('Id'):
+                        type_by_prop[key] = propid2type(key)
+
+            for match in filtered_matches:                         # for each match
+                if any_in(type_by_prop.keys(), match.keys()):      # if at least one property points to a resolvable ID (fast)
+                    for k, v in match.items():                     # for each key in match (slow)
+                        if type_by_prop.get(k):                    # if this is the property that points to a resolvable ID
+                            if v is None:
+                                cli.log.debug(f"unexpected value for {k} = {v}")
+                                continue
+                            # get the resource with the name we're after
+                            resource, status = get_generic_resource_by_type_and_id(setup=organization, resource_type=type_by_prop[k], resource_id=v)
+                            if resource.get('name'):                # if the name property isn't empty
+                                match[k] = f"{resource['name']}"    # wedge the name into the ID column
+
         if cli.config.general.headers:
             table_headers = filtered_matches[0].keys()
         else:
@@ -898,7 +933,7 @@ def demo(cli):
                 name=network_name,
                 size=cli.config.demo.size,
                 version=cli.config.demo.product_version,
-                wait=0)  # FIXME: don't use wait > 0 until process-executions beta is launched, until then poll for status
+            )
             network, network_group = use_network(
                 cli,
                 organization=organization,
@@ -913,8 +948,8 @@ def demo(cli):
     # a list of locations to place a hosted router
     fabric_placements = []
     for region in cli.config.demo.regions:
-        dc_matches = network.find_edge_router_data_centers(provider=cli.config.demo.provider, location_code=region)
-        if not len(dc_matches) == 1:
+        region_matches = networks.find_regions(providers=[cli.config.demo.provider], location_code=region)
+        if not len(region_matches) == 1:
             raise RuntimeError(f"invalid region '{region}'")
         else:
             existing_count = len([er for er in hosted_edge_routers if er['provider'] == cli.config.demo.provider and er['region'] == region])
@@ -1153,7 +1188,7 @@ def use_organization(cli, spinner: object = None, prompt: bool = True):
             raise NFAPINoCredentials()
     spinner.succeed(f"Logged in profile '{cli.config.general.profile}'")
     cli.log.debug(f"logged-in organization label is {organization.label}.")
-    networks = Networks(Organization=organization)
+    networks = Networks(setup=organization)
     return organization, networks
 
 
@@ -1181,7 +1216,7 @@ def use_network_group(cli, organization: object, group: str = None, spinner: obj
     return network_group
 
 
-def use_network(cli, organization: object, network_name: str = None, group: str = None, spinner: object = None):
+def use_network(cli, organization: Organization, network_name: str = None, group: str = None, spinner: object = None):
     """
     Use a network.
 
@@ -1332,6 +1367,33 @@ def get_spinner(cli, text):
     else:
         inner_spinner.enabled = True
     return inner_spinner
+
+
+def jwt_decode(token):
+    # TODO: figure out how to stop doing this because the token is for the
+    # API, not this app, and so may change algorithm unexpectedly or stop
+    # being a JWT altogether, currently needed to build the URL for HTTP
+    # requests, might need to start using env config
+    """Parse the token and return claimset."""
+    try:
+        claim = jwt.decode(jwt=token, algorithms=["RS256"], options={"verify_signature": False})
+    except jwt.exceptions.PyJWTError as e:
+        raise jwt.exceptions.PyJWTError(f"failed to parse bearer token as JWT, caught {e}")
+    except Exception as e:
+        raise RuntimeError(f"unexpected error parsing JWT, caught {e}")
+    return claim
+
+
+def is_jwt(token):
+    """If is a JWT then True."""
+    try:
+        jwt_decode(token)
+    except jwt.exceptions.PyJWTError:
+        return False
+    except Exception as e:
+        raise RuntimeError(f"unexpected error parsing JWT, caught {e}")
+    else:
+        return True
 
 
 yaml_lexer = get_lexer_by_name("yaml", stripall=True)

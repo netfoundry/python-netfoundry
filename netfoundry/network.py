@@ -4,12 +4,12 @@ import json
 import re
 import time
 
-from requests.exceptions import HTTPError, JSONDecodeError
+from requests.exceptions import JSONDecodeError
 
 from netfoundry.exceptions import NetworkBoundaryViolation, UnknownResourceType
 
-from .utility import (DC_PROVIDERS, MUTABLE_NET_RESOURCES, NET_RESOURCES, PROCESS_STATUS_SYMBOLS, RESOURCES, STATUS_CODES, VALID_SEPARATORS, VALID_SERVICE_PROTOCOLS, any_in, docstring_parameters, find_generic_resources, get_generic_resource, http,
-                      is_uuidv4, normalize_caseless, plural, singular)
+from .utility import (DC_PROVIDERS, MUTABLE_NET_RESOURCES, NET_RESOURCES, RESOURCES, STATUS_CODES, VALID_SEPARATORS, VALID_SERVICE_PROTOCOLS, create_generic_resource, docstring_parameters, find_generic_resources, get_generic_resource_by_type_and_id,
+                      get_generic_resource_by_url, http, is_uuidv4, normalize_caseless, plural, singular, wait_for_execution)
 
 
 class Network:
@@ -31,13 +31,15 @@ class Network:
         self.audience = NetworkGroup.audience
         self.network_group_id = NetworkGroup.id
 
+        self.Networks = Networks(NetworkGroup)
+
         if (not network_id and not network_name) and network:
             if is_uuidv4(network):
                 network_id = network
             else:
                 network_name = network
         elif (network_id or network_name) and network:
-            self.logger.warn(f"ignoring network identifier '{network}' because network_id or network_name were provided")
+            self.logger.warning(f"ignoring network identifier '{network}' because network_id or network_name were provided")
 
         if network_id:
             self.describe = self.get_network_by_id(network_id)
@@ -265,60 +267,20 @@ class Network:
 
         return(valid_entities)
 
-    def get_data_center_by_id(self, id: str):
-        """Get data centers by UUIDv4.
-
-        :param id:        required UUIDv4 of data center
-        """
-        url = self.audience+'core/v2/data-centers/'+id
-        headers = {"authorization": "Bearer " + self.token}
-        try:
-            data_center, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
-        except Exception as e:
-            raise RuntimeError(f"failed to get data_center from url: '{url}', caught {e}")
-        else:
-            return(data_center)
-
     @docstring_parameters(providers=str(DC_PROVIDERS))
-    def find_edge_router_data_centers(self, provider: str = None, location_code: str = None, **kwargs):
-        """Find data centers for hosting edge routers.
-
-        :param provider:        optionally filter by data center provider, choices: {providers}
-        :param location_code:   provider-specific string identifying the data center location e.g. us-west-1
+    def find_regions(self, **kwargs):
         """
-        params = dict()
-        for param in kwargs.keys():
-            if param == 'region':
-                location_code = kwargs[param]
-            else:
-                params[param] = kwargs[param]
-        if not params.get('productVersion'):
-            params["productVersion"] = self.product_version
-        if not params.get('hostType'):
-            params["hostType"] = "ER"
+        Find regions for router placement.
 
-        if location_code:
-            params["locationCode"] = location_code
-        elif params.get('locationCode'):
-            location_code = params['locationCode']  # query param not yet implemented in API so store it in function to filter the list in response
-        elif params.get('region'):
-            location_code = params['region']        # alternatively, get the location_code from a 'region' query param
-        if provider is not None:
-            if provider in DC_PROVIDERS:
-                params['provider'] = provider
-            else:
-                raise RuntimeError(f"unknown cloud provider '{provider}'. Need one of {str(DC_PROVIDERS)}")
+        Optionally filter by provider, and optionally get exactly one region by sending both a single element for providers and a location_code
 
-        url = self.audience+'core/v2/data-centers'
-        headers = {"authorization": "Bearer " + self.token}
-        data_centers = list()
-        for i in find_generic_resources(url=url, headers=headers, embedded=NET_RESOURCES['data-centers']._embedded, proxies=self.proxies, verify=self.verify, **params):
-            data_centers.extend(i)
-        if location_code:
-            return [dc for dc in data_centers if dc['locationCode'] == location_code]
-        else:
-            return data_centers
-    get_edge_router_data_centers = find_edge_router_data_centers
+        :param providers: optional list of providers from DC_PROVIDERS
+        :param provider: optional string matching one provider from DC_PROVIDERS
+        :param location_code: optional string that uniquely identifies a region for some provider
+        """
+        return self.Networks.find_regions(**kwargs)
+    get_edge_router_data_centers = find_regions
+    find_edge_router_data_centers = find_regions
 
     def share_endpoint(self, recipient, endpoint_id):
         """
@@ -352,7 +314,7 @@ class Network:
         if not response_code == STATUS_CODES.codes['ACCEPTED']:
             raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
 
-    def get_resource_by_id(self, type: str, id: str, accept: str = None):
+    def get_resource_by_id(self, type: str, id: str, accept: str = None, use_cache: bool = True):
         """Return an object describing a resource entity.
 
         :param type: required string of the singular of an entity type e.g. network, endpoint, service, edge-router, edge-router-policy, posture-check
@@ -369,21 +331,20 @@ class Network:
             if accept in ["create", "update"]:
                 headers['accept'] = "application/json;as="+accept
             else:
-                self.logger.warn(f"ignoring invalid value for param 'accept': '{accept}'")
+                self.logger.warning(f"ignoring invalid value for param 'accept': '{accept}'")
         if not type == "network":
             params["networkId"] = self.id
         if not NET_RESOURCES.get(plural(type)):
             raise RuntimeError(f"unknown resource type '{plural(type)}'. Choices: {', '.join(NET_RESOURCES.keys())}")
 
-        headers = {"authorization": "Bearer " + self.token}
         url = self.audience+'core/v2/'+plural(type)+'/'+id
-        resource, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+        resource, status_symbol = get_generic_resource_by_url(setup=self, url=url, headers=headers, use_cache=use_cache)
         if not resource['networkId'] == self.id:
             raise NetworkBoundaryViolation("resource ID is from another network")
         return(resource)
     get_resource = get_resource_by_id
 
-    def find_resources(self, type: str, accept: str = None, deleted: bool = False, params: dict = dict(), **kwargs):
+    def find_resources(self, type: str, accept: str = None, deleted: bool = False, params: dict = dict(), use_cache: bool = True, **kwargs):
         """Find resources by type.
 
         :param str type: plural of an entity type in the network domain e.g. networks, endpoints, services, posture-checks, etc...
@@ -396,8 +357,6 @@ class Network:
         # pluralize if singular
         if not type[-1] == "s":
             type = plural(type)
-        if type == "data-centers":
-            self.logger.warn("don't call network.get_resources() for data centers, always use network.get_edge_router_data_centers() to filter for locations that support this network's version")
 
         for param in kwargs.keys():
             params[param] = kwargs[param]
@@ -410,10 +369,9 @@ class Network:
             params['status'] = "DELETED"
 
         url = self.audience+'core/v2/'+plural(type)
-        headers = {"authorization": "Bearer " + self.token}
         try:
             resources = list()
-            for i in find_generic_resources(url=url, headers=headers, embedded=NET_RESOURCES[plural(type)]._embedded, accept=accept, proxies=self.proxies, verify=self.verify, **params):
+            for i in find_generic_resources(setup=self, url=url, embedded=NET_RESOURCES[plural(type)]._embedded, accept=accept, use_cache=use_cache, **params):
                 resources.extend(i)
         except Exception as e:
             raise RuntimeError(f"failed to get {plural(type)} from url: '{url}', caught {e}")
@@ -456,12 +414,12 @@ class Network:
         else:
             split_type = self_link.split('/')[5]           # e.g. endpoints, app-wans, edge-routers, etc...
             if type and not type == split_type:
-                self.logger.warn(f"mutating value of param 'type={type}' to match self link '{split_type}' in requested patch")
+                self.logger.warning(f"mutating value of param 'type={type}' to match self link '{split_type}' in requested patch")
             type = split_type
 
         if not MUTABLE_NET_RESOURCES.get(type):  # prune properties that can't be patched
             raise RuntimeError(f"got unexpected type '{type}' for patch request to {self_link}")
-        before_resource, status_symbol = get_generic_resource(url=self_link, headers=headers, proxies=self.proxies, verify=self.verify, accept='update')
+        before_resource, status_symbol = get_generic_resource_by_url(setup=self, url=self_link, use_cache=False)
         self.logger.debug(f"found existing resource before patching with properties: '{before_resource}'")
         # compare the patch to the discovered, current state, adding new or updated keys to pruned_patch
         pruned_patch = dict()
@@ -491,7 +449,7 @@ class Network:
             if type == "services" and not pruned_patch.get('modelType') and pruned_patch.get('model'):
                 # moduleType is immutable, so we're just carrying a known value forward to compose a valid patch request
                 pruned_patch["modelType"] = before_resource["modelType"]
-                self.logger.warn(f"added required service property 'modelType' from current state '{pruned_patch['modelType']}' to patch request")
+                self.logger.warning(f"added required service property 'modelType' from current state '{pruned_patch['modelType']}' to patch request")
             after_response = http.patch(
                 self_link,
                 proxies=self.proxies,
@@ -522,14 +480,14 @@ class Network:
                     self.wait_for_statuses(expected_statuses=RESOURCES['executions'].status_symbols['progress'] + RESOURCES['executions'].status_symbols['complete'], type="executions", id=process_id, wait=9, sleep=2)
                     return(resource)
             elif wait:
-                self.logger.warn(f"unable to wait for async complete because response did not provide a process execution id, returning patched resource '{resource}'")
+                self.logger.warning(f"unable to wait for async complete because response did not provide a process execution id, returning patched resource '{resource}'")
                 return(resource)
             else:  # no links, no wait
                 self.logger.debug(f"returning patched resource without waiting: '{resource}'")
                 return(resource)
         else:
             # no change, return the existing unmodified entity
-            self.logger.warn("not sending patch because there were no differences between the requested state and current state, returning the current state")
+            self.logger.warning("not sending patch because there were no differences between the requested state and current state, returning the current state")
             return(before_resource)
 
     def put_resource(self, put: dict, type: str = None, id: str = None, wait: int = 0, sleep: int = 2, progress: bool = False):
@@ -586,7 +544,7 @@ class Network:
                 self.wait_for_statuses(expected_statuses=RESOURCES['executions'].status_symbols['progress'] + RESOURCES['executions'].status_symbols['complete'], type="executions", id=process_id, wait=9, sleep=2)
                 return(resource)
         elif wait:
-            self.logger.warn("unable to wait for async complete because response did not provide a process execution id")
+            self.logger.warning("unable to wait for async complete because response did not provide a process execution id")
             return(resource)
         else:
             return(resource)
@@ -599,43 +557,13 @@ class Network:
         :param post: required dictionary with all properties required by the particular resource type's model
         """
         type = plural(type)
-        try:
-            headers = {"authorization": "Bearer " + self.token}
-            post['networkId'] = self.id
-            if post.get('name'):
-                post['name'] = post['name'].strip('"')
-            response = http.post(
-                self.audience+'core/v2/'+type,
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers,
-                json=post
-            )
-            response.raise_for_status()
-        except HTTPError as e:
-            self.logger.error(f"failed POST to create resource, caught {e.response.text}")
-            exit(1)
-        else:
-            resource = response.json()
-
-        if resource.get('_links') and resource['_links'].get('executions'):
-            _links = resource['_links'].get('executions')
-            if isinstance(_links, list):
-                process_id = _links[0]['href'].split('/')[6]
-            else:
-                process_id = _links['href'].split('/')[6]
-            if wait:
-                self.wait_for_statuses(expected_statuses=RESOURCES["executions"].status_symbols['complete'], type="executions", id=process_id, wait=wait, sleep=sleep)
-                resource = self.get_resource_by_id(type=type, id=resource['id'])
-                return(resource)
-            else:    # only wait for the process to start, not finish, or timeout
-                self.wait_for_statuses(expected_statuses=RESOURCES['executions'].status_symbols['progress'] + RESOURCES['executions'].status_symbols['complete'], type="executions", id=process_id, wait=9, sleep=2)
-                return(resource)
-        elif wait:
-            self.logger.warn("unable to wait for async complete because response did not provide a process execution id")
-            return(resource)
-        else:
-            return(resource)
+        body = post
+        body['networkId'] = self.id
+        if body.get('name'):
+            body['name'] = body['name'].strip('"')
+        url = self.audience+'core/v2/'+type
+        resource = create_generic_resource(setup=self, url=url, body=body, wait=wait, sleep=sleep)
+        return(resource)
 
     def create_endpoint(self, name: str, attributes: list = [], session_identity: str = None, wait: int = 30, sleep: int = 2, progress: bool = False):
         """Create an endpoint.
@@ -645,67 +573,28 @@ class Network:
         :param: session_identity is optional string UUID of the identity in the NF organization for
                 which a concurrent web console session is required to activate this endpoint
         """
-        try:
-            headers = {
-                "authorization": "Bearer " + self.token
-            }
-            for role in attributes:
-                if not role[0:1] == '#':
-                    raise RuntimeError("hashtag role attributes on an endpoint must begin with #")
-            body = {
-                "networkId": self.id,
-                "name": name.strip('"'),
-                "attributes": attributes,
-                "enrollmentMethod": {"ott": True}
-            }
+        for role in attributes:
+            if not role[0:1] == '#':
+                raise RuntimeError("hashtag role attributes on an endpoint must begin with #")
+        body = {
+            "networkId": self.id,
+            "name": name.strip('"'),
+            "attributes": attributes,
+            "enrollmentMethod": {"ott": True}
+        }
 
-            if session_identity:
-                body['sessionIdentityId'] = session_identity
+        if session_identity:
+            body['sessionIdentityId'] = session_identity
 
-            response = http.post(
-                self.audience+'core/v2/endpoints',
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers,
-                json=body
-            )
-            response_code = response.status_code
-        except Exception as e:
-            raise RuntimeError(f"error with POST to {self.audience+'core/v2/endpoints'}, caught {e}")
-
-        resource = None
-
-        response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, NET_RESOURCES['endpoints'].create_responses):
-            try:
-                resource = response.json()
-            except ValueError as e:
-                raise RuntimeError(f"problem loading JSON from response '{response.text}' after expected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}), caught {e}")
-
-        else:
-            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}")
-
-        if resource.get('_links') and resource['_links'].get('executions'):
-            _links = resource['_links'].get('executions')
-            if isinstance(_links, list):
-                process_id = _links[0]['href'].split('/')[6]
-            else:
-                process_id = _links['href'].split('/')[6]
-            if wait:
-                self.wait_for_statuses(expected_statuses=RESOURCES["executions"].status_symbols['complete'], type="executions", id=process_id, wait=wait, sleep=sleep)
-                resource = self.get_resource_by_id(type='endpoint', id=resource['id'])
-                return(resource)
-            else:    # only wait for the process to start, not finish, or timeout
-                self.wait_for_statuses(expected_statuses=RESOURCES['executions'].status_symbols['progress'] + RESOURCES['executions'].status_symbols['complete'], type="executions", id=process_id, wait=9, sleep=2)
-                return(resource)
-        elif wait:
-            self.logger.warn("unable to wait for async complete because response did not provide a process execution id")
-            return(resource)
-        else:
-            return(resource)
+        url = self.audience+'core/v2/endpoints'
+        resource = create_generic_resource(setup=self, url=url, body=body, wait=wait, sleep=sleep)
+        # get it again without cache to ensure the JWT is defined
+        resource, status = get_generic_resource_by_type_and_id(setup=self, resource_type='endpoints', resource_id=resource['id'], use_cache=False)
+        self.logger.debug(f"created endpoint {resource['name']}")
+        return(resource)
 
     @docstring_parameters(providers=str(DC_PROVIDERS))
-    def create_edge_router(self, name: str, attributes: list = list(), link_listener: bool = False, data_center_id: str = None,
+    def create_edge_router(self, name: str, attributes: list = list(), link_listener: bool = False,
                            tunneler_enabled: bool = False, wait: int = 900, sleep: int = 10, progress: bool = False,
                            provider: str = None, location_code: str = None):
         """Create an edge router.
@@ -717,91 +606,38 @@ class Network:
         :param name:              a meaningful, unique name
         :param attributes:        a list of hashtag role attributes
         :param link_listener:     true if router should listen for other routers' transit links on 80/tcp, always true if hosted by NetFoundry
-        :param data_center_id:    (DEPRECATED by provider, location_code) the UUIDv4 of a NetFoundry data center location that can host edge routers
         :param provider:          datacenter provider, choices: {providers}
         :param location_code:     provider-specific string identifying the datacenter location e.g. us-west-1
         :param tunneler_enabled:  true if the built-in tunneler features should be enabled for hosting or interception or both
         :param wait:              seconds to wait for async create to succeed
         """
-        try:
-            headers = {
-                "authorization": "Bearer " + self.token
-            }
-            for role in attributes:
-                if not role[0:1] == '#':
-                    raise RuntimeError("hashtag role attributes on an endpoint must begin with #")
-            body = {
-                "networkId": self.id,
-                "name": name.strip('"'),
-                "attributes": attributes,
-                "linkListener": link_listener,
-                "tunnelerEnabled": tunneler_enabled
-            }
-            if data_center_id:
-                self.logger.warn('data_center_id is deprecated by provider, location_code. ')
-                data_center = self.get_data_center_by_id(id=data_center_id)
-                body['provider'] = data_center['provider']
-                body['locationCode'] = data_center['locationCode']
-                body['linkListener'] = True
-            elif provider or location_code:
-                if provider and location_code:
-                    data_centers = self.get_edge_router_data_centers(provider=provider, location_code=location_code)
-                    if len(data_centers) == 1:
-                        body['provider'] = provider
-                        body['locationCode'] = location_code
-                        body['linkListener'] = True
-                    else:
-                        raise Exception(f"failed to find exactly one {provider} data center with location_code={location_code}")
+        for role in attributes:
+            if not role[0:1] == '#':
+                raise RuntimeError("hashtag role attributes on an endpoint must begin with #")
+        body = {
+            "networkId": self.id,
+            "name": name.strip('"'),
+            "attributes": attributes,
+            "linkListener": link_listener,
+            "tunnelerEnabled": tunneler_enabled
+        }
+        if provider or location_code:
+            if provider and location_code:
+                data_centers = self.find_regions(provider=provider, location_code=location_code)
+                if len(data_centers) == 1:
+                    body['provider'] = provider
+                    body['locationCode'] = location_code
+                    body['linkListener'] = True
                 else:
-                    raise RuntimeError("need both provider and location_code to create a hosted router.")
-
-            response = http.post(
-                self.audience+'core/v2/edge-routers',
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers,
-                json=body
-            )
-            response_code = response.status_code
-        except Exception as e:
-            raise RuntimeError(f"error with POST to {self.audience+'core/v2/edge-routers'}, caught {e}")
-
-        response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, NET_RESOURCES['edge-routers'].create_responses):
-            try:
-                resource = response.json()
-            except ValueError as e:
-                raise RuntimeError(f"failed to load JSON from POST response, caught {e}")
+                    raise Exception(f"failed to find exactly one {provider} data center with location_code={location_code}")
             else:
-                if response.headers._store.get('x-b3-traceid'):
-                    self.logger.debug(f"created edge router trace ID {response.headers._store['x-b3-traceid'][1]}'")
-                else:
-                    self.logger.debug("created edge router")
-        else:
-            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
+                raise RuntimeError("need both provider and location_code to create a hosted router.")
 
-        if resource.get('_links') and resource['_links'].get('executions'):
-            _links = resource['_links'].get('executions')
-            if isinstance(_links, list):
-                process_id = _links[0]['href'].split('/')[6]
-            else:
-                process_id = _links['href'].split('/')[6]
-            if wait:
-                self.wait_for_statuses(expected_statuses=RESOURCES["executions"].status_symbols['complete'], type="executions", id=process_id, wait=wait, sleep=sleep)
-                if tunneler_enabled:
-                    self.wait_for_entity_name_exists(entity_name=name, entity_type="endpoint", wait=wait)
-                resource = self.get_resource_by_id(type="edge-router", id=resource['id'])
-                return(resource)
-            else:    # only wait for the process to start, not finish, or timeout
-                self.wait_for_statuses(expected_statuses=RESOURCES['executions'].status_symbols['progress'] + RESOURCES['executions'].status_symbols['complete'], type="executions", id=process_id, wait=9, sleep=2)
-                return(resource)
-        elif wait:
-            self.logger.warn("unable to wait for async complete because response did not provide a process execution id")
-            return(resource)
-        else:
-            return(resource)
+        url = self.audience+'core/v2/edge-routers'
+        resource = create_generic_resource(setup=self, url=url, body=body, wait=wait, sleep=sleep)
+        return(resource)
 
-    def create_edge_router_policy(self, name: str, endpoint_attributes: list = [], edge_router_attributes: list = [], wait: int = 30):
+    def create_edge_router_policy(self, name: str, endpoint_attributes: list = [], edge_router_attributes: list = [], wait: int = 30, sleep: int = 3):
         """Create an edge router Policy.
 
         :param name:                    a meaningful, unique name
@@ -809,45 +645,18 @@ class Network:
         :param edge_router_attributes:  a list of router hashtag role attributes and router name mentions
         :param wait:                    seconds to  wait for provisioning to finish before raising an exception
         """
-        try:
-            headers = {
-                "authorization": "Bearer " + self.token
-            }
-            for role in endpoint_attributes+edge_router_attributes:
-                if not re.match('^[#@]', role):
-                    raise RuntimeError("role attributes on a policy must begin with # or @")
-            body = {
-                "networkId": self.id,
-                "name": name.strip('"'),
-                "endpointAttributes": endpoint_attributes,
-                "edgeRouterAttributes": edge_router_attributes
-            }
-            response = http.post(
-                self.audience+'core/v2/edge-router-policies',
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers,
-                json=body
-            )
-            response_code = response.status_code
-        except Exception as e:
-            raise RuntimeError(f"error with POST to {self.audience+'core/v2/edge-router-policies'}, caught {e}")
-
-        response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, NET_RESOURCES['edge-router-policies'].create_responses):
-            try:
-                started = response.json()
-            except ValueError as e:
-                raise RuntimeError(f"failed to load JSON from POST response, caught {e}")
-        else:
-            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
-
-        # ERPs are created in a blocking, synchronous manner, and so zitiId should be defined
-        if wait and not started['zitiId']:
-            finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="edge-router-policy", id=started['id'], wait=wait)
-            return(finished)
-        else:
-            return(started)
+        for role in endpoint_attributes+edge_router_attributes:
+            if not re.match('^[#@]', role):
+                raise RuntimeError("role attributes on a policy must begin with # or @")
+        body = {
+            "networkId": self.id,
+            "name": name.strip('"'),
+            "endpointAttributes": endpoint_attributes,
+            "edgeRouterAttributes": edge_router_attributes
+        }
+        url = self.audience+'core/v2/edge-router-policies'
+        resource = create_generic_resource(setup=self, url=url, body=body, wait=wait, sleep=sleep)
+        return(resource)
 
     @docstring_parameters(valid_service_protocols=VALID_SERVICE_PROTOCOLS)
     def create_service_simple(self, name: str, client_host_name: str, client_port: int, server_host_name: str = None,
@@ -878,131 +687,93 @@ class Network:
         :param: endpoints is optional list of strings of hosting endpoints. Selects endpoint-hosting strategy.
         :param: encryption_required is optional Boolean. Default is to enable edge-to-edge encryption.
         """
-        try:
-            headers = {"authorization": "Bearer " + self.token}
-            for role in attributes:
-                if not role[0:1] == '#':
-                    raise Exception(f'invalid role "{role}". Must begin with "#"')
-            body = {
-                "networkId": self.id,
-                "name": name.strip('"'),
-                "encryptionRequired": encryption_required,
-                "model": {
-                    "clientIngress": {
-                        "host": client_host_name,
-                        "port": client_port,
-                    },
-                    "edgeRouterAttributes": edge_router_attributes
+        for role in attributes:
+            if not role[0:1] == '#':
+                raise Exception(f'invalid role "{role}". Must begin with "#"')
+        body = {
+            "networkId": self.id,
+            "name": name.strip('"'),
+            "encryptionRequired": encryption_required,
+            "model": {
+                "clientIngress": {
+                    "host": client_host_name,
+                    "port": client_port,
                 },
-                "attributes": attributes,
+                "edgeRouterAttributes": edge_router_attributes
+            },
+            "attributes": attributes,
+        }
+        # resolve exit hosting params
+        if not server_host_name:
+            body['modelType'] = "TunnelerToSdk"
+            if server_port:
+                self.logger.warning("ignoring unexpected server details for SDK-hosted service")
+        else:
+            server_egress = {
+                "protocol": server_protocol.lower(),
+                "host": server_host_name,
+                "port": server_port if server_port else client_port
             }
-            # resolve exit hosting params
-            if not server_host_name:
-                body['modelType'] = "TunnelerToSdk"
-                if server_port:
-                    self.logger.warn("ignoring unexpected server details for SDK-hosted service")
+            if endpoints and not egress_router_id:
+                body['modelType'] = "TunnelerToEndpoint"
+                body['model']['serverEgress'] = server_egress
+            elif egress_router_id and not endpoints:
+                body['modelType'] = "TunnelerToEdgeRouter"
+                # check if UUIDv4
+                if not is_uuidv4(egress_router_id):
+                    # else assume is a name and resolve to ID
+                    try:
+                        name_lookup = self.get_resources(type="edge-routers", name=egress_router_id)[0]
+                        egress_router_id = name_lookup['id']    # clobber the name value with the looked-up UUID
+                    except Exception as e:
+                        raise Exception('ERROR: Failed to find exactly one egress router "{}". Caught exception: {}'.format(egress_router_id, e))
+                body['model']['edgeRouterHosts'] = [{
+                        "edgeRouterId": egress_router_id,
+                        "serverEgress": server_egress,
+                    }]
             else:
-                server_egress = {
-                    "protocol": server_protocol.lower(),
-                    "host": server_host_name,
-                    "port": server_port if server_port else client_port
-                }
-                if endpoints and not egress_router_id:
-                    body['modelType'] = "TunnelerToEndpoint"
-                    body['model']['serverEgress'] = server_egress
-                elif egress_router_id and not endpoints:
-                    body['modelType'] = "TunnelerToEdgeRouter"
-                    # check if UUIDv4
-                    if not is_uuidv4(egress_router_id):
+                raise Exception('ERROR: invalid service model: need only one of binding "endpoints" or hosting "egress_router_id" if "server_host_name" is specified')
+
+        # resolve edge router param
+        if edge_router_attributes and not edge_router_attributes == ['#all']:
+            self.logger.warning("overriding default service edge router policy #all for new service {:s}".format(name))
+            body['edgeRouterAttributes'] = edge_router_attributes
+
+        if body['modelType'] in ["TunnelerToSdk", "TunnelerToEndpoint"]:
+            # parse out the elements in the list of endpoints as one of #attribute, UUID, or resolvable Endoint name
+            bind_endpoints = list()
+            for endpoint in endpoints:
+                if endpoint[0:1] == '#':
+                    bind_endpoints += [endpoint]
+                else:
+                    # strip leading @ if present and re-add later after verifying the named endpoint exists
+                    if endpoint[0:1] == '@':
+                        endpoint = endpoint[1:]
+
+                    # if UUIDv4 then resolve to name, else verify the named endpoint exists
+                    if is_uuidv4(endpoint):   # assigned below under "else" if already a UUID
+                        try:
+                            name_lookup = self.get_resource(type="endpoint", id=endpoint)
+                            endpoint_name = name_lookup['name']
+                        except Exception as e:
+                            raise RuntimeError(f'failed to find exactly one hosting endpoint with ID "{endpoint}", caught {e}')
+                        else:
+                            bind_endpoints += ['@'+endpoint_name]
+                    else:
                         # else assume is a name and resolve to ID
                         try:
-                            name_lookup = self.get_resources(type="edge-routers", name=egress_router_id)[0]
-                            egress_router_id = name_lookup['id']    # clobber the name value with the looked-up UUID
+                            name_lookup = self.get_resources(type="endpoints", name=endpoint, use_cache=False)[0]
+                            endpoint_name = name_lookup['name']
                         except Exception as e:
-                            raise Exception('ERROR: Failed to find exactly one egress router "{}". Caught exception: {}'.format(egress_router_id, e))
-                    body['model']['edgeRouterHosts'] = [{
-                            "edgeRouterId": egress_router_id,
-                            "serverEgress": server_egress,
-                        }]
-                else:
-                    raise Exception('ERROR: invalid service model: need only one of binding "endpoints" or hosting "egress_router_id" if "server_host_name" is specified')
-
-            # resolve edge router param
-            if edge_router_attributes and not edge_router_attributes == ['#all']:
-                self.logger.warning("overriding default service edge router policy #all for new service {:s}".format(name))
-                body['edgeRouterAttributes'] = edge_router_attributes
-
-            if body['modelType'] in ["TunnelerToSdk", "TunnelerToEndpoint"]:
-                # parse out the elements in the list of endpoints as one of #attribute, UUID, or resolvable Endoint name
-                bind_endpoints = list()
-                for endpoint in endpoints:
-                    if endpoint[0:1] == '#':
-                        bind_endpoints += [endpoint]
-                    else:
-                        # strip leading @ if present and re-add later after verifying the named endpoint exists
-                        if endpoint[0:1] == '@':
-                            endpoint = endpoint[1:]
-
-                        # if UUIDv4 then resolve to name, else verify the named endpoint exists
-                        if is_uuidv4(endpoint):   # assigned below under "else" if already a UUID
-                            try:
-                                name_lookup = self.get_resource(type="endpoint", id=endpoint)
-                                endpoint_name = name_lookup['name']
-                            except Exception as e:
-                                raise RuntimeError(f'failed to find exactly one hosting endpoint with ID "{endpoint}", caught {e}')
-                            else:
-                                bind_endpoints += ['@'+endpoint_name]
+                            raise RuntimeError(f'failed to find exactly one hosting endpoint named "{endpoint}", caught {e}')
+                        # append to list after successfully resolving name to ID
                         else:
-                            # else assume is a name and resolve to ID
-                            try:
-                                name_lookup = self.get_resources(type="endpoints", name=endpoint)[0]
-                                endpoint_name = name_lookup['name']
-                            except Exception as e:
-                                raise RuntimeError(f'failed to find exactly one hosting endpoint named "{endpoint}", caught {e}')
-                            # append to list after successfully resolving name to ID
-                            else:
-                                bind_endpoints += ['@'+endpoint_name]
-                body['model']['bindEndpointAttributes'] = bind_endpoints
+                            bind_endpoints += ['@'+endpoint_name]
+            body['model']['bindEndpointAttributes'] = bind_endpoints
 
-            params = dict()
-            response = http.post(
-                self.audience+'core/v2/services',
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers,
-                json=body,
-                params=params
-            )
-            response_code = response.status_code
-        except Exception as e:
-            raise RuntimeError(f"error with POST to {self.audience+'core/v2/services'}, caught {e}")
-
-        response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, NET_RESOURCES['services'].create_responses):
-            try:
-                resource = response.json()
-            except ValueError as e:
-                raise RuntimeError(f"failed to load JSON from POST response, caught {e}")
-        else:
-            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
-
-        if resource.get('_links') and resource['_links'].get('executions'):
-            _links = resource['_links'].get('executions')
-            if isinstance(_links, list):
-                process_id = _links[0]['href'].split('/')[6]
-            else:
-                process_id = _links['href'].split('/')[6]
-            if wait:
-                self.wait_for_statuses(expected_statuses=RESOURCES["executions"].status_symbols['complete'], type="executions", id=process_id, wait=wait, sleep=sleep)
-                return(resource)
-            else:    # only wait for the process to start, not finish, or timeout
-                self.wait_for_statuses(expected_statuses=RESOURCES['executions'].status_symbols['progress'] + RESOURCES['executions'].status_symbols['complete'], type="executions", id=process_id, wait=9, sleep=2)
-                return(resource)
-        elif wait:
-            self.logger.warn("unable to wait for async complete because response did not provide a process execution id")
-            return(resource)
-        else:
-            return(resource)
+        url = self.audience+'core/v2/services'
+        resource = create_generic_resource(setup=self, url=url, body=body, wait=wait, sleep=sleep)
+        return(resource)
 
     # the above method was renamed to follow the development of PSM-based services (platform service models)
     create_service = create_service_simple
@@ -1024,66 +795,22 @@ class Network:
         bind_endpoints = self.validate_entity_roles(endpoints, type="endpoints")
         valid_services = self.validate_entity_roles(services, type="services")
         valid_postures = self.validate_entity_roles(posture_checks, type="posture-checks")
-        try:
-            headers = {
-                "authorization": "Bearer " + self.token
-            }
-            body = {
-                "networkId": self.id,
-                "name":  name.strip('"'),
-                "type": type,
-                "semantic": semantic,
-                "postureCheckAttributes": valid_postures,
-                "serviceAttributes": valid_services,
-                "endpointAttributes": bind_endpoints
-            }
+        body = {
+            "networkId": self.id,
+            "name":  name.strip('"'),
+            "type": type,
+            "semantic": semantic,
+            "postureCheckAttributes": valid_postures,
+            "serviceAttributes": valid_services,
+            "endpointAttributes": bind_endpoints
+        }
 
-            params = dict()
-            # params = {
-            #     "beta": ''
-            # }
+        if dry_run:
+            return(body)
 
-            if dry_run:
-                return(body)
-
-            response = http.post(
-                self.audience+'core/v2/service-policies',
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers,
-                json=body,
-                params=params
-            )
-            response_code = response.status_code
-        except Exception as e:
-            raise RuntimeError(f"error with POST to {self.audience+'core/v2/service-policies'}, caught {e}")
-
-        response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, NET_RESOURCES['service-policies'].create_responses):
-            try:
-                resource = response.json()
-            except ValueError as e:
-                raise RuntimeError(f"failed to load JSON from POST response, caught {e}")
-        else:
-            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
-
-        if resource.get('_links') and resource['_links'].get('executions'):
-            _links = resource['_links'].get('executions')
-            if isinstance(_links, list):
-                process_id = _links[0]['href'].split('/')[6]
-            else:
-                process_id = _links['href'].split('/')[6]
-            if wait:
-                self.wait_for_statuses(expected_statuses=RESOURCES["executions"].status_symbols['complete'], type="executions", id=process_id, wait=wait, sleep=sleep)
-                return(resource)
-            else:    # only wait for the process to start, not finish, or timeout
-                self.wait_for_statuses(expected_statuses=RESOURCES['executions'].status_symbols['progress'] + RESOURCES['executions'].status_symbols['complete'], type="executions", id=process_id, wait=9, sleep=2)
-                return(resource)
-        elif wait:
-            self.logger.warn("unable to wait for async complete because response did not provide a process execution id")
-            return(resource)
-        else:
-            return(resource)
+        url = self.audience+'core/v2/service-policies'
+        resource = create_generic_resource(setup=self, url=url, body=body, wait=wait, sleep=sleep)
+        return(resource)
 
     def create_service_edge_router_policy(self, name: str, services: list, edge_routers: list, semantic: str = "AnyOf",
                                           dry_run: bool = False, wait: int = 30, sleep: int = 10, progress: bool = False):
@@ -1098,64 +825,20 @@ class Network:
         """
         valid_services = self.validate_entity_roles(services, type="services")
         valid_routers = self.validate_entity_roles(edge_routers, type="edge-routers")
-        try:
-            headers = {
-                "authorization": "Bearer " + self.token
-            }
-            body = {
-                "networkId": self.id,
-                "name":  name.strip('"'),
-                "semantic": semantic,
-                "serviceAttributes": valid_services,
-                "edgeRouterAttributes": valid_routers
-            }
+        body = {
+            "networkId": self.id,
+            "name":  name.strip('"'),
+            "semantic": semantic,
+            "serviceAttributes": valid_services,
+            "edgeRouterAttributes": valid_routers
+        }
 
-            params = dict()
-            # params = {
-            #     "beta": ''
-            # }
+        if dry_run:
+            return(body)
 
-            if dry_run:
-                return(body)
-
-            response = http.post(
-                self.audience+'core/v2/service-edge-router-policies',
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers,
-                json=body,
-                params=params
-            )
-            response_code = response.status_code
-        except Exception as e:
-            raise RuntimeError(f"error with POST to {self.audience+'core/v2/service-edge-router-policies'}, caught {e}")
-
-        response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, NET_RESOURCES['service-edge-router-policies'].create_responses):
-            try:
-                resource = response.json()
-            except ValueError as e:
-                raise RuntimeError(f"failed to load JSON from POST response, caught {e}")
-        else:
-            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
-
-        if resource.get('_links') and resource['_links'].get('executions'):
-            _links = resource['_links'].get('executions')
-            if isinstance(_links, list):
-                process_id = _links[0]['href'].split('/')[6]
-            else:
-                process_id = _links['href'].split('/')[6]
-            if wait:
-                self.wait_for_statuses(expected_statuses=RESOURCES["executions"].status_symbols['complete'], type="executions", id=process_id, wait=wait, sleep=sleep)
-                return(resource)
-            else:    # only wait for the process to start, not finish, or timeout
-                self.wait_for_statuses(expected_statuses=RESOURCES['executions'].status_symbols['progress'] + RESOURCES['executions'].status_symbols['complete'], type="executions", id=process_id, wait=9, sleep=2)
-                return(resource)
-        elif wait:
-            self.logger.warn("unable to wait for async complete because response did not provide a process execution id")
-            return(resource)
-        else:
-            return(resource)
+        url = self.audience+'core/v2/service-edge-router-policies'
+        resource = create_generic_resource(setup=self, url=url, body=body, wait=wait, sleep=sleep)
+        return(resource)
 
     def create_service_with_configs(self, name: str, intercept_config_data: dict, host_config_data: dict, attributes: list = [],
                                     encryption_required: bool = True, dry_run: bool = False, wait: int = 60, sleep: int = 10,
@@ -1169,82 +852,38 @@ class Network:
         :param: encryption_required is optional Boolean. Default is to enable edge-to-edge encryption.
         :param: dry_run is optional Boolean where True returns only the entity model without sending a request.
         """
-        try:
-            # validate roles
-            for role in attributes:
-                if not role[0:1] == '#':
-                    raise Exception('ERROR: invalid role "{:s}". Must begin with "#"'.format(role))
+        # validate roles
+        for role in attributes:
+            if not role[0:1] == '#':
+                raise Exception('ERROR: invalid role "{:s}". Must begin with "#"'.format(role))
 
-            headers = {
-                "authorization": "Bearer " + self.token
-            }
-            body = {
-                "networkId": self.id,
-                "name": name.strip('"'),
-                "encryptionRequired": encryption_required,
-                "configs": [
-                    {
-                        "networkId": self.id,
-                        "name": name+"-config-intercept.v1",
-                        "configTypeName": "intercept.v1",
-                        "data": intercept_config_data
-                    },
-                    {
-                        "networkId": self.id,
-                        "name": name+"-config-host.v1",
-                        "configTypeName": "host.v1",
-                        "data": host_config_data
-                    }
-                ],
-                "attributes": attributes,
-            }
+        body = {
+            "networkId": self.id,
+            "name": name.strip('"'),
+            "encryptionRequired": encryption_required,
+            "configs": [
+                {
+                    "networkId": self.id,
+                    "name": name+"-config-intercept.v1",
+                    "configTypeName": "intercept.v1",
+                    "data": intercept_config_data
+                },
+                {
+                    "networkId": self.id,
+                    "name": name+"-config-host.v1",
+                    "configTypeName": "host.v1",
+                    "data": host_config_data
+                }
+            ],
+            "attributes": attributes,
+        }
 
-            params = dict()
-            # params = {
-            #     "beta": ''
-            # }
+        if dry_run:
+            return(body)
 
-            if dry_run:
-                return(body)
-
-            response = http.post(
-                self.audience+'core/v2/services',
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers,
-                json=body,
-                params=params
-            )
-            response_code = response.status_code
-        except Exception as e:
-            raise RuntimeError(f"error with POST to {self.audience+'core/v2/services'}, caught {e}")
-
-        response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, NET_RESOURCES['services'].create_responses):
-            try:
-                resource = response.json()
-            except ValueError as e:
-                raise RuntimeError(f"failed to load JSON from POST response, caught {e}")
-        else:
-            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
-
-        if resource.get('_links') and resource['_links'].get('executions'):
-            _links = resource['_links'].get('executions')
-            if isinstance(_links, list):
-                process_id = _links[0]['href'].split('/')[6]
-            else:
-                process_id = _links['href'].split('/')[6]
-            if wait:
-                self.wait_for_statuses(expected_statuses=RESOURCES["executions"].status_symbols['complete'], type="executions", id=process_id, wait=wait, sleep=sleep)
-                return(resource)
-            else:    # only wait for the process to start, not finish, or timeout
-                self.wait_for_statuses(expected_statuses=RESOURCES['executions'].status_symbols['progress'] + RESOURCES['executions'].status_symbols['complete'], type="executions", id=process_id, wait=9, sleep=2)
-                return(resource)
-        elif wait:
-            self.logger.warn("unable to wait for async complete because response did not provide a process execution id")
-            return(resource)
-        else:
-            return(resource)
+        url = self.audience+'core/v2/services'
+        resource = create_generic_resource(setup=self, url=url, body=body, wait=wait, sleep=sleep)
+        return(resource)
 
     @docstring_parameters(valid_service_protocols=VALID_SERVICE_PROTOCOLS)
     def create_service_transparent(self, name: str, client_hosts: list, client_ports: list, transparent_hosts: list,
@@ -1397,163 +1036,119 @@ class Network:
         :param: dry_run is optional Boolean where True returns only the entity model without sending a request.
         """
         name = name.strip('"')
-        try:
-            # validate roles
-            for role in attributes:
-                if not role[0:1] == '#':
-                    raise Exception('ERROR: invalid role "{:s}". Must begin with "#"'.format(role))
+        # validate roles
+        for role in attributes:
+            if not role[0:1] == '#':
+                raise Exception('ERROR: invalid role "{:s}". Must begin with "#"'.format(role))
 
-            # these elements could be a single port as integer or a string with one or two ports separated by a : or -
-            valid_client_ports = self.validate_port_ranges(client_ports)
-            valid_server_ports = self.validate_port_ranges(server_ports)
+        # these elements could be a single port as integer or a string with one or two ports separated by a : or -
+        valid_client_ports = self.validate_port_ranges(client_ports)
+        valid_server_ports = self.validate_port_ranges(server_ports)
 
-            # validate client protocols
-            valid_client_protocols = list()
-            for proto in client_protocols:
-                if not proto.lower() in VALID_SERVICE_PROTOCOLS:
-                    raise Exception("ERROR: client intercept protocol \"{}\" is not valid.".format(proto.lower()))
-                else:
-                    valid_client_protocols.append(proto.lower())
-
-            # validate server protocols
-            valid_server_protocols = list()
-            for proto in server_protocols:
-                if not proto.lower() in VALID_SERVICE_PROTOCOLS:
-                    raise Exception("ERROR: server protocol \"{}\" is not valid.".format(proto.lower()))
-                else:
-                    valid_server_protocols.append(proto.lower())
-
-            # resolve exit hosting params
-            server_egress = dict()
-            if server_hosts and len(server_hosts) == 1:
-                server_egress["host"] = server_hosts[0]
-            elif server_hosts and len(server_hosts) > 1:
-                server_egress["forwardHost"] = True
-                server_egress["allowedHosts"] = server_hosts
+        # validate client protocols
+        valid_client_protocols = list()
+        for proto in client_protocols:
+            if not proto.lower() in VALID_SERVICE_PROTOCOLS:
+                raise Exception("ERROR: client intercept protocol \"{}\" is not valid.".format(proto.lower()))
             else:
-                server_egress["forwardHost"] = True
-                server_egress["allowedHosts"] = client_hosts
+                valid_client_protocols.append(proto.lower())
 
-            if valid_server_ports and len(valid_server_ports) == 1 and valid_server_ports[0]['low'] == valid_server_ports[0]['high']:
-                server_egress["port"] = valid_server_ports[0]['low']
-            elif valid_server_ports:
-                server_egress["forwardPort"] = True
-                server_egress["allowedPortRanges"] = valid_server_ports
+        # validate server protocols
+        valid_server_protocols = list()
+        for proto in server_protocols:
+            if not proto.lower() in VALID_SERVICE_PROTOCOLS:
+                raise Exception("ERROR: server protocol \"{}\" is not valid.".format(proto.lower()))
             else:
-                server_egress["forwardPort"] = True
-                server_egress["allowedPortRanges"] = valid_client_ports
+                valid_server_protocols.append(proto.lower())
 
-            if valid_server_protocols and len(valid_server_protocols) == 1:
-                server_egress["protocol"] = valid_server_protocols[0]
-            elif valid_server_protocols and len(valid_server_protocols) > 1:
-                server_egress["forwardProtocol"] = True
-                server_egress["allowedProtocols"] = valid_server_protocols
+        # resolve exit hosting params
+        server_egress = dict()
+        if server_hosts and len(server_hosts) == 1:
+            server_egress["host"] = server_hosts[0]
+        elif server_hosts and len(server_hosts) > 1:
+            server_egress["forwardHost"] = True
+            server_egress["allowedHosts"] = server_hosts
+        else:
+            server_egress["forwardHost"] = True
+            server_egress["allowedHosts"] = client_hosts
+
+        if valid_server_ports and len(valid_server_ports) == 1 and valid_server_ports[0]['low'] == valid_server_ports[0]['high']:
+            server_egress["port"] = valid_server_ports[0]['low']
+        elif valid_server_ports:
+            server_egress["forwardPort"] = True
+            server_egress["allowedPortRanges"] = valid_server_ports
+        else:
+            server_egress["forwardPort"] = True
+            server_egress["allowedPortRanges"] = valid_client_ports
+
+        if valid_server_protocols and len(valid_server_protocols) == 1:
+            server_egress["protocol"] = valid_server_protocols[0]
+        elif valid_server_protocols and len(valid_server_protocols) > 1:
+            server_egress["forwardProtocol"] = True
+            server_egress["allowedProtocols"] = valid_server_protocols
+        else:
+            server_egress["forwardProtocol"] = True
+            server_egress["allowedProtocols"] = valid_client_protocols
+
+        # parse out the elements in the list of endpoints as one of #attribute, UUID, or resolvable Endoint name
+        bind_endpoints = list()
+        for endpoint in endpoints:
+            if endpoint[0:1] == '#':
+                bind_endpoints.append(endpoint)  # is an endpoint role attribute
             else:
-                server_egress["forwardProtocol"] = True
-                server_egress["allowedProtocols"] = valid_client_protocols
+                # strip leading @ if present and re-add later after verifying the named endpoint exists
+                if endpoint[0:1] == '@':
+                    endpoint = endpoint[1:]
 
-            # parse out the elements in the list of endpoints as one of #attribute, UUID, or resolvable Endoint name
-            bind_endpoints = list()
-            for endpoint in endpoints:
-                if endpoint[0:1] == '#':
-                    bind_endpoints.append(endpoint)  # is an endpoint role attribute
-                else:
-                    # strip leading @ if present and re-add later after verifying the named endpoint exists
-                    if endpoint[0:1] == '@':
-                        endpoint = endpoint[1:]
-
-                    # if UUIDv4 then resolve to name, else verify the named endpoint exists
-                    if is_uuidv4(endpoint):          # assigned below under "else" if already a UUID
-                        try:
-                            name_lookup = self.get_resource(type="endpoint", id=endpoint)
-                            endpoint_name = name_lookup['name']
-                        except Exception as e:
-                            raise Exception('ERROR: Failed to find exactly one hosting endpoint with ID "{}". Caught exception: {}'.format(endpoint, e))
-                        else:
-                            bind_endpoints.append('@'+endpoint_name)  # is an existing endpoint's name resolved from UUID
+                # if UUIDv4 then resolve to name, else verify the named endpoint exists
+                if is_uuidv4(endpoint):          # assigned below under "else" if already a UUID
+                    try:
+                        name_lookup = self.get_resource(type="endpoint", id=endpoint)
+                        endpoint_name = name_lookup['name']
+                    except Exception as e:
+                        raise Exception('ERROR: Failed to find exactly one hosting endpoint with ID "{}". Caught exception: {}'.format(endpoint, e))
                     else:
-                        try:
-                            name_lookup = self.get_resources(type="endpoints", name=endpoint)[0]
-                            endpoint_name = name_lookup['name']
-                        except Exception as e:
-                            raise Exception('ERROR: Failed to find exactly one hosting endpoint named "{}". Caught exception: {}'.format(endpoint, e))
-                        # append to list after successfully resolving name to ID
-                        else:
-                            bind_endpoints.append('@'+endpoint_name)      # is an existing endpoint's name
+                        bind_endpoints.append('@'+endpoint_name)  # is an existing endpoint's name resolved from UUID
+                else:
+                    try:
+                        name_lookup = self.get_resources(type="endpoints", name=endpoint, use_cache=False)[0]
+                        endpoint_name = name_lookup['name']
+                    except Exception as e:
+                        raise Exception('ERROR: Failed to find exactly one hosting endpoint named "{}". Caught exception: {}'.format(endpoint, e))
+                    # append to list after successfully resolving name to ID
+                    else:
+                        bind_endpoints.append('@'+endpoint_name)      # is an existing endpoint's name
 
-            headers = {
-                "authorization": "Bearer " + self.token
-            }
-            body = {
-                "networkId": self.id,
-                "name": name,
-                "encryptionRequired": encryption_required,
-                "modelType": "AdvancedTunnelerToEndpoint",
-                "model": {
-                    "bindEndpointAttributes": bind_endpoints,
-                    "clientIngress": {
-                        "addresses": client_hosts,
-                        "ports": valid_client_ports,
-                        "protocols": valid_client_protocols
-                    },
-                    "serverEgress": server_egress,
-                    "edgeRouterAttributes": edge_router_attributes
+        body = {
+            "networkId": self.id,
+            "name": name,
+            "encryptionRequired": encryption_required,
+            "modelType": "AdvancedTunnelerToEndpoint",
+            "model": {
+                "bindEndpointAttributes": bind_endpoints,
+                "clientIngress": {
+                    "addresses": client_hosts,
+                    "ports": valid_client_ports,
+                    "protocols": valid_client_protocols
                 },
-                "attributes": attributes,
-            }
+                "serverEgress": server_egress,
+                "edgeRouterAttributes": edge_router_attributes
+            },
+            "attributes": attributes,
+        }
 
-            params = dict()
-            # params = {
-            #     "beta": ''
-            # }
+        if dry_run:
+            return(body)
 
-            if dry_run:
-                return(body)
-
-            response = http.post(
-                self.audience+'core/v2/services',
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers,
-                json=body,
-                params=params
-            )
-            response_code = response.status_code
-        except Exception as e:
-            raise RuntimeError(f"error with POST to {self.audience+'core/v2/services'}, caught {e}")
-
-        response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, NET_RESOURCES['services'].create_responses):
-            try:
-                resource = response.json()
-            except ValueError as e:
-                raise RuntimeError(f"failed to load JSON from POST response, caught {e}")
-        else:
-            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
-
-        if resource.get('_links') and resource['_links'].get('executions'):
-            _links = resource['_links'].get('executions')
-            if isinstance(_links, list):
-                process_id = _links[0]['href'].split('/')[6]
-            else:
-                process_id = _links['href'].split('/')[6]
-            if wait:
-                self.wait_for_statuses(expected_statuses=RESOURCES["executions"].status_symbols['complete'], type="executions", id=process_id, wait=wait, sleep=sleep)
-                return(resource)
-            else:    # only wait for the process to start, not finish, or timeout
-                self.wait_for_statuses(expected_statuses=RESOURCES['executions'].status_symbols['progress'] + RESOURCES['executions'].status_symbols['complete'], type="executions", id=process_id, wait=9, sleep=2)
-                return(resource)
-        elif wait:
-            self.logger.warn("unable to wait for async complete because response did not provide a process execution id")
-            return(resource)
-        else:
-            return(resource)
+        url = self.audience+'core/v2/services'
+        resource = create_generic_resource(setup=self, url=url, body=body, wait=wait, sleep=sleep)
+        return(resource)
 
     # the above method was renamed to follow the development of PSM-based services (platform service models)
     create_endpoint_service = create_service_advanced
 
     def create_app_wan(self, name: str, endpoint_attributes: list = [], service_attributes: list = [], posture_check_attributes: list = [],
-                       wait: int = 10):
+                       wait: int = 10, sleep: int = 3):
         """Create an AppWAN.
 
         :param name:                        a meaningful, unique name
@@ -1561,47 +1156,19 @@ class Network:
         :param service_attributes:          a list of service hashtag role attributes and service names
         :param posture_check_attributes:    a list of posture hashtag role attributes and posture names
         """
-        try:
-            headers = {
-                "authorization": "Bearer " + self.token
-            }
-            for role in endpoint_attributes+service_attributes+posture_check_attributes:
-                if not re.match('^[#@]', role):
-                    raise RuntimeError("ERROR: role attributes on an AppWAN must begin with # or @")
-            body = {
-                "networkId": self.id,
-                "name": name.strip('"'),
-                "endpointAttributes": endpoint_attributes,
-                "serviceAttributes": service_attributes,
-                "postureCheckAttributes": posture_check_attributes
-            }
-
-            response = http.post(
-                self.audience+'core/v2/app-wans',
-                proxies=self.proxies,
-                verify=self.verify,
-                headers=headers,
-                json=body
-            )
-            response_code = response.status_code
-        except Exception as e:
-            raise RuntimeError(f"error with POST to {self.audience+'core/v2/app-wans'}, caught {e}")
-
-        response_code_symbols = [s.upper() for s in STATUS_CODES._codes[response_code]]
-        if any_in(response_code_symbols, NET_RESOURCES['app-wans'].create_responses):
-            try:
-                started = response.json()
-            except ValueError as e:
-                raise RuntimeError(f"failed to load JSON from POST response, caught {e}")
-        else:
-            raise RuntimeError(f"got unexpected HTTP code {STATUS_CODES._codes[response_code][0].upper()} ({response_code}) and response {response.text}")
-
-        # AppWANs are created in a blocking, synchronous manner, and so zitiId should be defined
-        if wait and not started['zitiId']:
-            finished = self.wait_for_property_defined(property_name="zitiId", property_type=str, entity_type="app-wan", id=started['id'], wait=wait)
-            return(finished)
-        else:
-            return(started)
+        for role in endpoint_attributes+service_attributes+posture_check_attributes:
+            if not re.match('^[#@]', role):
+                raise RuntimeError("ERROR: role attributes on an AppWAN must begin with # or @")
+        body = {
+            "networkId": self.id,
+            "name": name.strip('"'),
+            "endpointAttributes": endpoint_attributes,
+            "serviceAttributes": service_attributes,
+            "postureCheckAttributes": posture_check_attributes
+        }
+        url = self.audience+'core/v2/app-wans'
+        resource = create_generic_resource(setup=self, url=url, body=body, wait=wait, sleep=sleep)
+        return(resource)
 
     def get_network_by_name(self, name: str):
         """Get one network from the current group by network name.
@@ -1628,9 +1195,8 @@ class Network:
         :param str network_id: the UUID of the network
         """
         url = self.audience+'core/v2/networks/'+network_id
-        headers = {"authorization": "Bearer " + self.token}
         try:
-            network, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            network, status_symbol = get_generic_resource_by_url(setup=self, url=url)
         except Exception as e:
             raise RuntimeError(f"failed to get network from url: '{url}', caught {e}")
         else:
@@ -1643,9 +1209,8 @@ class Network:
         :param id: the UUID of the network controller
         """
         url = self.audience+'core/v2/network-controllers/'+id+'/secrets'
-        headers = {"authorization": "Bearer " + self.token}
         try:
-            secrets, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            secrets, status_symbol = get_generic_resource_by_url(setup=self, url=url)
         except Exception as e:
             raise RuntimeError(f"failed to get secrets from url: '{url}', caught {e}")
         else:
@@ -1664,9 +1229,8 @@ class Network:
         :param id: the UUID of the network controller
         """
         url = self.audience+'core/v2/network-controllers/'+id+'/session'
-        headers = {"authorization": "Bearer " + self.token}
         try:
-            session, status_symbol = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify)
+            session, status_symbol = get_generic_resource_by_url(setup=self, url=url)
         except Exception as e:
             raise RuntimeError(f"failed to get session from url: '{url}', caught {e}")
         else:
@@ -1698,14 +1262,14 @@ class Network:
             raise RuntimeError(f"wait duration ({wait}) must be greater than or equal to polling interval ({sleep})")
 
         if progress:
-            self.logger.warn("progress meters are decommissioned and superseded by nfctl")
+            self.logger.warning("progress meters are decommissioned and superseded by nfctl")
         self.logger.debug(f"waiting for {str(property_type)} property {property_name} in {entity_type} with id {id} or until {time.ctime(now+wait)}.")
 
         property_value = None
         while time.time() < now+wait:
 
             try:
-                entity = self.get_resource_by_id(type=entity_type, id=id)
+                entity = self.get_resource_by_id(type=entity_type, id=id, use_cache=False)
             except Exception as e:
                 raise RuntimeError(f"problem getting resource by id to get status, caught {e}")
 
@@ -1744,13 +1308,13 @@ class Network:
             raise Exception(f"ERROR: unknown type '{entity_type}'. Choices: {', '.join(NET_RESOURCES.keys())}")
 
         if progress:
-            self.logger.warn("progress meters are decommissioned and superseded by nfctl")
+            self.logger.warning("progress meters are decommissioned and superseded by nfctl")
         self.logger.debug(f"waiting for {entity_type} with name {entity_name} to appear or until {time.ctime(now+wait)}.")
 
         found_entities = []
         while time.time() < now+wait:
             try:
-                found_entities = self.find_resources(type=plural(entity_type), name=entity_name)
+                found_entities = self.find_resources(type=plural(entity_type), name=entity_name, use_cache=False)
             except Exception as e:
                 raise RuntimeError(f"error finding resources, caught {e}")
 
@@ -1786,7 +1350,7 @@ class Network:
             raise RuntimeError("need expect status other than 'ERROR' because it's used internally to notice failures while waiting for valid statuses")
 
         if progress:
-            self.logger.warn("progress meters are decommissioned and superseded by nfctl")
+            self.logger.warning("progress meters are decommissioned and superseded by nfctl")
         self.logger.debug(f"waiting for {type} to have status {expect} or until {time.ctime(now+wait)}")
 
         status = str()
@@ -1835,7 +1399,7 @@ class Network:
         unexpected_statuses = RESOURCES[plural(type)].status_symbols['error']
 
         if progress:
-            self.logger.warn("progress meters are decommissioned and superseded by nfctl")
+            self.logger.warning("progress meters are decommissioned and superseded by nfctl")
         self.logger.debug(f"waiting for any status in {expected_statuses} for {type} with id {id} or until {time.ctime(now+wait)}.")
 
         status = 'NEW'
@@ -1878,8 +1442,7 @@ class Network:
         else:
             entity_url += f"{plural(type)}/{id}"
 
-        headers = {"authorization": "Bearer " + self.token}
-        resource, status_symbol = get_generic_resource(url=entity_url, headers=headers, proxies=self.proxies, verify=self.verify)
+        resource, status_symbol = get_generic_resource_by_url(setup=self, url=entity_url, use_cache=False)
 
         if resource.get(RESOURCES[plural(type)].status):
             status = resource[RESOURCES[plural(type)].status]
@@ -1967,24 +1530,17 @@ class Network:
             try:
                 resource = response.json()
             except JSONDecodeError as e:
-                self.logger.debug("ignoring {e}")
+                self.logger.debug(f"ignoring {e}")
                 return(True)
             else:
-                if resource.get('_links') and resource['_links'].get('executions'):
-                    _links = resource['_links'].get('executions')
-                    if isinstance(_links, list):
-                        process_id = _links[0]['href'].split('/')[6]
+                if wait:
+                    if resource.get('_links') and resource['_links'].get('execution'):
+                        execution_url = resource['_links'].get('execution')['href']
+                        wait_for_execution(setup=self, url=execution_url, wait=wait, sleep=sleep)
+                        return(True)
                     else:
-                        process_id = _links['href'].split('/')[6]
-                    if wait:
-                        self.wait_for_statuses(expected_statuses=RESOURCES["executions"].status_symbols['complete'], type="executions", id=process_id, wait=wait, sleep=sleep)
-                        return(True)
-                    else:    # only wait for the process to start, not finish, or timeout
-                        self.wait_for_statuses(expected_statuses=RESOURCES['executions'].status_symbols['progress'] + RESOURCES['executions'].status_symbols['complete'], type="executions", id=process_id, wait=9, sleep=2)
-                        return(True)
-                elif wait:
-                    self.logger.warn("unable to wait for async complete because response did not provide a process execution id")
-                    return(False)
+                        self.logger.error("unable to wait for async complete because response did not provide an execution link")
+                        return(False)
                 else:
                     return(True)
 
@@ -1998,15 +1554,16 @@ class Networks:
     networks.
     """
 
-    def __init__(self, Organization: object) -> None:
+    def __init__(self, setup: object) -> None:
         """
-        :organization: an instance of netfoundry.Organization provides a session and configuration
+        :organization: an instance of an object such as netfoundry.Organization provides a session and configuration
         """
-        self.token = Organization.token
-        self.proxies = Organization.proxies
-        self.verify = Organization.verify
-        self.audience = Organization.audience
-        self.environment = Organization.environment
+        self.token = setup.token
+        self.proxies = setup.proxies
+        self.verify = setup.verify
+        self.audience = setup.audience
+        self.environment = setup.environment
+        self.logger = setup.logger
 
     def find_network_domain_resources(self, resource_type: str, **kwargs):
         """
@@ -2029,17 +1586,9 @@ class Networks:
         for k, v in kwargs.items():
             params[k] = v
 
-        url = f"{self.audience}core/v2/{resource_type}"
-        headers = {"authorization": "Bearer " + self.token}
+        url = self.audience+NET_RESOURCES[resource_type].find_url
         resources = list()
-        for i in find_generic_resources(
-            url=url,
-            headers=headers,
-            embedded=_embedded,
-            proxies=self.proxies,
-            verify=self.verify,
-            **params,
-        ):
+        for i in find_generic_resources(setup=self, url=url, embedded=_embedded, **params):
             resources.extend(i)
         return(resources)
 
@@ -2060,40 +1609,46 @@ class Networks:
             params[k] = v
 
         url = f"{self.audience}core/v2/{resource_type}"
-        headers = {"authorization": "Bearer " + self.token}
-        resource = get_generic_resource(url=url, headers=headers, proxies=self.proxies, verify=self.verify, **params)
+        resource = get_generic_resource_by_url(setup=self, url=url, **params)
         return(resource)
 
-    def wait_for_execution(self, process_id: str, expected_statuses: list, wait: int = 300, sleep: int = 3, id: str = None):
-        """Continuously poll for the expected statuses until expiry.
-
-        :param expected_statuses: list of strings as expected status symbol(s) e.g. ["PROVISIONING","PROVISIONED"]
-        :param wait: optional SECONDS after which to raise an exception defaults to five minutes (300)
-        :param sleep: SECONDS polling interval
+    def find_regions(self, providers: list = [], provider: str = None, location_code: str = None):
         """
-        now = time.time()
-        if not wait >= sleep:
-            raise RuntimeError(f"wait duration ({wait}) must be greater than or equal to polling interval ({sleep})")
-        unexpected_statuses = PROCESS_STATUS_SYMBOLS['error']
-        self.logger.debug(f"waiting for any status in {expected_statuses} for {type} with id {id} or until {time.ctime(now+wait)}.")
-        status = 'NEW'
-        url = f"{self.audience}core/v2/executions/{process_id}"
-        headers = {"authorization": "Bearer " + self.token}
-        time.sleep(sleep)                          # allow minimal time for the resource status to become available
-        while time.time() < now+wait and status not in expected_statuses:
-            entity_status, status_symbol = get_generic_resource(url, headers, self.proxies, self.verify)
-            if entity_status['status']:            # attribute is not None if HTTP OK
-                status = entity_status['status']
-                self.logger.debug(f"{entity_status['name']} has status {entity_status['status']}")
-            if status in unexpected_statuses:
-                raise RuntimeError(f"got status {status} while waiting for {expected_statuses}")
-            elif status not in expected_statuses:
-                time.sleep(sleep)
+        Find regions.
 
-        if status in expected_statuses:
-            return True
-        elif not status:
-            raise RuntimeError(f"failed to read status while waiting for any status in {expected_statuses}; got {entity_status['http_status']} ({entity_status['response_code']})")
+        Optionally filter by provider, and optionally get exactly one region by sending both a single element for providers and a location_code
+
+        :param providers: optional list of providers from DC_PROVIDERS
+        :param provider: optional string matching one provider from DC_PROVIDERS
+        :param location_code: optional string that uniquely identifies a region for some provider
+        """
+        # regions returns a list of dicts (data center objects)
+
+        if provider:
+            providers.append(provider)
+
+        unique_providers = set()
+        if providers:
+            for provider in providers:
+                if provider in DC_PROVIDERS:
+                    unique_providers.add(provider)
+                else:
+                    raise RuntimeError(f"unknown cloud provider '{provider}'. Need one of {str(DC_PROVIDERS)}")
+
+        url = self.audience+NET_RESOURCES['regions'].find_url
+
+        if len(unique_providers) == 1 and location_code:
+            unique_providers_iterator = iter(unique_providers)
+            url = f"{url}/{next(unique_providers_iterator, None)}/{location_code}"
+            region, status = get_generic_resource_by_url(setup=self, url=url)
+            return([region])
         else:
-            raise RuntimeError(f"timed out with status {status} while waiting for any status in {expected_statuses}")
-    wait_for_process = wait_for_execution
+            regions = list()
+            for i in find_generic_resources(setup=self, url=url, embedded=NET_RESOURCES['regions']._embedded, providers=unique_providers):
+                regions.extend(i)
+
+            if location_code and len(regions) > 0:
+                regions = [r for r in regions if r['locationCode'] == location_code]
+                return(regions)
+            else:
+                return(regions)
