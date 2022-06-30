@@ -1,24 +1,26 @@
 """Shared helper functions, constants, and classes."""
 
 import json
-from json import JSONDecodeError
 import logging
 import os
-from stat import filemode
 import re  # regex
-from urllib.parse import urlparse
 import time  # enforce a timeout; sleep
 import unicodedata  # case insensitive compare in Utility
 from dataclasses import dataclass, field
-from re import sub
+from json import JSONDecodeError
+from stat import filemode
+from urllib.parse import urlparse
 from uuid import UUID  # validate UUIDv4 strings
 
 import inflect  # singular and plural nouns
 import jwt
+from platformdirs import user_cache_path, user_config_path
 from requests import Session  # HTTP user agent will not emit server cert warnings if verify=False
 from requests import status_codes
-from requests.exceptions import HTTPError
 from requests.adapters import HTTPAdapter
+from requests.exceptions import HTTPError
+from requests_cache import CachedSession
+# FIXME: disable warning for debug proxy
 from urllib3 import disable_warnings
 from urllib3.exceptions import InsecureRequestWarning
 from urllib3.util.retry import Retry
@@ -26,8 +28,9 @@ from urllib3.util.retry import Retry
 from .exceptions import UnknownResourceType
 
 disable_warnings(InsecureRequestWarning)
-
-p = inflect.engine()
+for name, logger in logging.root.manager.loggerDict.items():
+    if name.startswith('requests_cache'):
+        logger.disabled = True
 
 
 def any_in(a, b):
@@ -38,6 +41,7 @@ def any_in(a, b):
 def plural(singular):
     """Pluralize a singular form."""
     # if already plural then return, else pluralize
+    p = inflect.engine()
     if singular[-1:] == 's':
         return(singular)
     else:
@@ -46,6 +50,7 @@ def plural(singular):
 
 def singular(plural):
     """Singularize a plural form."""
+    p = inflect.engine()
     return(p.singular_noun(plural))
 
 
@@ -78,7 +83,22 @@ def snake2camel(snake_str):
 
 def camel2snake(camel_str):
     """Convert a string from camel case to snake case."""
-    return sub(r'(?<!^)(?=[A-Z])', '_', camel_str).lower()
+    return re.sub(r'(?<!^)(?=[A-Z])', '_', camel_str).lower()
+
+
+def propid2type(prop):
+    """Transform a conventional property name like networkGroupId to a resource type like network-groups."""
+    if not prop.endswith('Id'):
+        raise RuntimeError(f"this function is intended to transform property names ending with 'Id', not {prop}")
+    else:
+        prop = prop[0:-2]                       # everything but the trailing 'Id'
+    words = re.split(r'(?<!^)(?=[A-Z])', prop)  # split dromedary words on zero-width assertion
+    words[-1] = plural(words[-1])               # pluralize the last word
+    resource_type = '-'.join(words).lower()     # e.g. network-groups
+    if not RESOURCES.get(resource_type):
+        raise RuntimeError(f"no such resource type '{resource_type}")
+    else:
+        return resource_type
 
 
 def abbreviate(kebab):
@@ -104,19 +124,19 @@ def caseless_equal(left, right):
     return normalize_caseless(left) == normalize_caseless(right)
 
 
-def get_token_cache(path):
+def get_token_cache(setup: object):
     """Try to read the token cache file and return the object."""
     try:
-        token_cache = json.loads(path.read_text())
+        token_cache = json.loads(setup.token_cache_file_path.read_text())
     except FileNotFoundError as e:
-        raise RuntimeError(f"cache file '{path.__str__()}' not found, caught {e}")
+        raise RuntimeError(f"cache file '{setup.token_cache_file_path.__str__()}' not found, caught {e}")
     except JSONDecodeError as e:
-        raise RuntimeError(f"failed to parse cache file '{path.__str__()}' as JSON, caught {e}")
+        raise RuntimeError(f"failed to parse cache file '{setup.token_cache_file_path.__str__()}' as JSON, caught {e}")
     except Exception as e:
-        raise RuntimeError(f"failed to read cache file '{path.__str__()}', caught {e}")
+        raise RuntimeError(f"failed to read cache file '{setup.token_cache_file_path.__str__()}', caught {e}")
     else:
-        cache_file_stats = os.stat(path)
-        logging.debug(f"parsed token cache file '{path.__str__()}' as JSON with mode {filemode(cache_file_stats.st_mode)}")
+        cache_file_stats = os.stat(setup.token_cache_file_path)
+        setup.logger.debug(f"parsed token cache file '{setup.token_cache_file_path.__str__()}' as JSON with mode {filemode(cache_file_stats.st_mode)}")
 
     if all(k in token_cache for k in ['token', 'expiry', 'audience']):
         return token_cache
@@ -124,83 +144,82 @@ def get_token_cache(path):
         raise Exception("not all expected token cache file keys were found: token, expiry, audience")
 
 
-def jwt_expiry(token):
+def jwt_expiry(setup: object):
     """Return an epoch timestampt when the token will be expired.
 
     First, try to parse JWT to extract expiry. If that fails then estimate +1h.
     """
     try:
-        claim = jwt_decode(token)
+        claim = jwt_decode(setup)
         expiry = claim['exp']
     except jwt.exceptions.PyJWTError:
-        logging.debug(f"error parsing JWT to extract expiry, estimating +{DEFAULT_TOKEN_EXPIRY}s")
+        setup.logger.debug(f"error parsing JWT to extract expiry, estimating +{DEFAULT_TOKEN_EXPIRY}s")
         expiry = time.time() + DEFAULT_TOKEN_EXPIRY
     except KeyError:
-        logging.debug(f"failed to extract expiry epoch from claimset as key 'exp', estimating +{DEFAULT_TOKEN_EXPIRY}s")
+        setup.logger.debug(f"failed to extract expiry epoch from claimset as key 'exp', estimating +{DEFAULT_TOKEN_EXPIRY}s")
         expiry = time.time() + DEFAULT_TOKEN_EXPIRY
     except Exception as e:
-        raise RuntimeError(f"unexpect error, caught {e}")
+        raise RuntimeError(f"unexpected error, caught {e}")
     else:
-        logging.debug("successfully extracted expiry from JWT")
+        setup.logger.debug("successfully extracted expiry from JWT")
     finally:
         return expiry
 
 
-def jwt_environment(token):
+def jwt_environment(setup: object):
     """Try to extract the environment name from a JWT.
 
     First, try to parse JWT to extract the audience. If that fails then assume "production".
     """
     try:
-        claim = jwt_decode(token)
+        claim = jwt_decode(setup)
         iss = claim['iss']
     except jwt.exceptions.PyJWTError:
         environment = "production"
-        logging.debug("error parsing JWT to extract audience, assuming environment is Production")
+        setup.logger.debug("error parsing JWT to extract audience, assuming environment is Production")
     except KeyError:
         environment = "production"
-        logging.debug("failed to extract the issuer URL from claimset as key 'iss', assuming environment is Production")
+        setup.logger.debug("failed to extract the issuer URL from claimset as key 'iss', assuming environment is Production")
     except Exception as e:
-        raise RuntimeError(f"unexpect error, caught {e}")
+        raise RuntimeError(f"unexpected error, caught {e}")
 
     else:
         if re.match(r'https://cognito-', iss):
             environment = re.sub(r'https://gateway\.([^.]+)\.netfoundry\.io.*', r'\1', claim['scope'])
-            logging.debug(f"matched Cognito issuer URL convention, found environment '{environment}'")
+            setup.logger.debug(f"matched Cognito issuer URL convention, found environment '{environment}'")
         elif re.match(r'.*\.auth0\.com', iss):
             environment = re.sub(r'https://netfoundry-([^.]+)\.auth0\.com.*', r'\1', claim['iss'])
-            logging.debug(f"matched Auth0 issuer URL convention, found environment '{environment}'")
+            setup.logger.debug(f"matched Auth0 issuer URL convention, found environment '{environment}'")
         else:
             environment = "production"
-            logging.debug(f"failed to match Auth0 and Cognito issuer URL conventions, assuming environment is '{environment}'")
+            setup.logger.debug(f"failed to match Auth0 and Cognito issuer URL conventions, assuming environment is '{environment}'")
     finally:
         return environment
 
 
-def jwt_decode(token):
+def jwt_decode(setup):
     # TODO: figure out how to stop doing this because the token is for the
     # API, not this app, and so may change algorithm unexpectedly or stop
     # being a JWT altogether, currently needed to build the URL for HTTP
     # requests, might need to start using env config
     """Parse the token and return claimset."""
     try:
-        claim = jwt.decode(jwt=token, algorithms=["RS256"], options={"verify_signature": False})
+        claim = jwt.decode(jwt=setup.token, algorithms=["RS256"], options={"verify_signature": False})
     except jwt.exceptions.PyJWTError as e:
         raise jwt.exceptions.PyJWTError(f"failed to parse bearer token as JWT, caught {e}")
     except Exception as e:
-        raise RuntimeError(f"unexpect error parsing JWT, caught {e}")
+        raise RuntimeError(f"unexpected error parsing JWT, caught {e}")
     return claim
 
 
-def is_jwt(token):
+def is_jwt(setup):
     """If is a JWT then True."""
     try:
-        jwt_decode(token)
+        jwt_decode(setup)
     except jwt.exceptions.PyJWTError:
         return False
     except Exception as e:
-        raise RuntimeError(f"unexpect error parsing JWT, caught {e}")
-
+        raise RuntimeError(f"unexpected error parsing JWT, caught {e}")
     else:
         return True
 
@@ -215,32 +234,110 @@ def is_uuidv4(string: str):
         return True
 
 
-def eprint(*args, **kwargs):
-    """Adapt legacy function to logging."""
-    logging.debug(*args, **kwargs)
-
-
 def get_resource_type_by_url(url: str):
     """Get the resource type definition from a resource URL."""
     url_parts = urlparse(url)
     url_path = url_parts.path
-    resource_type = sub(r'/(core|rest|identity|auth|product-metadata)/v\d+/([^/]+)/?.*', r'\2', url_path)
-    if resource_type == "download-urls.json":
-        resource_type = "download-urls"
+    resource_type = re.sub(r'/(core|rest|identity|auth|product-metadata)/v\d+/([^/]+)/?.*', r'\2', url_path)
     if RESOURCES.get(resource_type):
         return RESOURCES.get(resource_type)
     else:
         raise UnknownResourceType(resource_type, RESOURCES.keys())
 
 
-def get_generic_resource(url: str, headers: dict, proxies: dict = dict(), verify: bool = True, accept: str = None, **kwargs):
+def get_user_cache_dir():
+    return user_cache_path(appname='netfoundry')
+
+
+def get_user_config_dir():
+    return user_config_path(appname='netfoundry')
+
+
+def get_generic_resource_by_type_and_id(setup: object, resource_type: str, resource_id: str, accept: str = None, use_cache: bool = True, **kwargs):
+    url = f"{setup.audience}{RESOURCES[resource_type].find_url}/{resource_id}"
+    resource, status_symbol = get_generic_resource_by_url(setup=setup, url=url, accept=accept, use_cache=use_cache, **kwargs)
+    return resource, status_symbol
+
+
+def wait_for_execution(setup: object, url: str, wait: int = 300, sleep: int = 3):
+    """Continuously poll for execution until completion or max wait seconds.
+
+    :param setup: instance of Organization with attributes token, proxies, verify, and logger
+    :param url: the full URL of the execution
+    :param wait: Seconds to wait for async execution to be FINISHED
+    :param sleep: Execution status polling interval in seconds
+    """
+
+    now = time.time()
+    if not wait >= sleep:
+        raise RuntimeError(f"wait duration ({wait}) must be greater than or equal to polling interval ({sleep})")
+
+    expected_statuses = RESOURCES['executions'].status_symbols['complete']
+    unexpected_statuses = RESOURCES['executions'].status_symbols['error']
+    setup.logger.debug(f"waiting for any status in {expected_statuses} for {type} with id {id} or until {time.ctime(now+wait)}.")
+
+    status = 'NEW'
+    # time.sleep(sleep)  # allow minimal time for the resource status to become available
+    while time.time() < now+wait and status not in expected_statuses:
+        execution, status_symbol = get_generic_resource_by_url(setup=setup, url=url, use_cache=False)
+        if execution.get('status'):  # attribute is not None if HTTP OK
+            status = execution['status']
+            setup.logger.debug(f"{execution['name']} has status {execution['status']}")
+        if status in unexpected_statuses:
+            raise RuntimeError(f"got unexpected status {status} while waiting for {expected_statuses}")
+        elif status not in expected_statuses:
+            time.sleep(sleep)
+
+    if status in expected_statuses:
+        return True
+    elif status == 'NEW':
+        raise RuntimeError(f"failed to read status while waiting for expected statuses in '{expected_statuses}'; got HTTP status {execution['http_status']}")
+    else:
+        raise RuntimeError(f"timed out with status '{status}' while waiting for expected statuses in '{expected_statuses}'")
+
+
+def create_generic_resource(setup: object, url: str, body: dict, headers: dict = dict(), wait: int = 30, sleep: int = 3):
+    """
+    POST to create a resource by URL and wait for async execution to be FINISHED.
+
+    :param setup: instance of Organization with attributes token, proxies, verify, and logger
+    :param url: the full URL to POST
+    :param body: the body document to POST
+    :param wait: Seconds to wait for async execution to be FINISHED
+    :param sleep: Execution status polling interval in seconds
+    :param kwargs: additional query params are typically logical AND if supported or ignored by the API if not
+    """
+
+    resource_type = get_resource_type_by_url(url)
+    setup.logger.debug(f"detected URL for resource type {resource_type.name}")
+    headers['Authorization'] = f"Bearer {setup.token}"
+    headers['Content-Type'] = 'application/json'
+    response = http.post(
+        url,
+        json=body,
+        headers=headers,
+        proxies=setup.proxies,
+        verify=setup.verify,
+    )
+    response.raise_for_status()
+    resource = response.json()
+
+    if wait and resource['_links'].get('execution'):
+        execution_url = resource['_links']['execution']['href']
+        setup.logger.debug(f"waiting for create {resource_type} execution with url {execution_url}")
+        wait_for_execution(setup=setup, url=execution_url, wait=wait, sleep=sleep)
+    else:
+        setup.logger.warn(f"not waiting for create {resource_type.name} execution")
+    return resource
+
+
+def get_generic_resource_by_url(setup: object, url: str, headers: dict = dict(), accept: str = None, use_cache: bool = True, **kwargs):
     """
     Get, deserialize, and return a single resource.
 
+    :param setup: instance of Organization with attributes token, proxies, verify, and logger
     :param url: the full URL to get
-    :param headers: authorization and accept headers
-    :param proxies: Requests proxies dict
-    :param verify: Requests verify bool is off if proxies enabled in this lib
+    :param accept: None or 'create' which means to find the as=create form of the resource, i.e. just the properties needed to re-create the same resource
     :param kwargs: additional query params are typically logical AND if supported or ignored by the API if not
     """
     params = dict()
@@ -250,10 +347,12 @@ def get_generic_resource(url: str, headers: dict, proxies: dict = dict(), verify
         if accept in ["create", "update"]:
             headers['accept'] = f"application/json;as={accept}"
         else:
-            logging.warn("ignoring invalid value for header 'accept': '{:s}'".format(accept))
+            setup.logger.warn("ignoring invalid value for header 'accept': '{:s}'".format(accept))
 
     resource_type = get_resource_type_by_url(url)
-    logging.debug(f"detected resource type {resource_type.name}")
+    setup.logger.debug(f"detected URL for resource type {resource_type.name}")
+    if not resource_type.name == "download-urls":
+        headers['Authorization'] = f"Bearer {setup.token}"
     # always embed the host record if getting the base resource by ID i.e. /{resource_type}/{uuid}, not leaf operations like /session or /rotatekey
     pattern = re.compile(f".*/{resource_type.name}/"+r'[a-f0-9]{8}-?[a-f0-9]{4}-?4[a-f0-9]{3}-?[89ab][a-f0-9]{3}-?[a-f0-9]{12}\Z', re.I)
     if resource_type.name in HOSTABLE_NET_RESOURCES.keys() and re.match(pattern, url):
@@ -261,13 +360,17 @@ def get_generic_resource(url: str, headers: dict, proxies: dict = dict(), verify
     elif resource_type.name in ["process-executions"]:
         params['beta'] = str()
     else:
-        logging.debug(f"no handlers specified for url '{url}'")
-    response = http.get(
+        setup.logger.debug(f"no handlers specified for url '{url}'")
+    if use_cache:
+        http_session = http_cache
+    else:
+        http_session = http
+    response = http_session.get(
         url,
         headers=headers,
         params=params,
-        proxies=proxies,
-        verify=verify,
+        proxies=setup.proxies,
+        verify=setup.verify,
     )
     # Return the HTTP response code symbol. This is useful for functions like
     # network.get_status() which will fall-back to the HTTP status if a status
@@ -282,7 +385,7 @@ def get_generic_resource(url: str, headers: dict, proxies: dict = dict(), verify
             process_id = path_parts[-1]                                      # the UUID is the last part of the expected URL to get_generic_resource()
             url = f"https://{url_parts.netloc}{'/'.join(path_parts[:-1])}"  # everything but the id
             params['processId'] = process_id
-            resources = next(find_generic_resources(url, headers=headers, embedded=RESOURCES['process-executions']._embedded, proxies=proxies, verify=verify, accept=accept, **params))
+            resources = next(find_generic_resources(setup=setup, url=url, headers=headers, embedded=RESOURCES['process-executions']._embedded, accept=accept, **params))
             if len(resources) == 1:
                 resource = resources[0]
             else:
@@ -297,15 +400,17 @@ def get_generic_resource(url: str, headers: dict, proxies: dict = dict(), verify
     return resource, status_symbol
 
 
-def find_generic_resources(url: str, headers: dict, embedded: str = None, proxies: dict = dict(), verify: bool = True, accept: str = None, **kwargs):
+get_generic_resource = get_generic_resource_by_type_and_id
+
+
+def find_generic_resources(setup: object, url: str, headers: dict = dict(), embedded: str = None, accept: str = None, use_cache: bool = True, **kwargs):
     """
     Generate each page of a type of resource.
 
+    :param setup: instance of Organization with attributes token, proxies, verify, and logger
     :param url: the full URL to get
-    :param headers: authorization and accept headers
     :param embedded: the key under '_embedded' where the list of resources for this type is found (e.g. 'networkList')
-    :param proxies: Requests proxies dict
-    :param verify: Requests verify bool is off if proxies enabled in this lib
+    :param accept: None or 'create' which means to find the as=create form of the collection, i.e. just the properties needed to re-create the same resources
     :param kwargs: additional query params are typically logical AND if supported or ignored by the API if not
     """
     # page through all pages unless a particular page or size or both are requested
@@ -314,6 +419,9 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
     params = dict()
     # validate and store the resource type
     resource_type = get_resource_type_by_url(url)
+    setup.logger.debug(f"detected URL for resource type {resource_type.name}")
+    # if not resource_type.name == "download-urls":
+    headers['Authorization'] = f"Bearer {setup.token}"
     if HOSTABLE_NET_RESOURCES.get(resource_type.name):
         params['embed'] = "host"
     elif resource_type.name in ["process-executions"]:
@@ -330,15 +438,15 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
     # normalize output with a default sort param
     if not params.get('sort'):
         params["sort"] = "name,asc"
-    # workaround sort param bugs in MOP-18018, MOP-17863, MOP-18178
-    if resource_type.name in ['identities', 'user-identities', 'api-account-identities', 'hosts', 'terminators']:
+    # workaround sort param bugs in MOP-18018, MOP-17863, MOP-18178, MOP-18366
+    if resource_type.name in ['identities', 'user-identities', 'api-account-identities', 'hosts', 'terminators', 'network-versions']:
         del params['sort']
 
     # only get one page of the requested size, else default page size and all pages
     if params.get('size'):
         get_all_pages = False
     else:
-        if resource_type.name in ['data-centers', 'roles']:
+        if resource_type.name in ['roles']:
             params['size'] = 3000    # workaround last page bug in MOP-17993
         else:
             params['size'] = DEFAULT_PAGE_SIZE
@@ -356,14 +464,17 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
             headers['accept'] = "application/hal+json;as="+accept
             embedded = accept + embedded[0].upper() + embedded[1:]  # compose "createEndpointList" from "endpointList"
         else:
-            logging.warn("ignoring invalid value for header 'accept': '{:s}'".format(accept))
-
-    response = http.get(
+            setup.logger.warn("ignoring invalid value for header 'accept': '{:s}'".format(accept))
+    if use_cache:
+        http_session = http_cache
+    else:
+        http_session = http
+    response = http_session.get(
         url,
         headers=headers,
         params=params,
-        proxies=proxies,
-        verify=verify,
+        proxies=setup.proxies,
+        verify=setup.verify,
     )
     response.raise_for_status()
     resource_page = response.json()
@@ -403,7 +514,7 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
                     params['page'] = next_page
                     try:
                         # recurse
-                        yield from find_generic_resources(url=url, headers=headers, embedded=embedded, proxies=proxies, verify=verify, **params)
+                        yield from find_generic_resources(setup=setup, url=url, headers=headers, embedded=embedded, **params)
                     except Exception as e:
                         raise RuntimeError(f"failed to get page {next_page} of {total_pages}, caught {e}'")
     elif embedded:      # function param 'embedded' specifies the reference in which the collection of resources should be found
@@ -420,8 +531,9 @@ def find_generic_resources(url: str, headers: dict, embedded: str = None, proxie
         yield resource_page
 
 
+# FIXME: used by Ansible modules
 class Utility:
-    """Legacy interface to utility functions."""
+    """Interface to utility functions."""
     def __init__(self):
         pass
 
@@ -463,14 +575,19 @@ for k, v in RESOURCE_STATUS_SYMBOLS.items():
     for i in v:
         RESOURCE_STATUSES.add(i)
 
+IDENTITY_ID_PROPERTIES = [
+    'createdBy', 'updatedBy', 'deletedBy', 'ownerIdentityId',
+]
 
-# The purpose of the parent class is to validate the type of child class
-# attributes. Homing this logic in a parent class allows any number of child
-# classes to use it.
+
 @dataclass
 class ResourceTypeParent:
-    """Parent class for ResourceType class."""
+    """Parent class for ResourceType class.
 
+    The purpose of the parent class is to validate the type of child class
+    attributes. Homing this logic in a parent class allows any number of child
+    classes to use it.
+    """
     def __post_init__(self):
         """Enforce typed fields in resource spec."""
         for (name, field_type) in self.__annotations__.items():
@@ -510,6 +627,7 @@ class ResourceType(ResourceTypeParent):
     status_symbols: dict = field(default_factory=lambda: RESOURCE_STATUS_SYMBOLS)  # dictionary with three predictable keys: complete, progress, error, each a tuple associating status symbols with a state
     host: bool = field(default=False)                       # may have a managed host in NF cloud
     ziti: bool = field(default=False)
+    find_url: str = field(default='default')
 
     def __post_init__(self):
         """Compute and assign _embedded if not supplied and then check types in parent class."""
@@ -537,13 +655,22 @@ class ResourceType(ResourceTypeParent):
                 HOSTABLE_RESOURCE_ABBREV[self.abbreviation] = self
             if self.ziti:
                 ZITI_NET_RESOURCES[self.name] = self
+        if self.find_url == 'default':
+            if self.domain == 'network':
+                setattr(self, 'find_url', f'core/v2/{self.name}')
+            elif self.domain == 'identity':
+                setattr(self, 'find_url', f'identity/v1/{self.name}')
+            elif self.domain == 'authorization':
+                setattr(self, 'find_url', f'auth/v1/{self.name}')
+            else:
+                raise RuntimeError(f"need default find_url for {self.name}")
         return super().__post_init__()
 
 
 RESOURCES = {
     'roles': ResourceType(
         name='roles',
-        domain='identity',
+        domain='authorization',
         mutable=False,
         embeddable=False,
         _embedded='content',
@@ -565,13 +692,6 @@ RESOURCES = {
         status_symbols=PROCESS_STATUS_SYMBOLS,
         abbreviation='ex',
     ),
-    # 'processes': ResourceType(  # not a fully-fledged resource type because there is no "find processes" operation at this time
-    #     name='processes',
-    #     domain='network',
-    #     mutable=False,
-    #     embeddable=False,
-    #     status_symbols=PROCESS_STATUS_SYMBOLS,
-    # ),
     'regions': ResourceType(
         name='regions',
         domain='network',
@@ -586,13 +706,6 @@ RESOURCES = {
         embeddable=False,
         _embedded='network-versions',
     ),
-    'data-centers': ResourceType(
-        name='data-centers',
-        domain='network',
-        _embedded='dataCenters',
-        mutable=False,
-        embeddable=False,
-    ),
     'organizations': ResourceType(
         name='organizations',
         domain='identity',
@@ -605,12 +718,7 @@ RESOURCES = {
         _embedded='organizations',
         mutable=False,
         embeddable=False,
-    ),
-    'download-urls': ResourceType(
-        name='download-urls',
-        domain='network-group',
-        mutable=False,
-        embeddable=False,
+        find_url='rest/v1/network-groups',
     ),
     'networks': ResourceType(
         name='networks',
@@ -771,7 +879,7 @@ MAJOR_REGIONS = {
     }
 }
 
-DC_PROVIDERS = ["AWS", "AZURE", "GCP", "OCP"]
+DC_PROVIDERS = ["AWS", "AZURE", "GCP", "OCP", "OCI", "ALICLOUD", "NETFOUNDRY"]
 VALID_SERVICE_PROTOCOLS = ["tcp", "udp"]
 VALID_SEPARATORS = '[:-]'  # : or - will match regex pattern
 
@@ -811,11 +919,15 @@ class TimeoutHTTPAdapter(HTTPAdapter):
         return super().send(request, **kwargs)
 
 
-http = Session()
+http = Session()   # no cache
+HTTP_CACHE_EXPIRE = 33
+http_cache = CachedSession(cache_name=f"{get_user_cache_dir()}/http_cache", backend='sqlite', expire_after=HTTP_CACHE_EXPIRE)
 # Mount it for both http and https usage
 adapter = TimeoutHTTPAdapter(timeout=DEFAULT_TIMEOUT, max_retries=RETRY_STRATEGY)
 http.mount("https://", adapter)
 http.mount("http://", adapter)
+http_cache.mount("https://", adapter)
+http_cache.mount("http://", adapter)
 STATUS_CODES = status_codes
 DEFAULT_TOKEN_EXPIRY = 3600
 
