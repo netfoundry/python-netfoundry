@@ -43,8 +43,10 @@ class Organization:
                  log_file: str = None,
                  debug: bool = False,
                  logger: logging.Logger = None,
-                 proxy: str = None):
+                 proxy: str = None,
+                 gateway: str = "gateway"):
         """Initialize an instance of organization."""
+        self.gateway = gateway
         # set debug and file if specified and let the calling application dictate logging handlers
         self.log_file = log_file
         self.debug = debug
@@ -249,7 +251,8 @@ path to credentials file.
                 self.logger.warning(f"unexpected environment '{self.environment}'")
 
         if self.environment and not self.audience:
-            self.audience = f'https://gateway.{self.environment}.netfoundry.io/'
+            self.audience = f'https://{self.gateway}.{self.environment}.netfoundry.io/'
+            self.logger.debug(f"computed audience URL from gateway and environment: {self.audience}")
 
         if self.environment and self.audience:
             if not re.search(self.environment, self.audience):
@@ -284,15 +287,15 @@ path to credentials file.
             # extract the environment name from the authorization URL aka token API endpoint
             if self.environment is None:
                 self.environment = re.sub(r'https://netfoundry-([^-]+)-.*', r'\1', token_endpoint, re.IGNORECASE)
-                self.logger.debug(f"using environment parsed from token_endpoint URL {self.environment}")
+                self.logger.debug(f"using environment parsed from authenticationUrl: {self.environment}")
             # re: scope: we're not using scopes with Cognito, but a non-empty value is required;
             #  hence "/ignore-scope"
-            scope = "https://gateway."+self.environment+".netfoundry.io//ignore-scope"
+            scope = f"https://{self.gateway}.{self.environment}.netfoundry.io//ignore-scope"
+            self.logger.debug(f"computed scope URL from gateway and environment: {scope}")
             # we can gather the URL of the API from the first part of the scope string by
             #  dropping the scope suffix
             self.audience = scope.replace(r'/ignore-scope', '')
-            self.logger.debug(f"using audience parsed from token_endpoint URL {self.audience}")
-            # e.g. https://gateway.production.netfoundry.io/
+            self.logger.debug(f"using audience parsed from authenticationUrl: {self.audience}")
             assertion = {
                 "scope": scope,
                 "grant_type": "client_credentials"

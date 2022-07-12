@@ -185,7 +185,7 @@ def jwt_environment(setup: object):
 
     else:
         if re.match(r'https://cognito-', iss):
-            environment = re.sub(r'https://gateway\.([^.]+)\.netfoundry\.io.*', r'\1', claim['scope'])
+            environment = re.sub(f'https://{setup.gateway}\.([^.]+)\.netfoundry\.io.*', r'\1', claim['scope'])
             setup.logger.debug(f"matched Cognito issuer URL convention, found environment '{environment}'")
         elif re.match(r'.*\.auth0\.com', iss):
             environment = re.sub(r'https://netfoundry-([^.]+)\.auth0\.com.*', r'\1', claim['iss'])

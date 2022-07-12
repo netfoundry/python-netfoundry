@@ -1153,6 +1153,7 @@ def use_organization(cli, spinner: object = None, prompt: bool = True):
                 expiry_minimum=0,
                 proxy=cli.config.general.proxy,
                 logger=cli.log,
+                gateway="gatewayv2",
             )
     except NFAPINoCredentials:
         if prompt:
@@ -1177,6 +1178,7 @@ def use_organization(cli, spinner: object = None, prompt: bool = True):
                         expiry_minimum=0,
                         proxy=cli.config.general.proxy,
                         logger=cli.log,
+                        gateway="gatewayv2",
                     )
             except PyJWTError:
                 spinner.fail("Not a valid token")

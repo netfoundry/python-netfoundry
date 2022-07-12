@@ -149,7 +149,7 @@ class NetworkGroup:
 
     find_latest_product_version = find_latest_network_version
 
-    def create_network(self, name: str, network_group_id: str = None, location: str = "us-ashburn-1", provider: str = "OCI", version: str = None, size: str = "medium", wait: int = 1200, sleep: int = 10, **kwargs):
+    def create_network(self, name: str, network_group_id: str = None, location: str = "eu-amsterdam-1", provider: str = "OCI", version: str = None, size: str = "medium", wait: int = 1200, sleep: int = 10, **kwargs):
         """
         Create a network in this network group.
 
