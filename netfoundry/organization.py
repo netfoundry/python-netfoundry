@@ -46,7 +46,6 @@ class Organization:
                  proxy: str = None,
                  gateway: str = "gateway"):
         """Initialize an instance of organization."""
-        self.gateway = gateway
         # set debug and file if specified and let the calling application dictate logging handlers
         self.log_file = log_file
         self.debug = debug
@@ -80,6 +79,9 @@ class Organization:
                 self.verify = True
             else:
                 self.verify = False
+
+        self.gateway = gateway
+        self.logger.debug(f"got 'gateway' param {self.gateway}")
 
         epoch = round(time.time())
         self.expiry_seconds = 0  # initialize a placeholder for remaining seconds until expiry
@@ -258,6 +260,8 @@ path to credentials file.
             if not re.search(self.environment, self.audience):
                 self.logger.error(f"mismatched audience URL '{self.audience}' and environment '{self.environment}'")
                 exit(1)
+            else:
+                self.logger.debug(f"found audience already computed '{self.audience}' and matching environment '{self.environment}'")
 
         # the purpose of this try-except block is to soft-fail all attempts
         # to parse the JWT, which is intended for the API, not this
@@ -290,12 +294,15 @@ path to credentials file.
                 self.logger.debug(f"using environment parsed from authenticationUrl: {self.environment}")
             # re: scope: we're not using scopes with Cognito, but a non-empty value is required;
             #  hence "/ignore-scope"
-            scope = f"https://{self.gateway}.{self.environment}.netfoundry.io//ignore-scope"
-            self.logger.debug(f"computed scope URL from gateway and environment: {scope}")
+            scope = f"https://gateway.{self.environment}.netfoundry.io//ignore-scope"
+            self.logger.debug(f"computed scope URL from 'gateway' and environment: {scope}")
             # we can gather the URL of the API from the first part of the scope string by
             #  dropping the scope suffix
             self.audience = scope.replace(r'/ignore-scope', '')
-            self.logger.debug(f"using audience parsed from authenticationUrl: {self.audience}")
+            self.logger.debug(f"computed audience from authenticationUrl sans the trailing '/ignore-scope': {self.audience}")
+            audience_parts = self.audience.split('.')
+            self.audience = '.'.join([f"https://{self.gateway}"]+audience_parts[1:])
+            self.logger.debug(f"computed audience with substituted param 'gateway': {self.audience}")
             assertion = {
                 "scope": scope,
                 "grant_type": "client_credentials"

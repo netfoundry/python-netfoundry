@@ -185,7 +185,7 @@ def jwt_environment(setup: object):
 
     else:
         if re.match(r'https://cognito-', iss):
-            environment = re.sub(f'https://{setup.gateway}\.([^.]+)\.netfoundry\.io.*', r'\1', claim['scope'])
+            environment = re.sub(r'https://gateway\.([^.]+)\.netfoundry\.io.*', r'\1', claim['scope'])
             setup.logger.debug(f"matched Cognito issuer URL convention, found environment '{environment}'")
         elif re.match(r'.*\.auth0\.com', iss):
             environment = re.sub(r'https://netfoundry-([^.]+)\.auth0\.com.*', r'\1', claim['iss'])
@@ -319,6 +319,8 @@ def create_generic_resource(setup: object, url: str, body: dict, headers: dict =
         proxies=setup.proxies,
         verify=setup.verify,
     )
+    if response.status_code in range(400, 600):
+        setup.logger.debug(response.request)
     response.raise_for_status()
     resource = response.json()
 

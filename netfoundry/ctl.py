@@ -94,6 +94,7 @@ class StoreListKeys(argparse.Action):
 @cli.argument('-Y', '--yes', action='store_true', arg_only=True, help='answer yes to potentially-destructive operations')
 @cli.argument('-W', '--wait', help='seconds to wait for long-running processes to finish', default=900)
 @cli.argument('--proxy', help=argparse.SUPPRESS)
+@cli.argument('--gateway', default="gateway", help=argparse.SUPPRESS)
 @cli.entrypoint('configure the CLI to manage a network')
 def main(cli):
     """Configure the CLI to manage a network."""
@@ -1153,7 +1154,7 @@ def use_organization(cli, spinner: object = None, prompt: bool = True):
                 expiry_minimum=0,
                 proxy=cli.config.general.proxy,
                 logger=cli.log,
-                gateway="gatewayv2",
+                gateway=cli.config.general.gateway,
             )
     except NFAPINoCredentials:
         if prompt:
@@ -1178,7 +1179,7 @@ def use_organization(cli, spinner: object = None, prompt: bool = True):
                         expiry_minimum=0,
                         proxy=cli.config.general.proxy,
                         logger=cli.log,
-                        gateway="gatewayv2",
+                        gateway=cli.config.general.gateway,
                     )
             except PyJWTError:
                 spinner.fail("Not a valid token")
