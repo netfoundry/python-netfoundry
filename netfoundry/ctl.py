@@ -156,7 +156,7 @@ def login(cli):
                 summary_table = []
                 summary_table.append(['Caller ID', f"{summary_object['caller']['name']} ({summary_object['caller']['email']}) in {organization.label} ({organization.name})"])
                 if network_group:
-                    summary_table.append(['Network Resource Group', f"{summary_object['network_group']['name']} ({summary_object['network_group']['organizationShortName']}) with {summary_object['network_group']['networks_count']} networks"])
+                    summary_table.append(['Network Resource Group', f"{summary_object['network_group']['name']} ({summary_object['network_group']['shortName']}) with {summary_object['network_group']['networks_count']} networks"])
                 if network:
                     summary_table.append(['Configured Network', f"{summary_object['network']['name']} - {summary_object['network']['productVersion']} - {summary_object['network']['status']}"])
                 if cli.config.general.borders:
@@ -687,13 +687,11 @@ def list(cli, echo: bool = True, spinner: object = None):
         valid_keys = valid_keys.union(match.keys())
 
     # intersection of the set of valid, observed keys in the first match
-    default_keys = ['name', 'label', 'organizationShortName', 'type', 'description',
+    default_keys = ['name', 'label', 'shortName', 'type', 'description',
                     'edgeRouterAttributes', 'serviceAttributes', 'endpointAttributes',
                     'status', 'zitiId', 'provider', 'locationCode', 'ipAddress', 'networkVersion',
                     'active', 'default', 'region', 'size', 'attributes', 'email', 'productVersion',
                     'address', 'binding', 'component']
-    if cli.config.list.names:  # include identity IDs if --names
-        default_keys.extend(IDENTITY_ID_PROPERTIES)
     if cli.args.keys:
         valid_keys = valid_keys.intersection(cli.args.keys)
     else:

@@ -80,7 +80,12 @@ class Organization:
             else:
                 self.verify = False
 
-        self.gateway = gateway
+        # users of older versions of nfsupport-cli will send literal None until they upgrade to a version that provides the --gateway option
+        if gateway is None:
+            self.gateway = "gateway"
+        else:
+            self.gateway = gateway
+
         self.logger.debug(f"got 'gateway' param {self.gateway}")
 
         epoch = round(time.time())
@@ -554,7 +559,7 @@ path to credentials file.
 
         :param network_group_id: the UUID of the network group
         """
-        url = self.audience+'rest/v1/network-groups/'+network_group_id
+        url = self.audience+'core/v2/network-groups/'+network_group_id
         try:
             network_group, status_symbol = get_generic_resource_by_url(setup=self, url=url)
         except Exception as e:
@@ -595,7 +600,7 @@ path to credentials file.
 
         :param str kwargs: filter results by any supported query param
         """
-        url = self.audience+'rest/v1/network-groups'
+        url = self.audience+'core/v2/network-groups'
         network_groups = list()
         for i in find_generic_resources(setup=self, url=url, embedded=RESOURCES['network-groups']._embedded, **kwargs):
             network_groups.extend(i)
