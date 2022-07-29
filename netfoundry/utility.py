@@ -319,7 +319,7 @@ def create_generic_resource(setup: object, url: str, body: dict, headers: dict =
         proxies=setup.proxies,
         verify=setup.verify,
     )
-    if response.status_code in range(200, 600):
+    if response.status_code in range(400, 600):
         req = response.request
         setup.logger.debug(
             '%s\n%s\r\n%s\r\n\r\n%s',
