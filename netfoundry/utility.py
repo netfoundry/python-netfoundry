@@ -319,6 +319,15 @@ def create_generic_resource(setup: object, url: str, body: dict, headers: dict =
         proxies=setup.proxies,
         verify=setup.verify,
     )
+    if response.status_code in range(400, 600):
+        req = response.request
+        setup.logger.debug(
+            '%s\n%s\r\n%s\r\n\r\n%s',
+            '-----------START-----------',
+            req.method + ' ' + req.url,
+            '\r\n'.join('{}: {}'.format(k, v) for k, v in req.headers.items()),
+            req.body
+        )
     response.raise_for_status()
     resource = response.json()
 
@@ -454,8 +463,6 @@ def find_generic_resources(setup: object, url: str, headers: dict = dict(), embe
     # only get requested page, else first page and all pages
     if params.get('page'):
         get_all_pages = False
-    elif resource_type.name == 'network-groups':
-        params['page'] = 1           # start at 1 instead of 0 to workaround https://netfoundry.atlassian.net/browse/MOP-17890
     else:
         params['page'] = 0
 
@@ -658,6 +665,8 @@ class ResourceType(ResourceTypeParent):
         if self.find_url == 'default':
             if self.domain == 'network':
                 setattr(self, 'find_url', f'core/v2/{self.name}')
+            elif self.domain == 'network-group':
+                setattr(self, 'find_url', f'core/v2/{self.name}')
             elif self.domain == 'identity':
                 setattr(self, 'find_url', f'identity/v1/{self.name}')
             elif self.domain == 'authorization':
@@ -715,10 +724,8 @@ RESOURCES = {
     'network-groups': ResourceType(
         name='network-groups',
         domain='network-group',
-        _embedded='organizations',
         mutable=False,
         embeddable=False,
-        find_url='rest/v1/network-groups',
     ),
     'networks': ResourceType(
         name='networks',
