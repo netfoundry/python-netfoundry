@@ -43,7 +43,8 @@ class Organization:
                  log_file: str = None,
                  debug: bool = False,
                  logger: logging.Logger = None,
-                 proxy: str = None):
+                 proxy: str = None,
+                 gateway: str = "gateway"):
         """Initialize an instance of organization."""
         # set debug and file if specified and let the calling application dictate logging handlers
         self.log_file = log_file
@@ -78,6 +79,14 @@ class Organization:
                 self.verify = True
             else:
                 self.verify = False
+
+        # users of older versions of nfsupport-cli will send literal None until they upgrade to a version that provides the --gateway option
+        if gateway is None:
+            self.gateway = "gateway"
+        else:
+            self.gateway = gateway
+
+        self.logger.debug(f"got 'gateway' param {self.gateway}")
 
         epoch = round(time.time())
         self.expiry_seconds = 0  # initialize a placeholder for remaining seconds until expiry
@@ -249,12 +258,15 @@ path to credentials file.
                 self.logger.warning(f"unexpected environment '{self.environment}'")
 
         if self.environment and not self.audience:
-            self.audience = f'https://gateway.{self.environment}.netfoundry.io/'
+            self.audience = f'https://{self.gateway}.{self.environment}.netfoundry.io/'
+            self.logger.debug(f"computed audience URL from gateway and environment: {self.audience}")
 
         if self.environment and self.audience:
             if not re.search(self.environment, self.audience):
                 self.logger.error(f"mismatched audience URL '{self.audience}' and environment '{self.environment}'")
                 exit(1)
+            else:
+                self.logger.debug(f"found audience already computed '{self.audience}' and matching environment '{self.environment}'")
 
         # the purpose of this try-except block is to soft-fail all attempts
         # to parse the JWT, which is intended for the API, not this
@@ -284,15 +296,18 @@ path to credentials file.
             # extract the environment name from the authorization URL aka token API endpoint
             if self.environment is None:
                 self.environment = re.sub(r'https://netfoundry-([^-]+)-.*', r'\1', token_endpoint, re.IGNORECASE)
-                self.logger.debug(f"using environment parsed from token_endpoint URL {self.environment}")
+                self.logger.debug(f"using environment parsed from authenticationUrl: {self.environment}")
             # re: scope: we're not using scopes with Cognito, but a non-empty value is required;
             #  hence "/ignore-scope"
-            scope = "https://gateway."+self.environment+".netfoundry.io//ignore-scope"
+            scope = f"https://gateway.{self.environment}.netfoundry.io//ignore-scope"
+            self.logger.debug(f"computed scope URL from 'gateway' and environment: {scope}")
             # we can gather the URL of the API from the first part of the scope string by
             #  dropping the scope suffix
             self.audience = scope.replace(r'/ignore-scope', '')
-            self.logger.debug(f"using audience parsed from token_endpoint URL {self.audience}")
-            # e.g. https://gateway.production.netfoundry.io/
+            self.logger.debug(f"computed audience from authenticationUrl sans the trailing '/ignore-scope': {self.audience}")
+            audience_parts = self.audience.split('.')
+            self.audience = '.'.join([f"https://{self.gateway}"]+audience_parts[1:])
+            self.logger.debug(f"computed audience with substituted param 'gateway': {self.audience}")
             assertion = {
                 "scope": scope,
                 "grant_type": "client_credentials"
@@ -544,7 +559,7 @@ path to credentials file.
 
         :param network_group_id: the UUID of the network group
         """
-        url = self.audience+'rest/v1/network-groups/'+network_group_id
+        url = self.audience+'core/v2/network-groups/'+network_group_id
         try:
             network_group, status_symbol = get_generic_resource_by_url(setup=self, url=url)
         except Exception as e:
@@ -585,7 +600,7 @@ path to credentials file.
 
         :param str kwargs: filter results by any supported query param
         """
-        url = self.audience+'rest/v1/network-groups'
+        url = self.audience+'core/v2/network-groups'
         network_groups = list()
         for i in find_generic_resources(setup=self, url=url, embedded=RESOURCES['network-groups']._embedded, **kwargs):
             network_groups.extend(i)

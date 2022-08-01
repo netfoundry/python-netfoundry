@@ -28,14 +28,14 @@ class NetworkGroup:
             self.network_group_id = network_group_id
             network_group_matches = [ng for ng in self.network_groups if ng['id'] == network_group_id]
             if len(network_group_matches) == 1:
-                self.network_group_name = network_group_matches[0]['organizationShortName']
+                self.network_group_name = network_group_matches[0]['shortName']
                 self.logger.debug(f"found one match for group id '{network_group_id}'")
             else:
                 raise RuntimeError(f"there was not exactly one network group matching the id '{network_group_id}'")
         # TODO: review the use of org short name ref https://mattermost.tools.netfoundry.io/netfoundry/pl/gegyzuybypb9jxnrw1g1imjywh
         elif network_group_name:
             self.network_group_name = network_group_name
-            network_group_matches = [ng for ng in self.network_groups if caseless_equal(ng['organizationShortName'], self.network_group_name)]
+            network_group_matches = [ng for ng in self.network_groups if caseless_equal(ng['shortName'], self.network_group_name)]
             if len(network_group_matches) == 1:
                 self.network_group_id = network_group_matches[0]['id']
                 self.logger.debug(f"found one match for group short name '{network_group_name}'")
@@ -44,10 +44,10 @@ class NetworkGroup:
         elif len(self.network_groups) > 0:
             # first network group is typically the only network group
             self.network_group_id = self.network_groups[0]['id']
-            self.network_group_name = normalize_caseless(self.network_groups[0]['organizationShortName'])
+            self.network_group_name = normalize_caseless(self.network_groups[0]['shortName'])
             # warn if there are other groups
             if len(self.network_groups) > 1:
-                self.logger.warning(f"using first network group {self.network_group_name} and ignoring {len(self.network_groups) - 1} other(s) e.g. {self.network_groups[1]['organizationShortName']}, etc...")
+                self.logger.warning(f"using first network group {self.network_group_name} and ignoring {len(self.network_groups) - 1} other(s) e.g. {self.network_groups[1]['shortName']}, etc...")
             elif len(self.network_groups) == 1:
                 self.logger.debug(f"using the only available network group: {self.network_group_name}")
         else:
@@ -149,7 +149,7 @@ class NetworkGroup:
 
     find_latest_product_version = find_latest_network_version
 
-    def create_network(self, name: str, network_group_id: str = None, location: str = "us-ashburn-1", provider: str = "OCI", version: str = None, size: str = "medium", wait: int = 1200, sleep: int = 10, **kwargs):
+    def create_network(self, name: str, network_group_id: str = None, location: str = "eu-amsterdam-1", provider: str = "OCI", version: str = None, size: str = "medium", wait: int = 1200, sleep: int = 10, **kwargs):
         """
         Create a network in this network group.
 
