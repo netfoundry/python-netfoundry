@@ -4,6 +4,7 @@ import json
 import re
 import time
 
+from packaging.version import parse
 from requests.exceptions import JSONDecodeError
 
 from netfoundry.exceptions import NetworkBoundaryViolation, UnknownResourceType
@@ -56,7 +57,7 @@ class Network:
         self.product_version = self.describe['productVersion']
         self.owner_identity_id = self.describe['ownerIdentityId']
         self.size = self.describe['size']
-        self.o365_breakout_category = self.describe['o365BreakoutCategory']
+        self.o365_breakout_category = self.describe.get('o365BreakoutCategory')
         self.created_at = self.describe['createdAt']
         self.updated_at = self.describe['updatedAt']
         self.created_by = self.describe['createdBy']
@@ -1228,6 +1229,9 @@ class Network:
         Note that this function requires privileged access to the controller and is intended for emergency, read-only operations by customer support engineers.
         :param id: the UUID of the network controller
         """
+
+        if parse(self.product_version) >= parse("8.0.0"):
+            raise RuntimeError(f"get_controller_session() is unavailable in network version {self.product_version} and later.")
         url = self.audience+'core/v2/network-controllers/'+id+'/session'
         try:
             session, status_symbol = get_generic_resource_by_url(setup=self, url=url)
