@@ -25,7 +25,7 @@ from sys import stderr, stdin, stdout
 from xml.sax.xmlreader import InputSource
 
 from jwt.exceptions import PyJWTError
-from milc import set_metadata  # this function needed to set metadata immediately below
+# milc metadata will be set after cli import
 from pygments import highlight
 from pygments.formatters import Terminal256Formatter
 from pygments.lexers import get_lexer_by_name, load_lexer_from_file
@@ -42,10 +42,10 @@ from .network_group import NetworkGroup
 from .organization import Organization
 from .utility import DC_PROVIDERS, EMBED_NET_RESOURCES, IDENTITY_ID_PROPERTIES, MUTABLE_NET_RESOURCES, MUTABLE_RESOURCE_ABBREV, RESOURCE_ABBREV, RESOURCES, any_in, get_generic_resource_by_type_and_id, normalize_caseless, plural, propid2type, singular
 
-# must precend import milc.cli
-set_metadata(version=f"v{netfoundry_version}", author="NetFoundry", name="nfctl")
-# this uses metadata set above
+# import milc cli
 from milc import cli, questions  # noqa: E402
+# set milc options using new API
+cli.milc_options(name='nfctl', author='NetFoundry', version=f'v{netfoundry_version}')
 # this creates the config subcommand
 from milc.subcommand import config  # noqa: F401,E402
 
@@ -871,7 +871,7 @@ def delete(cli):
             sysexit(1)
 
 
-@cli.argument("-p", "--prefix", default=f"{cli.prog_name}-demo", help="choose a network name prefix to identify all of your demos")
+@cli.argument("-p", "--prefix", default="nfctl-demo", help="choose a network name prefix to identify all of your demos")
 @cli.argument("-j", "--jwt", action="store_boolean", default=True, help="save the one-time enroll token for each demo identity in the current directory")
 @cli.argument("-e", "--echo-name", arg_only=True, action="store_true", default=False, help="only echo a friendly network name then exit")
 @cli.argument("-s", "--size", default="medium", help=argparse.SUPPRESS)   # troubleshoot scale-up instance size factor
