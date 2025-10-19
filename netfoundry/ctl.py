@@ -13,7 +13,6 @@ import re
 import signal
 import jwt
 import tempfile
-from builtins import list as blist
 from json import dumps as json_dumps
 from json import load as json_load
 from json import loads as json_loads
@@ -43,9 +42,12 @@ from .network_group import NetworkGroup
 from .organization import Organization
 from .utility import DC_PROVIDERS, EMBED_NET_RESOURCES, IDENTITY_ID_PROPERTIES, MUTABLE_NET_RESOURCES, MUTABLE_RESOURCE_ABBREV, RESOURCE_ABBREV, RESOURCES, any_in, get_generic_resource_by_type_and_id, normalize_caseless, plural, propid2type, singular
 
-set_metadata(version=f"v{netfoundry_version}", author="NetFoundry", name="nfctl")  # must precend import milc.cli
-from milc import cli, questions  # this uses metadata set above
-from milc.subcommand import config  # this creates the config subcommand
+# must precend import milc.cli
+set_metadata(version=f"v{netfoundry_version}", author="NetFoundry", name="nfctl")
+# this uses metadata set above
+from milc import cli, questions  # noqa: E402
+# this creates the config subcommand
+from milc.subcommand import config  # noqa: F401,E402
 
 if platform.system() == 'Linux':
     # this allows the app the terminate gracefully when piped to a truncating consumer like `head`
