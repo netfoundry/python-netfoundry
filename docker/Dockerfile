@@ -1,4 +1,4 @@
-FROM python:3.13-slim-bookworm
+FROM python:3.12-slim-bookworm
 COPY ./dist/netfoundry-*.whl /tmp/
 RUN pip install --upgrade pip
 RUN pip install /tmp/netfoundry-*.whl
