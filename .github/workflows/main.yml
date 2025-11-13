@@ -87,8 +87,8 @@ jobs:
           general.verbose=yes || true # FIXME: sometimes config command exits with an error
         nfctl demo \
           --size medium \
-          --regions us-ashburn-1 us-phoenix-1 \
-          --provider OCI
+          --regions us-west-2 us-east-1 \
+          --provider AWS
         nfctl \
           list services
         nfctl \
