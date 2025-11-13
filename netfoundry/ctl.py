@@ -96,7 +96,7 @@ class StoreListKeys(argparse.Action):
 @cli.argument('-B', '--borders', default=True, action='store_boolean', help='print cell borders in text tables')
 @cli.argument('-H', '--headers', default=True, action='store_boolean', help='print column headers in text tables')
 @cli.argument('-Y', '--yes', action='store_true', arg_only=True, help='answer yes to potentially-destructive operations')
-@cli.argument('-W', '--wait', help='seconds to wait for long-running processes to finish', default=900)
+@cli.argument('-W', '--wait', type=int, help='seconds to wait for long-running processes to finish', default=900)
 @cli.argument('--proxy', help=argparse.SUPPRESS)
 @cli.argument('--gateway', default="gateway", help=argparse.SUPPRESS)
 @cli.entrypoint('configure the CLI to manage a network')
