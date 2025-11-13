@@ -13,6 +13,7 @@ import re
 import signal
 import jwt
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from json import dumps as json_dumps
 from json import load as json_load
 from json import loads as json_loads
@@ -22,6 +23,7 @@ from re import sub
 from subprocess import CalledProcessError
 from sys import exit as sysexit
 from sys import stderr, stdin, stdout
+from threading import Lock
 from xml.sax.xmlreader import InputSource
 
 from jwt.exceptions import PyJWTError
@@ -961,32 +963,55 @@ def demo(cli):
         else:
             spinner.succeed(f"Found a hosted router in {region}")
 
-    spinner.text = f"Creating {len(fabric_placements)} hosted router(s)"
-    with spinner:
-        for region in fabric_placements:
-            er_name = f"Hosted Router {region} [{cli.config.demo.provider}]"
-            if not network.edge_router_exists(er_name):
-                er = network.create_edge_router(
-                    name=er_name,
-                    attributes=[
-                        "#hosted_routers",
-                        "#demo_exits",
-                        f"#{cli.config.demo.provider}",
-                    ],
-                    provider=cli.config.demo.provider,
-                    location_code=region,
-                    tunneler_enabled=False,  # workaround for MOP-18098 (missing tunneler binding in ziti-router config)
-                )
-                hosted_edge_routers.extend([er])
-                spinner.succeed(f"Created {cli.config.demo.provider} router in {region}")
+    # Helper function to create or validate a single router (runs in parallel)
+    def create_or_validate_router(region):
+        """Create or validate router for a region. Returns (region, router_dict, message)."""
+        er_name = f"Hosted Router {region} [{cli.config.demo.provider}]"
+        if not network.edge_router_exists(er_name):
+            er = network.create_edge_router(
+                name=er_name,
+                attributes=[
+                    "#hosted_routers",
+                    "#demo_exits",
+                    f"#{cli.config.demo.provider}",
+                ],
+                provider=cli.config.demo.provider,
+                location_code=region,
+                tunneler_enabled=False,  # workaround for MOP-18098 (missing tunneler binding in ziti-router config)
+            )
+            message = f"Created {cli.config.demo.provider} router in {region}"
+            return (region, er, message)
+        else:
+            er_matches = network.edge_routers(name=er_name, only_hosted=True)
+            if len(er_matches) == 1:
+                er = er_matches[0]
             else:
-                er_matches = network.edge_routers(name=er_name, only_hosted=True)
-                if len(er_matches) == 1:
-                    er = er_matches[0]
-                else:
-                    raise RuntimeError(f"unexpectedly found more than one matching router for name '{er_name}'")
-                if er['status'] in RESOURCES["edge-routers"].status_symbols["error"] + RESOURCES["edge-routers"].status_symbols["deleting"] + RESOURCES["edge-routers"].status_symbols["deleted"]:
-                    raise RuntimeError(f"hosted router '{er_name}' has unexpected status '{er['status']}'")
+                raise RuntimeError(f"unexpectedly found more than one matching router for name '{er_name}'")
+            if er['status'] in RESOURCES["edge-routers"].status_symbols["error"] + RESOURCES["edge-routers"].status_symbols["deleting"] + RESOURCES["edge-routers"].status_symbols["deleted"]:
+                raise RuntimeError(f"hosted router '{er_name}' has unexpected status '{er['status']}'")
+            return (region, er, None)  # No message for existing routers
+
+    # Parallelize router creation with thread-safe spinner updates
+    spinner.text = f"Creating {len(fabric_placements)} hosted router(s)"
+    spinner_lock = Lock()
+    new_routers = []
+
+    with ThreadPoolExecutor(max_workers=min(len(fabric_placements), 5)) as executor:
+        # Submit all router creation tasks
+        future_to_region = {executor.submit(create_or_validate_router, region): region for region in fabric_placements}
+
+        # Collect results as they complete
+        for future in as_completed(future_to_region):
+            region, er, message = future.result()
+            new_routers.append(er)
+
+            # Thread-safe spinner update for newly created routers
+            if message:
+                with spinner_lock:
+                    spinner.succeed(message)
+
+    # Add all new routers to the list
+    hosted_edge_routers.extend(new_routers)
 
     if not len(hosted_edge_routers) > 0:
         raise RuntimeError("unexpected problem with router placements, found zero hosted routers")
