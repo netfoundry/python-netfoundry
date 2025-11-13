@@ -934,6 +934,7 @@ def demo(cli):
                 name=network_name,
                 size=cli.config.demo.size,
                 version=cli.config.demo.product_version,
+                provider=cli.config.demo.provider,
             )
             network, network_group = use_network(
                 cli,

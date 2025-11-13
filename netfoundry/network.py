@@ -5,7 +5,7 @@ import re
 import time
 
 from packaging.version import parse
-from requests.exceptions import JSONDecodeError
+from json import JSONDecodeError
 
 from netfoundry.exceptions import NetworkBoundaryViolation, UnknownResourceType
 

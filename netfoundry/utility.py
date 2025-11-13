@@ -485,6 +485,12 @@ def find_generic_resources(setup: object, url: str, headers: dict = dict(), embe
     )
     response.raise_for_status()
     resource_page = response.json()
+    
+    # Handle non-paginated endpoints that return direct lists
+    if isinstance(resource_page, list):
+        yield resource_page
+        return
+    
     if isinstance(resource_page, dict) and resource_page.get('page'):
         try:
             total_pages = resource_page['page']['totalPages']
@@ -515,8 +521,6 @@ def find_generic_resources(setup: object, url: str, headers: dict = dict(), embe
             # then yield subsequent pages, if applicable
             if get_all_pages and total_pages > 1:      # get_all_pages is False if param 'page' or 'size' to stop recursion and get a single page
                 next_range_lower, next_range_upper = params['page'] + 1, total_pages
-                if resource_type.name == 'network-groups':
-                    next_range_upper += 1              # network-groups pages are 1-based and so +1 upper limit
                 for next_page in range(next_range_lower, next_range_upper):
                     params['page'] = next_page
                     try:
@@ -902,7 +906,7 @@ def docstring_parameters(*args, **kwargs):
 RETRY_STRATEGY = Retry(
     total=5,
     status_forcelist=[403, 404, 413, 429, 503],  # The API responds 403 and 404 for not-yet-existing executions for some async operations
-    method_whitelist=["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE"],
+    allowed_methods=["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE"],
     backoff_factor=1
 )
 DEFAULT_TIMEOUT = 31  # seconds, Gateway Service waits 30s before responding with an error code e.g. 503 and
