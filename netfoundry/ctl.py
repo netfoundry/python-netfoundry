@@ -935,6 +935,7 @@ def demo(cli):
                 size=cli.config.demo.size,
                 version=cli.config.demo.product_version,
                 provider=cli.config.demo.provider,
+                location=cli.config.demo.regions[0],  # Use first region for network location
             )
             network, network_group = use_network(
                 cli,
