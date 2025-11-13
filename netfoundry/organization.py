@@ -386,7 +386,7 @@ path to credentials file.
             if self.organizations_by_label.get(organization_label):
                 self.describe = self.get_organization(id=self.organizations_by_label[organization_label])
             else:
-                raise RuntimeError(f"failed to find org label {organization_label} in the list of orgs {', '.join(self.organizations_by_label.keys())}")
+                raise RuntimeError(f"failed to find org label {organization_label} in the list of {len(self.organizations_by_label)} available organizations")
         else:
             self.describe = self.get_organization(id=self.caller['organizationId'])
 

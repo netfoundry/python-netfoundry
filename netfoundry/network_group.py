@@ -173,7 +173,7 @@ class NetworkGroup:
             elif param == 'productVersion':
                 if version:
                     self.logger.debug("clobbering param 'version' with kwarg 'productVersion'")
-                version == value
+                version = value
             else:
                 self.logger.warn(f"ignoring unexpected keyword argument '{param}'")
 

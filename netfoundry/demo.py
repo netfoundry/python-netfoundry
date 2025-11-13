@@ -28,11 +28,13 @@ def importlib_load_entry_point(spec, group, name):
 
 globals().setdefault('load_entry_point', importlib_load_entry_point)
 
+
 def main():
     sys.argv[0] = re.sub(r'(-script\.pyw?|\.exe)?$', '', sys.argv[0])
     _args = [sys.argv[0], 'demo'] + sys.argv[1:]
     sys.argv = _args
     sys.exit(load_entry_point('netfoundry', 'console_scripts', 'nfctl')())
+
 
 if __name__ == '__main__':
     main()
