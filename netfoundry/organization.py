@@ -159,6 +159,13 @@ class Organization:
                 self.expiry_seconds = round(self.expiry - epoch)
                 self.audience = token_cache['audience']
 
+                # Check if cached token is expired
+                if self.expiry_seconds < 0:
+                    self.logger.debug(f"cached token is expired ({self.expiry_seconds}s ago), forcing renewal")
+                    self.token = None
+                    self.expiry = None
+                    self.audience = None
+
         # if the token was found but not the expiry then try to parse to extract the expiry so we can enforce minimum lifespan seconds
         if self.token and not self.expiry:
             try:
@@ -280,14 +287,16 @@ path to credentials file.
                 self.expiry_seconds = round(self.expiry - epoch)
                 self.logger.debug(f"bearer token expiry in {self.expiry_seconds}s")
 
-        # renew token if not existing or imminent expiry, else continue
-        if not self.token or self.expiry_seconds < expiry_minimum:
+        # renew token if not existing, expired, or imminent expiry, else continue
+        if not self.token or self.expiry_seconds < 0 or self.expiry_seconds < expiry_minimum:
             # we've already done the work to determine the cached token is expired or imminently-expiring, might as well save other runs the same trouble
             self.logout()
             self.expiry = None
             self.audience = None
             if self.token and self.expiry_seconds < expiry_minimum:
                 self.logger.debug(f"token expiry {self.expiry_seconds}s is less than configured minimum {expiry_minimum}s")
+            if self.expiry_seconds < 0:
+                self.logger.debug(f"token is expired ({abs(self.expiry_seconds)}s ago), forcing renewal")
             if not credentials_configured:
                 raise NFAPINoCredentials("unable to renew because credentials are not configured")
             else:
@@ -430,7 +439,7 @@ path to credentials file.
             except Exception as e:
                 self.logger.debug(f"failed to get caller identity from url: '{url}', trying next until last, caught {e}")
             else:
-                return(caller)
+                return caller
         raise RuntimeError("failed to get caller identity from any url")
 
     def get_identity(self, identity_id: str):
@@ -444,7 +453,7 @@ path to credentials file.
         except Exception as e:
             raise RuntimeError(f"failed to get identity from url: '{url}', caught {e}")
         else:
-            return(identity)
+            return identity
 
     def find_identities(self, type: str = 'identities', **kwargs):
         """Get identities as a collection.
@@ -473,7 +482,7 @@ path to credentials file.
         except Exception as e:
             raise RuntimeError(f"failed to get identities from url: '{url}', caught {e}")
         else:
-            return(identities)
+            return identities
     get_identities = find_identities
 
     def find_roles(self, **kwargs):
@@ -503,7 +512,7 @@ path to credentials file.
         except Exception as e:
             raise RuntimeError(f"failed to get roles from url: '{url}', caught {e}")
         else:
-            return(roles)
+            return roles
 
     def get_role(self, role_id: str):
         """Get roles as a collection."""
@@ -514,7 +523,7 @@ path to credentials file.
         except Exception as e:
             raise RuntimeError(f"failed to get role from url: '{url}', caught {e}")
         else:
-            return(role)
+            return role
 
     def find_organizations(self, **kwargs):
         """Find organizations as a collection.
@@ -536,7 +545,7 @@ path to credentials file.
         except Exception as e:
             raise RuntimeError(f"failed to get organizations from url: '{url}', caught {e}")
         else:
-            return(organizations)
+            return organizations
     get_organizations = find_organizations
 
     def get_organization(self, id):
@@ -551,7 +560,7 @@ path to credentials file.
         except Exception as e:
             raise RuntimeError(f"failed to get organization from url: '{url}', caught {e}")
         else:
-            return(organization)
+            return organization
 
     def get_network_group(self, network_group_id):
         """
@@ -565,7 +574,7 @@ path to credentials file.
         except Exception as e:
             raise RuntimeError(f"failed to get network_group from url: '{url}', caught {e}")
         else:
-            return(network_group)
+            return network_group
 
     def get_network(self, network_id: str, embed: object = None, accept: str = None):
         """Describe a Network by ID.
@@ -593,7 +602,7 @@ path to credentials file.
 
         url = self.audience+'core/v2/networks/'+network_id
         network, status_symbol = get_generic_resource_by_url(setup=self, url=url, accept=accept, **params)
-        return(network)
+        return network
 
     def find_network_groups_by_organization(self, **kwargs):
         """Find network groups as a collection.
@@ -604,7 +613,7 @@ path to credentials file.
         network_groups = list()
         for i in find_generic_resources(setup=self, url=url, embedded=RESOURCES['network-groups']._embedded, **kwargs):
             network_groups.extend(i)
-        return(network_groups)
+        return network_groups
     get_network_groups_by_organization = find_network_groups_by_organization
     network_groups = get_network_groups_by_organization
 
@@ -631,7 +640,7 @@ path to credentials file.
         except Exception as e:
             raise RuntimeError(f"failed to get networks from url: '{url}', caught {e}")
         else:
-            return(networks)
+            return networks
     get_networks_by_organization = find_networks_by_organization
 
     def network_exists(self, name: str, deleted: bool = False):
@@ -641,9 +650,9 @@ path to credentials file.
         :param deleted: include deleted networks in results
         """
         if self.count_networks_with_name(name=name, deleted=deleted) > 0:
-            return(True)
+            return True
         else:
-            return(False)
+            return False
 
     def count_networks_with_name(self, name: str, deleted: bool = False, unique: bool = True):
         """
@@ -686,5 +695,5 @@ path to credentials file.
         except Exception as e:
             raise RuntimeError(f"failed to get networks from url: '{url}', caught {e}")
         else:
-            return(networks)
+            return networks
     get_networks_by_group = find_networks_by_group

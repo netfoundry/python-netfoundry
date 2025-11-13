@@ -85,7 +85,7 @@ jobs:
           general.network=$(nfctl demo --echo-name --prefix 'gh-${{ github.run_id }}') \
           general.yes=True \
           general.verbose=yes || true # FIXME: sometimes config command exits with an error
-        nfctl demo \
+        nfctl --wait 3000 demo \
           --size medium \
           --regions us-west-2 us-east-1 \
           --provider AWS

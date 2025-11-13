@@ -44,7 +44,7 @@ from .utility import DC_PROVIDERS, EMBED_NET_RESOURCES, IDENTITY_ID_PROPERTIES, 
 
 # import milc cli
 from milc import cli, questions  # noqa: E402
-# set milc options using new API
+# set milc options (requires milc >= 1.8.0)
 cli.milc_options(name='nfctl', author='NetFoundry', version=f'v{netfoundry_version}')
 # this creates the config subcommand
 from milc.subcommand import config  # noqa: F401,E402
@@ -994,7 +994,7 @@ def demo(cli):
     spinner.text = f"Waiting for {len(hosted_edge_routers)} hosted router(s) to provision"
     with spinner:
         for router in hosted_edge_routers:
-            network.wait_for_statuses(expected_statuses=RESOURCES["edge-routers"].status_symbols["complete"], id=router['id'], type="edge-router", wait=2222, progress=False)
+            network.wait_for_statuses(expected_statuses=RESOURCES["edge-routers"].status_symbols["complete"], id=router['id'], type="edge-router", wait=cli.config.general.wait, progress=False)
             # ensure the router tunneler is available
             # network.wait_for_entity_name_exists(entity_name=router['name'], entity_type='endpoint')
             # router_tunneler = network.find_resources(type='endpoint', name=router['name'])[0]
@@ -1105,8 +1105,9 @@ def demo(cli):
             customer_router = network.edge_routers(name=customer_router_name)[0]
             spinner.succeed(sub("Finding", "Found", spinner.text))
 
-    spinner.text = f"Waiting for customer router {customer_router_name} to be ready for registration"
-    # wait for customer router to be PROVISIONED so that registration will be available
+    spinner.text = f"Getting registration key for customer router {customer_router_name}"
+    # Customer routers don't auto-provision - registration key is available immediately at status NEW
+    # The router will only reach PROVISIONED status after manual registration and connection
     with spinner:
         try:
             network.wait_for_statuses(expected_statuses=RESOURCES["edge-routers"].status_symbols["complete"], id=customer_router['id'], type="edge-router", wait=222, progress=False)
