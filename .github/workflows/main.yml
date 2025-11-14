@@ -77,28 +77,7 @@ jobs:
         NETFOUNDRY_CLIENT_ID: ${{ secrets.NETFOUNDRY_CLIENT_ID }}
         NETFOUNDRY_PASSWORD: ${{ secrets.NETFOUNDRY_PASSWORD }}
         NETFOUNDRY_OAUTH_URL: ${{ secrets.NETFOUNDRY_OAUTH_URL }}
-      run: |
-        set -o xtrace
-        set -o pipefail
-
-        nfctl config \
-          general.network=$(nfctl demo --echo-name --prefix 'gh-${{ github.run_id }}') \
-          general.yes=True \
-          general.verbose=yes || true # FIXME: sometimes config command exits with an error
-        nfctl --wait 3000 demo \
-          --size medium \
-          --regions us-west-2 us-east-1 \
-          --provider AWS
-        nfctl \
-          list services
-        nfctl \
-          get service name=echo% > /tmp/echo.yml
-        nfctl \
-          delete service name=echo%
-        nfctl \
-          create service --file /tmp/echo.yml
-        nfctl \
-          delete network
+      run: ./scripts/test-demo.sh
 
     - name: Publish Test Package
       uses: pypa/gh-action-pypi-publish@v1.13.0
