@@ -43,15 +43,15 @@ def plural(singular):
     # if already plural then return, else pluralize
     p = inflect.engine()
     if singular[-1:] == 's':
-        return(singular)
+        return singular
     else:
-        return(p.plural_noun(singular))
+        return p.plural_noun(singular)
 
 
 def singular(plural):
     """Singularize a plural form."""
     p = inflect.engine()
-    return(p.singular_noun(plural))
+    return p.singular_noun(plural)
 
 
 def kebab2camel(kebab: str, case: str = "lower"):          # "lower" dromedary or "upper" Pascal
@@ -322,12 +322,17 @@ def create_generic_resource(setup: object, url: str, body: dict, headers: dict =
     if response.status_code in range(400, 600):
         req = response.request
         setup.logger.debug(
-            '%s\n%s\r\n%s\r\n\r\n%s',
-            '-----------START-----------',
+            '%s\n%s\r\n%s\r\n\r\n%s\n%s\n%s %s\r\n%s\r\n\r\n%s',
+            '-----------REQUEST-----------',
             req.method + ' ' + req.url,
             '\r\n'.join('{}: {}'.format(k, v) for k, v in req.headers.items()),
-            req.body
+            req.body,
+            '-----------RESPONSE-----------',
+            response.status_code, response.reason,
+            '\r\n'.join('{}: {}'.format(k, v) for k, v in response.headers.items()),
+            response.text
         )
+        setup.logger.error(f"HTTP {response.status_code} error response body: {response.text}")
     response.raise_for_status()
     resource = response.json()
 
@@ -388,6 +393,14 @@ def get_generic_resource_by_url(setup: object, url: str, headers: dict = dict(),
     try:
         response.raise_for_status()
     except HTTPError:
+        if response.status_code in range(400, 600):
+            setup.logger.debug(
+                '%s\n%s %s\r\n%s\r\n\r\n%s',
+                '-----------RESPONSE-----------',
+                response.status_code, response.reason,
+                '\r\n'.join('{}: {}'.format(k, v) for k, v in response.headers.items()),
+                response.text
+            )
         if resource_type.name in ["process-executions"] and status_symbol == "FORBIDDEN":  # FIXME: MOP-18095 workaround the create network process ID mismatch bug
             url_parts = urlparse(url)
             path_parts = url_parts.path.split('/')
@@ -483,14 +496,22 @@ def find_generic_resources(setup: object, url: str, headers: dict = dict(), embe
         proxies=setup.proxies,
         verify=setup.verify,
     )
+    if response.status_code in range(400, 600):
+        setup.logger.debug(
+            '%s\n%s %s\r\n%s\r\n\r\n%s',
+            '-----------RESPONSE-----------',
+            response.status_code, response.reason,
+            '\r\n'.join('{}: {}'.format(k, v) for k, v in response.headers.items()),
+            response.text
+        )
     response.raise_for_status()
     resource_page = response.json()
-    
+
     # Handle non-paginated endpoints that return direct lists
     if isinstance(resource_page, list):
         yield resource_page
         return
-    
+
     if isinstance(resource_page, dict) and resource_page.get('page'):
         try:
             total_pages = resource_page['page']['totalPages']
@@ -623,9 +644,7 @@ class ResourceType(ResourceTypeParent):
     embeddable: bool                                        # legal to request embedding in a parent resource in same domain
     parent: str = field(default=str())                      # optional parent ResourceType instance name
     status: str = field(default='status')                   # name of property where symbolic status is expressed
-    _embedded: str = field(default='default')               # the key under which lists are found in the API
-                                                            #  e.g. networkControllerList (computed if not provided as dromedary
-                                                            #  case singular)
+    _embedded: str = field(default='default')               # the key under which lists are found in the API e.g. networkControllerList (computed if not provided as dromedary case singular)
     create_responses: list = field(default_factory=list)    # expected HTTP response codes for create operation
     no_update_props: list = field(default_factory=list)     # expected HTTP response codes for create operation
     create_template: dict = field(default_factory=lambda: {
@@ -932,7 +951,14 @@ class TimeoutHTTPAdapter(HTTPAdapter):
 
 http = Session()   # no cache
 HTTP_CACHE_EXPIRE = 33
-http_cache = CachedSession(cache_name=f"{get_user_cache_dir()}/http_cache", backend='sqlite', expire_after=HTTP_CACHE_EXPIRE)
+http_cache = CachedSession(
+    cache_name=f"{get_user_cache_dir()}/http_cache_tz",
+    backend='sqlite',
+    expire_after=HTTP_CACHE_EXPIRE,
+    allowable_codes=(200, 203, 300, 301, 308),
+    timeout=DEFAULT_TIMEOUT,
+    stale_if_error=True
+)
 # Mount it for both http and https usage
 adapter = TimeoutHTTPAdapter(timeout=DEFAULT_TIMEOUT, max_retries=RETRY_STRATEGY)
 http.mount("https://", adapter)

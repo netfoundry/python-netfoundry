@@ -13,6 +13,7 @@ import re
 import signal
 import jwt
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from json import dumps as json_dumps
 from json import load as json_load
 from json import loads as json_loads
@@ -22,6 +23,7 @@ from re import sub
 from subprocess import CalledProcessError
 from sys import exit as sysexit
 from sys import stderr, stdin, stdout
+from threading import Lock
 from xml.sax.xmlreader import InputSource
 
 from jwt.exceptions import PyJWTError
@@ -44,7 +46,7 @@ from .utility import DC_PROVIDERS, EMBED_NET_RESOURCES, IDENTITY_ID_PROPERTIES, 
 
 # import milc cli
 from milc import cli, questions  # noqa: E402
-# set milc options using new API
+# set milc options (requires milc >= 1.8.0)
 cli.milc_options(name='nfctl', author='NetFoundry', version=f'v{netfoundry_version}')
 # this creates the config subcommand
 from milc.subcommand import config  # noqa: F401,E402
@@ -94,7 +96,7 @@ class StoreListKeys(argparse.Action):
 @cli.argument('-B', '--borders', default=True, action='store_boolean', help='print cell borders in text tables')
 @cli.argument('-H', '--headers', default=True, action='store_boolean', help='print column headers in text tables')
 @cli.argument('-Y', '--yes', action='store_true', arg_only=True, help='answer yes to potentially-destructive operations')
-@cli.argument('-W', '--wait', help='seconds to wait for long-running processes to finish', default=900)
+@cli.argument('-W', '--wait', type=int, help='seconds to wait for long-running processes to finish', default=900)
 @cli.argument('--proxy', help=argparse.SUPPRESS)
 @cli.argument('--gateway', default="gateway", help=argparse.SUPPRESS)
 @cli.entrypoint('configure the CLI to manage a network')
@@ -961,32 +963,55 @@ def demo(cli):
         else:
             spinner.succeed(f"Found a hosted router in {region}")
 
-    spinner.text = f"Creating {len(fabric_placements)} hosted router(s)"
-    with spinner:
-        for region in fabric_placements:
-            er_name = f"Hosted Router {region} [{cli.config.demo.provider}]"
-            if not network.edge_router_exists(er_name):
-                er = network.create_edge_router(
-                    name=er_name,
-                    attributes=[
-                        "#hosted_routers",
-                        "#demo_exits",
-                        f"#{cli.config.demo.provider}",
-                    ],
-                    provider=cli.config.demo.provider,
-                    location_code=region,
-                    tunneler_enabled=False,  # workaround for MOP-18098 (missing tunneler binding in ziti-router config)
-                )
-                hosted_edge_routers.extend([er])
-                spinner.succeed(f"Created {cli.config.demo.provider} router in {region}")
+    # Helper function to create or validate a single router (runs in parallel)
+    def create_or_validate_router(region):
+        """Create or validate router for a region. Returns (region, router_dict, message)."""
+        er_name = f"Hosted Router {region} [{cli.config.demo.provider}]"
+        if not network.edge_router_exists(er_name):
+            er = network.create_edge_router(
+                name=er_name,
+                attributes=[
+                    "#hosted_routers",
+                    "#demo_exits",
+                    f"#{cli.config.demo.provider}",
+                ],
+                provider=cli.config.demo.provider,
+                location_code=region,
+                tunneler_enabled=False,  # workaround for MOP-18098 (missing tunneler binding in ziti-router config)
+            )
+            message = f"Created {cli.config.demo.provider} router in {region}"
+            return (region, er, message)
+        else:
+            er_matches = network.edge_routers(name=er_name, only_hosted=True)
+            if len(er_matches) == 1:
+                er = er_matches[0]
             else:
-                er_matches = network.edge_routers(name=er_name, only_hosted=True)
-                if len(er_matches) == 1:
-                    er = er_matches[0]
-                else:
-                    raise RuntimeError(f"unexpectedly found more than one matching router for name '{er_name}'")
-                if er['status'] in RESOURCES["edge-routers"].status_symbols["error"] + RESOURCES["edge-routers"].status_symbols["deleting"] + RESOURCES["edge-routers"].status_symbols["deleted"]:
-                    raise RuntimeError(f"hosted router '{er_name}' has unexpected status '{er['status']}'")
+                raise RuntimeError(f"unexpectedly found more than one matching router for name '{er_name}'")
+            if er['status'] in RESOURCES["edge-routers"].status_symbols["error"] + RESOURCES["edge-routers"].status_symbols["deleting"] + RESOURCES["edge-routers"].status_symbols["deleted"]:
+                raise RuntimeError(f"hosted router '{er_name}' has unexpected status '{er['status']}'")
+            return (region, er, None)  # No message for existing routers
+
+    # Parallelize router creation with thread-safe spinner updates
+    spinner.text = f"Creating {len(fabric_placements)} hosted router(s)"
+    spinner_lock = Lock()
+    new_routers = []
+
+    with ThreadPoolExecutor(max_workers=min(len(fabric_placements), 5)) as executor:
+        # Submit all router creation tasks
+        future_to_region = {executor.submit(create_or_validate_router, region): region for region in fabric_placements}
+
+        # Collect results as they complete
+        for future in as_completed(future_to_region):
+            region, er, message = future.result()
+            new_routers.append(er)
+
+            # Thread-safe spinner update for newly created routers
+            if message:
+                with spinner_lock:
+                    spinner.succeed(message)
+
+    # Add all new routers to the list
+    hosted_edge_routers.extend(new_routers)
 
     if not len(hosted_edge_routers) > 0:
         raise RuntimeError("unexpected problem with router placements, found zero hosted routers")
@@ -994,7 +1019,7 @@ def demo(cli):
     spinner.text = f"Waiting for {len(hosted_edge_routers)} hosted router(s) to provision"
     with spinner:
         for router in hosted_edge_routers:
-            network.wait_for_statuses(expected_statuses=RESOURCES["edge-routers"].status_symbols["complete"], id=router['id'], type="edge-router", wait=2222, progress=False)
+            network.wait_for_statuses(expected_statuses=RESOURCES["edge-routers"].status_symbols["complete"], id=router['id'], type="edge-router", wait=cli.config.general.wait, progress=False)
             # ensure the router tunneler is available
             # network.wait_for_entity_name_exists(entity_name=router['name'], entity_type='endpoint')
             # router_tunneler = network.find_resources(type='endpoint', name=router['name'])[0]
@@ -1090,31 +1115,6 @@ def demo(cli):
             else:
                 services[svc]['properties'] = network.services(name=svc)[0]
                 spinner.succeed(sub("Finding", "Found", spinner.text))
-
-    # create a customer-hosted ER unless exists
-    customer_router_name = "Branch Exit Router"
-    spinner.text = f"Finding customer router '{customer_router_name}'"
-    with spinner:
-        if not network.edge_router_exists(name=customer_router_name):
-            spinner.text = sub("Finding", "Creating", spinner.text)
-            customer_router = network.create_edge_router(
-                name=customer_router_name,
-                attributes=["#branch_exit_routers"],
-                tunneler_enabled=True)
-        else:
-            customer_router = network.edge_routers(name=customer_router_name)[0]
-            spinner.succeed(sub("Finding", "Found", spinner.text))
-
-    spinner.text = f"Waiting for customer router {customer_router_name} to be ready for registration"
-    # wait for customer router to be PROVISIONED so that registration will be available
-    with spinner:
-        try:
-            network.wait_for_statuses(expected_statuses=RESOURCES["edge-routers"].status_symbols["complete"], id=customer_router['id'], type="edge-router", wait=222, progress=False)
-            customer_router_registration = network.rotate_edge_router_registration(id=customer_router['id'])
-        except Exception as e:
-            raise RuntimeError(f"error getting router registration, got {e}")
-        else:
-            spinner.succeed(f"Customer router ready to register with key '{customer_router_registration['registrationKey']}'")
 
     # create unless exists
     app_wan_name = "Default Service Policy"

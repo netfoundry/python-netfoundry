@@ -72,33 +72,13 @@ jobs:
         register-python-argcomplete nfctl
 
     - name: Run the NF CLI demo to  test installed version
+      id: test_demo
       shell: bash
       env:
         NETFOUNDRY_CLIENT_ID: ${{ secrets.NETFOUNDRY_CLIENT_ID }}
         NETFOUNDRY_PASSWORD: ${{ secrets.NETFOUNDRY_PASSWORD }}
         NETFOUNDRY_OAUTH_URL: ${{ secrets.NETFOUNDRY_OAUTH_URL }}
-      run: |
-        set -o xtrace
-        set -o pipefail
-
-        nfctl config \
-          general.network=$(nfctl demo --echo-name --prefix 'gh-${{ github.run_id }}') \
-          general.yes=True \
-          general.verbose=yes || true # FIXME: sometimes config command exits with an error
-        nfctl demo \
-          --size medium \
-          --regions us-ashburn-1 us-phoenix-1 \
-          --provider OCI
-        nfctl \
-          list services
-        nfctl \
-          get service name=echo% > /tmp/echo.yml
-        nfctl \
-          delete service name=echo%
-        nfctl \
-          create service --file /tmp/echo.yml
-        nfctl \
-          delete network
+      run: ./scripts/test-demo.sh
 
     - name: Publish Test Package
       uses: pypa/gh-action-pypi-publish@v1.13.0
@@ -162,3 +142,43 @@ jobs:
         platforms: linux/amd64,linux/arm64
         push: true
         tags: ${{ steps.compose_tags.outputs.container_tags }}
+
+  cleanup-delay:
+    if: failure()
+    needs: [build_pypi_and_docker]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait 30 minutes before cleanup
+        run: |
+          echo "Test demo failed to complete. Waiting 30 minutes before cleanup to allow investigation..."
+          sleep 1800
+
+  cleanup-network:
+    if: always() && needs.build_pypi_and_docker.result == 'failure'
+    needs: [cleanup-delay]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install nfctl
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+
+      - name: Delete test network
+        env:
+          NETFOUNDRY_CLIENT_ID: ${{ secrets.NETFOUNDRY_CLIENT_ID }}
+          NETFOUNDRY_PASSWORD: ${{ secrets.NETFOUNDRY_PASSWORD }}
+          NETFOUNDRY_OAUTH_URL: ${{ secrets.NETFOUNDRY_OAUTH_URL }}
+        run: |
+          # Use wildcard pattern to match network created by this run
+          NETWORK_PATTERN="gh-${GITHUB_RUN_ID}-%"
+          echo "Attempting to delete network matching: ${NETWORK_PATTERN}"
+
+          # Try to delete the network, ignore errors if it doesn't exist
+          nfctl delete network "name=${NETWORK_PATTERN}" --yes || echo "Network may not exist or already deleted"
