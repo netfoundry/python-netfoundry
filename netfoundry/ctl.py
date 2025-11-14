@@ -1116,32 +1116,6 @@ def demo(cli):
                 services[svc]['properties'] = network.services(name=svc)[0]
                 spinner.succeed(sub("Finding", "Found", spinner.text))
 
-    # create a customer-hosted ER unless exists
-    customer_router_name = "Branch Exit Router"
-    spinner.text = f"Finding customer router '{customer_router_name}'"
-    with spinner:
-        if not network.edge_router_exists(name=customer_router_name):
-            spinner.text = sub("Finding", "Creating", spinner.text)
-            customer_router = network.create_edge_router(
-                name=customer_router_name,
-                attributes=["#branch_exit_routers"],
-                tunneler_enabled=True)
-        else:
-            customer_router = network.edge_routers(name=customer_router_name)[0]
-            spinner.succeed(sub("Finding", "Found", spinner.text))
-
-    spinner.text = f"Getting registration key for customer router {customer_router_name}"
-    # Customer routers don't auto-provision - registration key is available immediately at status NEW
-    # The router will only reach PROVISIONED status after manual registration and connection
-    with spinner:
-        try:
-            network.wait_for_statuses(expected_statuses=RESOURCES["edge-routers"].status_symbols["complete"], id=customer_router['id'], type="edge-router", wait=222, progress=False)
-            customer_router_registration = network.rotate_edge_router_registration(id=customer_router['id'])
-        except Exception as e:
-            raise RuntimeError(f"error getting router registration, got {e}")
-        else:
-            spinner.succeed(f"Customer router ready to register with key '{customer_router_registration['registrationKey']}'")
-
     # create unless exists
     app_wan_name = "Default Service Policy"
     spinner.text = "Finding service policy"

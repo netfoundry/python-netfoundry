@@ -2,6 +2,7 @@
 # Test script for nfctl demo command
 # Can be run locally or in GitHub Actions
 
+set -o errexit
 set -o xtrace
 set -o pipefail
 
