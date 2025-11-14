@@ -322,12 +322,17 @@ def create_generic_resource(setup: object, url: str, body: dict, headers: dict =
     if response.status_code in range(400, 600):
         req = response.request
         setup.logger.debug(
-            '%s\n%s\r\n%s\r\n\r\n%s',
-            '-----------START-----------',
+            '%s\n%s\r\n%s\r\n\r\n%s\n%s\n%s %s\r\n%s\r\n\r\n%s',
+            '-----------REQUEST-----------',
             req.method + ' ' + req.url,
             '\r\n'.join('{}: {}'.format(k, v) for k, v in req.headers.items()),
-            req.body
+            req.body,
+            '-----------RESPONSE-----------',
+            response.status_code, response.reason,
+            '\r\n'.join('{}: {}'.format(k, v) for k, v in response.headers.items()),
+            response.text
         )
+        setup.logger.error(f"HTTP {response.status_code} error response body: {response.text}")
     response.raise_for_status()
     resource = response.json()
 
@@ -388,6 +393,14 @@ def get_generic_resource_by_url(setup: object, url: str, headers: dict = dict(),
     try:
         response.raise_for_status()
     except HTTPError:
+        if response.status_code in range(400, 600):
+            setup.logger.debug(
+                '%s\n%s %s\r\n%s\r\n\r\n%s',
+                '-----------RESPONSE-----------',
+                response.status_code, response.reason,
+                '\r\n'.join('{}: {}'.format(k, v) for k, v in response.headers.items()),
+                response.text
+            )
         if resource_type.name in ["process-executions"] and status_symbol == "FORBIDDEN":  # FIXME: MOP-18095 workaround the create network process ID mismatch bug
             url_parts = urlparse(url)
             path_parts = url_parts.path.split('/')
@@ -483,6 +496,14 @@ def find_generic_resources(setup: object, url: str, headers: dict = dict(), embe
         proxies=setup.proxies,
         verify=setup.verify,
     )
+    if response.status_code in range(400, 600):
+        setup.logger.debug(
+            '%s\n%s %s\r\n%s\r\n\r\n%s',
+            '-----------RESPONSE-----------',
+            response.status_code, response.reason,
+            '\r\n'.join('{}: {}'.format(k, v) for k, v in response.headers.items()),
+            response.text
+        )
     response.raise_for_status()
     resource_page = response.json()
 

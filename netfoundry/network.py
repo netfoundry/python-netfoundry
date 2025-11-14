@@ -458,6 +458,14 @@ class Network:
                 headers=headers,
                 json=pruned_patch
             )
+            if after_response.status_code in range(400, 600):
+                self.logger.debug(
+                    '%s\n%s %s\r\n%s\r\n\r\n%s',
+                    '-----------RESPONSE-----------',
+                    after_response.status_code, after_response.reason,
+                    '\r\n'.join('{}: {}'.format(k, v) for k, v in after_response.headers.items()),
+                    after_response.text
+                )
             after_response.raise_for_status()  # raise any gross errors immediately
             after_response_code = after_response.status_code
             if after_response_code in [STATUS_CODES.codes.OK, STATUS_CODES.codes.ACCEPTED]:
